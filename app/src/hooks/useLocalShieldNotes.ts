@@ -6,6 +6,7 @@ import { getRhPublicClient } from "@/lib/rhClient";
 import { useDemoLive } from "@/lib/demo";
 import { readDemo } from "@/lib/demoFlag";
 import { unlockNoteVault, syncFromDisk, NOTES_KEY } from "@/lib/noteVault";
+import { reconcileClaims } from "@/lib/claimSweep";
 import {
   activeSpendableNotes,
   confirmedNotes,
@@ -88,6 +89,8 @@ export function useLocalShieldNotes(address?: string | null) {
     }
     setSyncing(true);
     try {
+      // Secured claims whose move landed (or never can) since last time.
+      if (await reconcileClaims().catch(() => false)) setLocal(loadLocalNotes(address));
       const publicClient = getRhPublicClient();
       const rows = await fetchChainShieldNotes(
         publicClient,

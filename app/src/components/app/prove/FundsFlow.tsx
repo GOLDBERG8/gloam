@@ -11,6 +11,7 @@ import {
   type LocalNote,
 } from "@/lib/shield";
 import { shieldTokensFor } from "@/lib/tokens";
+import { isClaimedNote, isSecuredClaim } from "@/lib/claimSweep";
 import {
   AssetMark,
   CheckMark,
@@ -43,7 +44,7 @@ import {
 type Done = { token: string; threshold: bigint; asset: string; verifier: string; expiresAt: number; chainId: number };
 
 function noteKind(n: LocalNote): string {
-  if (n.id.startsWith("imp-")) return "Claimed";
+  if (isClaimedNote(n) || isSecuredClaim(n)) return "Claimed";
   if (n.id.startsWith("chg-")) return "Change from a payment";
   return "Added";
 }

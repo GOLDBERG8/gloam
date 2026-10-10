@@ -367,6 +367,20 @@ export type LocalNote = {
    * encrypted at rest; never part of a proof.
    */
   note?: string;
+  /**
+   * A claimed payment (`imp-` id) that has been secured: moved into a fresh
+   * note only this browser knows, so the payer can no longer spend it
+   * (lib/claimSweep). The claimed note itself is spent by that move.
+   */
+  secured?: boolean;
+  /** On the fresh note from securing a claim: the claimed note it came from. */
+  sweptFrom?: { id: string; nullifier: Hex };
+  /**
+   * The move into this note was sent (or may have been) but has not been seen
+   * on chain yet. Not counted in the balance until it lands; kept, never
+   * dropped, because it may still land (lib/claimSweep reconciles it).
+   */
+  sweepPending?: boolean;
 };
 
 export function confirmedNotes(notes: LocalNote[]): LocalNote[] {
@@ -377,16 +391,21 @@ export function confirmedNotes(notes: LocalNote[]): LocalNote[] {
  * Notes you can still spend (have a local secret).
  * Includes imports (no txHash yet) and confirmed shields/transfers.
  * Excludes recovered and chain-history-only rows without a secret.
- * Excludes historic sender payment rows (id pay-*).
+ * Excludes historic sender payment rows (id pay-*), and a secured claim's
+ * fresh note until its move lands (the claimed note still counts until then).
  */
 export function activeSpendableNotes(notes: LocalNote[]): LocalNote[] {
-  return notes.filter(
-    (n) =>
-      n.status !== "recovered" &&
-      !n.id.startsWith("pay-") &&
-      Boolean(n.secret) &&
-      n.secret !== "0x" &&
-      n.secret.length > 10
+  return notes.filter((n) => holdsSecret(n) && !n.sweepPending);
+}
+
+/** Not spent, and this browser has its secret (a pending secured claim too). */
+function holdsSecret(n: LocalNote): boolean {
+  return (
+    n.status !== "recovered" &&
+    !n.id.startsWith("pay-") &&
+    Boolean(n.secret) &&
+    n.secret !== "0x" &&
+    n.secret.length > 10
   );
 }
 
@@ -420,7 +439,8 @@ export type NotesBackup = {
 /** Export spendable notes (secrets!) for device backup. */
 export function exportNotesBackup(address?: string | null): NotesBackup {
   purgeSenderPaymentNotes();
-  const notes = activeSpendableNotes(loadLocalNotes(address));
+  // A secured claim's pending note goes too: its move may still land.
+  const notes = loadLocalNotes(address).filter(holdsSecret);
   return {
     v: 1,
     type: "gloam-notes-backup",
@@ -538,7 +558,7 @@ export function saveLocalNote(note: LocalNote) {
 
 export function updateLocalNote(
   id: string,
-  patch: Partial<Pick<LocalNote, "leafIndex" | "txHash" | "status">>
+  patch: Partial<Pick<LocalNote, "leafIndex" | "txHash" | "status" | "secured" | "sweepPending">>
 ) {
   if (typeof window === "undefined") return;
   const next = getAllNotes().map((n) => (n.id === id ? { ...n, ...patch } : n));

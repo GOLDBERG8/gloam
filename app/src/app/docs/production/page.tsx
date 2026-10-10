@@ -25,8 +25,7 @@ export default function DocsProductionPage() {
       <p>
         The app proves shield, unshield, and private send in the browser. That is
         real cryptography, and still <strong>not</strong> production-safe while
-        the proving keys come from a development trusted setup and note secrets
-        sit in the browser in the clear.
+        the proving keys come from a development trusted setup.
       </p>
 
       <FlowDiagram
@@ -76,6 +75,10 @@ export default function DocsProductionPage() {
         <li>Hardened pool: a bound shield proof and 128-bit amount range checks (audit C1/C2)</li>
         <li>Two-step ownership and a one-way shield-verifier set (audit M-4)</li>
         <li>Note secrets encrypted at rest (AES-GCM under an IndexedDB device key, audit M-1)</li>
+        <li>
+          Claimed payments secured on claim: moved into a fresh note only the
+          payee knows, so the payer cannot spend them back
+        </li>
       </ul>
 
       <h2>What is still open product-wise</h2>

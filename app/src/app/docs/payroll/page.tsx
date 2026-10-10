@@ -111,6 +111,8 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
         <li>
           <strong>Blank</strong>: they get a claim link after the run. Anyone
           with the link can claim it, so send each link only to its person.
+          Claiming secures it straight away: the money moves into a balance only
+          they hold, so the link is worth nothing after that, to anyone.
         </li>
         <li>
           <strong>A public 0x address</strong> is rejected on purpose: paying

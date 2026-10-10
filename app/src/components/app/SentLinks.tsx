@@ -3,9 +3,10 @@
 /**
  * Pay > Send privately > Sent links: the claim codes this browser sent
  * (lib/sentLinks), with whether each one's money has moved, Copy code, and
- * Take back for one nobody used. Taking back runs the same claim as Receive >
- * Claim a payment (passed in as onTakeBack), so a locked code asks for its
- * phrase there too. A code stays bearer after a take back, and the copy says so.
+ * Take back for one nobody used. Taking back runs the same claim and secure as
+ * Receive > Claim a payment (passed in as onTakeBack), so a locked code asks
+ * for its phrase there too. Once the secure lands the code is dead; until then
+ * it stays bearer, and the copy says which.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -40,8 +41,9 @@ import { StatusPill } from "./StatusPill";
 const HINT = "Kept in this browser only, encrypted like your balance.";
 const EMPTY =
   "Claim links you send show up here, so you can copy them again or take back one nobody used.";
-const TAKEN_BACK =
-  "It's back in your private balance. Anyone who already has the link can still claim it until this money moves, so if you shared it, send it on or cash out.";
+const TAKEN_BACK = "It's back in your private balance, and the link no longer works.";
+const TAKEN_BACK_OPEN =
+  "It's back in your private balance, but not secured yet, so anyone who has the link can still claim it. Tap Secure it now at the top.";
 /** Open on its own while the list is this short; longer lists start collapsed. */
 const OPEN_UP_TO = 3;
 
@@ -69,7 +71,8 @@ export function SentLinks({
   onTakeBack,
 }: {
   /** Claim this code into the connected wallet's private balance (throws with a readable message). */
-  onTakeBack: (code: string, passphrase?: string) => Promise<void>;
+  /** Resolves with whether the money moved into a note only this browser knows. */
+  onTakeBack: (code: string, passphrase?: string) => Promise<{ secured: boolean }>;
 }) {
   const { network } = useNetwork();
   const pool = network.pool;
@@ -193,11 +196,11 @@ export function SentLinks({
           return;
         }
       }
-      await onTakeBack(rec.code, rec.locked ? passphrase : undefined);
+      const { secured } = await onTakeBack(rec.code, rec.locked ? passphrase : undefined);
       await markSentLinkTakenBack(rec.id);
       setPhraseFor(null);
       setPhrase("");
-      setMessage({ id: rec.id, text: TAKEN_BACK, tone: "done" });
+      setMessage({ id: rec.id, text: secured ? TAKEN_BACK : TAKEN_BACK_OPEN, tone: "done" });
     } catch (e) {
       setMessage({ id: rec.id, text: e instanceof Error ? e.message : "Could not take it back.", tone: "error" });
     } finally {

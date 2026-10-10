@@ -224,7 +224,7 @@ export function PaymentFlow({ notes }: { notes: LocalNote[] }) {
                       </span>
                       <span className="block truncate text-[12px] text-mute">
                         Received privately, {shortDate(p.createdAt)}
-                        {p.status === "recovered" ? ", spent since" : ""}
+                        {p.secured ? ", secured" : p.status === "recovered" ? ", spent since" : ""}
                       </span>
                       {p.note && (
                         <PaymentNoteLine

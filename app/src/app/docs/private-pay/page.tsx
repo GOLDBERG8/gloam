@@ -57,7 +57,12 @@ export default function DocsPrivatePayPage() {
           {
             n: "4",
             title: "Claim",
-            body: "Recipient decrypts (tag key) and imports the note into their vault.",
+            body: "Recipient opens it with their tag key (or the claim link) and saves the note in their browser.",
+          },
+          {
+            n: "5",
+            title: "Secure",
+            body: "The app moves it straight away into a fresh note only the recipient knows. From then on the sender cannot take it back.",
           },
         ]}
       />
@@ -69,10 +74,42 @@ export default function DocsPrivatePayPage() {
         Every one you send is kept under <strong>Sent links</strong>, below
         the Send privately form, encrypted in that browser like your balance.
         Each shows whether its money has moved yet. Copy a code again, or take
-        back one nobody used into your own private balance. Taking back is not
-        a cancel: anyone who already has the link can still claim it until that
-        money moves, so if you shared it, send it on or cash out.
+        back one nobody used into your own private balance. Taking back is a
+        claim that is then secured (below), so once that move lands the link
+        stops working. Until it lands, whoever has the link can still claim it
+        first.
       </p>
+
+      <h2>Why a claim is secured</h2>
+      <p>
+        A Gloam payment is a note in the vault, and whoever knows its secret can
+        spend it. The sender made that secret, so until the recipient moves the
+        money the sender could still spend it back. Claiming in the app does two
+        things: it saves the payment, then moves the whole amount into a fresh
+        note whose secret only the recipient&apos;s browser knows (a private
+        transfer with a zero change note). Once that lands, the payment is final.
+      </p>
+      <ul>
+        <li>
+          <strong>One step.</strong> Claim and secure happen together. With the
+          relay on there is no wallet prompt and no gas; with it off, the wallet
+          signs and shows as the sender of that one private transfer.
+        </li>
+        <li>
+          <strong>If it cannot finish</strong> (a closed wallet prompt, a dropped
+          connection), the payment stays in the balance marked not secured yet,
+          and Move offers to secure it. Nothing is lost: the new note is saved
+          before anything is sent.
+        </li>
+        <li>
+          <strong>If the sender spends it first</strong>, the move cannot land and
+          the claim is dropped. Ask them to send it again.
+        </li>
+        <li>
+          Agents get the same guarantee from the SDK&apos;s sweep: a payee calls{" "}
+          <code>settleGloamPayment</code> and serves only once it is final.
+        </li>
+      </ul>
 
       <h2>Is RH “not able” to do Solana-style private send?</h2>
       <p>

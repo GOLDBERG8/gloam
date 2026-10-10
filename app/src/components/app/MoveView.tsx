@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatUnits, type Hex } from "viem";
+import { useWriteContract } from "wagmi";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { shortAddress } from "@/lib/chain";
@@ -14,6 +15,14 @@ import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient } from "@/lib/rhClient";
 import { HASH_SCHEME, gasFor, SHIELD_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
+import {
+  claimNoteId,
+  isClaimedNote,
+  isSecuredClaim,
+  isUnsecuredClaim,
+  secureClaim,
+} from "@/lib/claimSweep";
+import { readDemo } from "@/lib/demoFlag";
 import { syncShieldTree } from "@/lib/treeSync";
 import { buildPoseidonUnshieldWitness } from "@/lib/proverPoseidon";
 import { buildTransferWitness } from "@/lib/proverTransfer";
@@ -26,7 +35,11 @@ import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenWallets } from "@/lib/screeningClient";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
 import { IssuerPolicyRow } from "./IssuerPolicyRow";
+import { noteCommitmentPoseidon, noteNullifierPoseidon } from "@/lib/notePoseidon";
+import { fieldToHex, hexToField } from "@/lib/poseidon";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
+import type { SweepResult } from "@gloamtrade/sdk";
+
 import {
   buildNotePackage,
   decodeNotePackage,
@@ -90,6 +103,9 @@ import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
+
+/** How securing a claim ended (lib/claimSweep), or "error" when it threw. */
+type SweepStatus = SweepResult["status"] | "error";
 
 type Mode = "send" | "cashout" | "receive";
 /** Direct (pay to sticky tag) vs open bearer ticket */
@@ -157,7 +173,9 @@ export function MoveView() {
   const [sendPassphrase, setSendPassphrase] = useState("");
   const [importText, setImportText] = useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
-  const [importOk, setImportOk] = useState<{ text: string; note?: string; fresh?: boolean } | null>(null);
+  const [importOk, setImportOk] = useState<{ text: string; note?: string; fresh?: boolean; warn?: boolean } | null>(null);
+  /** The claimed payment being secured right now (lib/claimSweep). */
+  const [securingId, setSecuringId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successTitle, setSuccessTitle] = useState("Done");
   const [busy, setBusy] = useState(false);
@@ -207,6 +225,8 @@ export function MoveView() {
     error: writeError,
     reset,
   } = useAppWriteContract();
+  // Securing a claim waits on its own transaction, apart from the flow above.
+  const { writeContractAsync } = useWriteContract();
 
   const txHash = relayHash ?? hash;
   const { isLoading: confirming, isSuccess } = useAppTxReceipt({
@@ -523,6 +543,9 @@ export function MoveView() {
       })
       .filter((n) => n.leafIndex != null);
   }, [open, poseidonMode, leafIndexForCommitment]);
+
+  // Claimed payments the payer could still spend back (lib/claimSweep).
+  const unsecured = useMemo(() => open.filter(isUnsecuredClaim), [open]);
 
   // For a request, default to a balance in the requested token: the smallest
   // one that covers the amount, else the largest. A manual pick still wins.
@@ -898,15 +921,115 @@ export function MoveView() {
   }
 
   /**
+   * Move a claimed payment into a fresh note only this browser knows. Through
+   * the relay when it is on; otherwise the wallet signs (and shows as sender).
+   */
+  async function secureNote(
+    note: LocalNote,
+    claim?: { claimed: true; note?: string },
+    report = true
+  ): Promise<SweepStatus> {
+    const label = formatAssetLabel(note.amountWei, note.asset);
+    const did = claim ? `Claimed ${label}` : `${label} is claimed`;
+    const stillOpen = "Until it is secured, the person who sent it can still take it back.";
+    if (report) {
+      setError(null);
+      setImportOk(null);
+    }
+    setSecuringId(note.id);
+    setBusy(true);
+    setStatus("Securing this payment…");
+    let outcome: SweepStatus = "error";
+    try {
+      const r = await secureClaim({
+        note,
+        relay: relayOn,
+        sendWithWallet: ({ pool, args }) =>
+          writeContractAsync({
+            address: pool,
+            abi: shieldPoolAbi,
+            functionName: "transfer",
+            args: [args[0], args[1], args[2], [args[3][0], args[3][1]]],
+            gas: gasFor(network.chainId, SHIELD_GAS_LIMIT),
+            chainId: network.chainId,
+          }),
+        onStage: setStatus,
+      });
+      void import("@/lib/track").then(({ track }) => {
+        track("claim_secure", { reason: r.status, relay: relayOn, chainId: network.chainId });
+      });
+      outcome = r.status;
+      if (r.status === "swept" && r.freshNote) {
+        const fresh = loadLocalNotes(address).find(
+          (n) => n.commitment.toLowerCase() === r.freshNote!.commitment.toLowerCase()
+        );
+        if (fresh) setSelectedId(fresh.id);
+      }
+      if (!report) {
+        /* the caller says what happened */
+      } else if (r.status === "swept") {
+        setImportOk({
+          text: `${claim ? "Claimed and secured" : "Secured"} ${label}. Only you can spend it now, and the person who sent it can no longer take it back.`,
+          note: claim?.note,
+          fresh: Boolean(claim),
+        });
+      } else if (r.status === "already_spent") {
+        setError(
+          `The person who sent ${label} moved it before it was secured, so it is not in your balance. Ask them to send it again.`
+        );
+      } else if (r.status === "not_settled") {
+        setImportOk({
+          text: `${did}, but the payment has not reached the vault yet, so it cannot be secured. Secure it once it lands. ${stillOpen}`,
+          note: claim?.note,
+          warn: true,
+        });
+      } else if (r.status === "unconfirmed") {
+        setImportOk({
+          text: `${did}. Securing it was sent and has not confirmed yet. It counts in your balance once it lands.`,
+          note: claim?.note,
+          warn: true,
+        });
+      } else if (r.status === "bad_note") {
+        setError(`The amount in this payment does not match what it holds in the vault, so it cannot be secured.`);
+      } else {
+        const why = /reject|denied|cancel/i.test(r.reason ?? "")
+          ? "the wallet prompt was closed"
+          : "it did not go through";
+        setImportOk({
+          text: `${did}, but it is not secured yet: ${why}. ${stillOpen}`,
+          note: claim?.note,
+          warn: true,
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message.replace(/\.$/, "") : "something went wrong";
+      if (report) setImportOk({
+        text: `${did}, but it is not secured yet: ${msg}. ${stillOpen}`,
+        note: claim?.note,
+        warn: true,
+      });
+    }
+    refreshNotes();
+    void refreshTree();
+    setBusy(false);
+    setStatus(null);
+    setSecuringId(null);
+    return outcome;
+  }
+
+  /**
    * Claim a payment code into the connected wallet's private balance. Used by
    * Receive > Claim a payment and by Sent links > Take back, so a locked code
-   * needs its phrase either way. Saves the note in this browser only; nothing
-   * goes on-chain. A payment already in this balance is not counted twice.
+   * needs its phrase either way. The note is saved in this browser first (never
+   * lost); the caller then secures it with secureNote, because the payer made
+   * its secret and could spend it back until it moves. A payment already
+   * claimed here is not counted twice, and one still waiting to be secured is
+   * picked up again.
    */
   async function claimCode(
     code: string,
     passphrase?: string
-  ): Promise<{ label: string; note?: string; noteId: string; linked: boolean; already: boolean }> {
+  ): Promise<{ label: string; note?: string; local: LocalNote; isNew: boolean; already: boolean; demo: boolean }> {
     if (!network.pool || !address) {
       throw new Error("Connect a wallet first.");
     }
@@ -922,33 +1045,59 @@ export function MoveView() {
 
     const asset = pack.asset;
     const secret = pack.secret;
-    const commitment = pack.commitment;
-    const label = formatAssetLabel(pack.amountWei, pack.asset);
-
-    // Already claimed in this browser (say, taken back twice): never count it twice.
-    const have = loadLocalNotes(address).find(
-      (n) =>
-        n.status !== "recovered" &&
-        Boolean(n.secret) &&
-        n.secret !== "0x" &&
-        n.commitment.toLowerCase() === commitment.toLowerCase()
-    );
-    if (have) {
-      return { label, note: pack.note, noteId: have.id, linked: have.leafIndex != null, already: true };
-    }
-
-    let nullifier: Hex | undefined;
+    let amount: bigint;
     try {
-      nullifier = await paymentNullifier(secret, commitment);
+      amount = BigInt(pack.amountWei);
     } catch {
-      /* optional */
+      throw new Error("This payment has no readable amount.");
+    }
+    if (amount <= 0n) throw new Error("This payment carries no value.");
+    // The amount must be what the note holds: commitment = Poseidon(secret, amount, asset).
+    const commitment = fieldToHex(
+      await noteCommitmentPoseidon(hexToField(secret), amount, asset)
+    );
+    if (
+      pack.commitment &&
+      pack.commitment !== "0x" &&
+      pack.commitment.toLowerCase() !== commitment.toLowerCase()
+    ) {
+      throw new Error(
+        "The amount in this payment does not match what it holds in the vault, so it was not claimed."
+      );
+    }
+    const nullifier = fieldToHex(
+      await noteNullifierPoseidon(hexToField(secret), hexToField(commitment))
+    );
+    const label = formatAssetLabel(pack.amountWei, asset);
+    const demo = readDemo();
+    const moved =
+      "This payment was already moved, most likely by the person who sent it, so there is nothing left to claim. Ask them to send it again.";
+
+    const known = loadLocalNotes(address).find(
+      (n) => n.commitment.toLowerCase() === commitment.toLowerCase()
+    );
+    if (known && !isUnsecuredClaim(known)) {
+      if (known.status === "recovered" && !known.secured) throw new Error(moved);
+      return { label, note: pack.note, local: known, isNew: false, already: true, demo };
     }
 
-    await refreshTree();
-    const idx = leafIndexForCommitment(commitment);
+    if (!known && !demo) {
+      const spent = await getRhPublicClient()
+        .readContract({
+          address: network.pool,
+          abi: shieldPoolAbi,
+          functionName: "isSpent",
+          args: [nullifier],
+        })
+        .catch(() => false);
+      if (spent) throw new Error(moved);
+    }
 
-    const note: LocalNote = {
-      id: `imp-${Date.now()}`,
+    const tree = await syncShieldTree(getRhPublicClient()).catch(() => null);
+    const idx = tree?.indexByCommitment.get(commitment.toLowerCase());
+
+    const local: LocalNote = known ?? {
+      id: claimNoteId(),
       chainId: network.chainId,
       pool: network.pool,
       asset,
@@ -965,10 +1114,14 @@ export function MoveView() {
       leafIndex: idx ?? undefined,
       // The payer's private note, kept with the balance (encrypted at rest).
       ...(pack.note ? { note: pack.note } : {}),
+      // Recording demo: the pretend payer cannot take anything back.
+      ...(demo ? { secured: true } : {}),
     };
-    saveLocalNote(note);
+    if (!known) saveLocalNote(local);
+    setSelectedId(local.id);
     refreshNotes();
-    return { label, note: pack.note, noteId: note.id, linked: idx != null, already: false };
+    void refreshTree();
+    return { label, note: pack.note, local, isNew: !known, already: false, demo };
   }
 
   async function onImportNote() {
@@ -976,28 +1129,46 @@ export function MoveView() {
     setImportOk(null);
     try {
       const r = await claimCode(importText, importPassphrase);
-      if (!r.already) countLinkClaimed(importText);
-      setSelectedId(r.noteId);
+      if (r.isNew) countLinkClaimed(importText);
       setImportText("");
       setImportPassphrase("");
-      setImportOk({
-        text: r.already
-          ? `${r.label} is already in your private balance.`
-          : r.linked
-            ? `Claimed ${r.label} into your private balance. Send it or cash out when you are ready.`
-            : `Claimed ${r.label}. It shows up here once your balance refreshes.`,
-        note: r.note,
-        fresh: !r.already,
-      });
+      if (r.already) {
+        setImportOk({ text: `You already claimed ${r.label}.`, note: r.note });
+        return;
+      }
+      if (r.demo) {
+        setImportOk({
+          text: `Claimed and secured ${r.label}. Only you can spend it now.`,
+          note: r.note,
+          fresh: true,
+        });
+        return;
+      }
+      await secureNote(r.local, { claimed: true, note: r.note });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
     }
   }
 
-  /** Sent links > Take back: the same claim, into the sender's own balance. */
-  async function takeBackLink(code: string, passphrase?: string) {
+  /**
+   * Sent links > Take back: the same claim into the sender's own balance, then
+   * secured, so the link stops working once the move lands.
+   */
+  async function takeBackLink(code: string, passphrase?: string): Promise<{ secured: boolean }> {
     const r = await claimCode(code, passphrase);
-    setSelectedId(r.noteId);
+    if (r.already || r.demo) return { secured: true };
+    const outcome = await secureNote(r.local, undefined, false);
+    if (outcome === "already_spent") {
+      throw new Error("Someone claimed it first, so there is nothing to take back.");
+    }
+    return { secured: outcome === "swept" };
+  }
+
+  /** The banner's button: secure every claimed payment still open to the payer, one at a time. */
+  async function secureAll() {
+    for (const n of unsecured) {
+      if ((await secureNote(n)) !== "swept") return;
+    }
   }
 
   // Sticky receive tag for direct private pay
@@ -1212,10 +1383,54 @@ export function MoveView() {
             />
           )}
 
+          {unsecured.length > 0 && poseidonMode && (
+            <div className="mt-5 rounded-xl bg-warn-soft px-4 py-3.5 text-[13.5px] leading-relaxed">
+              <p className="font-medium text-warn">
+                {unsecured.length === 1
+                  ? `Secure the ${formatAssetLabel(unsecured[0]!.amountWei, unsecured[0]!.asset)} you claimed`
+                  : `Secure ${unsecured.length} payments you claimed`}
+              </p>
+              <p className="mt-1 text-foreground">
+                Whoever paid you made its key, so they can still take it back
+                until you secure it. Securing moves it into a balance only you
+                hold.
+                {relayOn
+                  ? " It goes through the Gloam relay, so your wallet stays out of it."
+                  : " With the relay off, your wallet signs it and shows as the sender."}
+              </p>
+              {isConnected && (onProduct || relayOn) ? (
+                <button
+                  type="button"
+                  onClick={() => void secureAll()}
+                  disabled={working}
+                  className="btn btn-ink btn-sm mt-3"
+                >
+                  {securingId ? (
+                    <>
+                      <Spinner />
+                      <span className="truncate">{status || "Securing…"}</span>
+                    </>
+                  ) : unsecured.length === 1 ? (
+                    "Secure it now"
+                  ) : (
+                    "Secure them now"
+                  )}
+                </button>
+              ) : (
+                <div className="mt-3">{connectPrompt("secure it")}</div>
+              )}
+            </div>
+          )}
+
           {importOk && (
-            <div className="mt-5 flex items-start gap-3 rounded-xl bg-sealed-soft px-4 py-3 text-[13.5px] leading-relaxed text-foreground">
-              <span className="mt-0.5 text-sealed" aria-hidden>
-                <CheckIcon />
+            <div
+              className={`mt-5 flex items-start gap-3 rounded-xl px-4 py-3 text-[13.5px] leading-relaxed text-foreground ${
+                importOk.warn ? "bg-warn-soft" : "bg-sealed-soft"
+              }`}
+              aria-live="polite"
+            >
+              <span className={`mt-0.5 ${importOk.warn ? "text-warn" : "text-sealed"}`} aria-hidden>
+                {importOk.warn ? <LockIcon size={14} /> : <CheckIcon />}
               </span>
               <span className="min-w-0">
                 <span className="block">{importOk.text}</span>
@@ -1273,11 +1488,14 @@ export function MoveView() {
                 >
                   {notes.map((n) => {
                     const active = selected?.id === n.id;
-                    const kind = !n.txHash
-                      ? "Claimed"
-                      : n.id.startsWith("chg-")
-                        ? "Change from a payment"
-                        : "Added";
+                    const exposed = isUnsecuredClaim(n);
+                    const kind = exposed
+                      ? "Claimed, not secured yet"
+                      : isClaimedNote(n) || isSecuredClaim(n) || !n.txHash
+                        ? "Claimed"
+                        : n.id.startsWith("chg-")
+                          ? "Change from a payment"
+                          : "Added";
                     return (
                       <li key={n.id}>
                         <button
@@ -1297,7 +1515,7 @@ export function MoveView() {
                               {formatAssetAmount(n.amountWei, n.asset)}{" "}
                               <span className="text-mute">{assetLabel(n.asset)}</span>
                             </span>
-                            <span className="block truncate text-[12px] text-mute">
+                            <span className={`block truncate text-[12px] ${exposed ? "text-warn" : "text-mute"}`}>
                               {kind},{" "}
                               {new Date(n.createdAt).toLocaleDateString("en-US", {
                                 month: "short",
@@ -1872,7 +2090,9 @@ export function MoveView() {
                 </h3>
                 <p className="mt-1 text-[13px] leading-relaxed text-mute">
                   Paste the claim link or payment code you were sent. Codes start
-                  with gloam2t, gloam1 or gloam1e.
+                  with gloam2t, gloam1 or gloam1e. Claiming also secures it: the
+                  payment moves into a balance only you hold, so the person who
+                  sent it can no longer take it back.
                 </p>
                 <label htmlFor="claim-code" className="sr-only">
                   Claim link or payment code
@@ -1919,17 +2139,25 @@ export function MoveView() {
                     />
                   </div>
                 )}
-                <div className="mt-4">
+                <div className="mt-4 space-y-4">
+                  {relayToggle}
                   {!isConnected ? (
                     connectPrompt("claim it")
                   ) : (
                     <button
                       type="button"
                       onClick={() => void onImportNote()}
-                      disabled={!importText.trim() || !isConnected}
+                      disabled={!importText.trim() || !isConnected || working}
                       className="btn btn-ink btn-lg btn-block"
                     >
-                      Claim to my private balance
+                      {securingId ? (
+                        <>
+                          <Spinner />
+                          <span className="truncate">{status || "Securing…"}</span>
+                        </>
+                      ) : (
+                        "Claim and secure"
+                      )}
                     </button>
                   )}
                 </div>
@@ -1996,8 +2224,9 @@ export function MoveView() {
                 <li className="pt-3">
                   <p className="text-foreground">Claim links work too</p>
                   <p className="mt-0.5 text-mute">
-                    Paste one under Claim a payment and it lands in your private
-                    balance.
+                    Paste one under Claim a payment. It lands in your private
+                    balance and is secured straight away, so the person who sent
+                    it cannot take it back.
                   </p>
                 </li>
               </ul>

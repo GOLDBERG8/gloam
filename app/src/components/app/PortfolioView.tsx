@@ -23,6 +23,7 @@ import {
   isNativeAsset,
   isShieldDeployed,
 } from "@/lib/shield";
+import { isClaimedNote, isSecuredClaim, isUnsecuredClaim } from "@/lib/claimSweep";
 import { SealedField } from "@/components/ui/SealedField";
 import { ActivityFeed } from "./ActivityFeed";
 import { AddressChip } from "./AddressChip";
@@ -587,10 +588,19 @@ export function PortfolioView() {
                           {n.leafIndex != null
                             ? "Ready to send privately or cash out"
                             : "Confirming…"}
-                          {n.source === "local" && n.id.startsWith("imp-")
-                            ? ", received"
-                            : ""}
+                          {isClaimedNote(n) || isSecuredClaim(n) ? ", received" : ""}
                         </p>
+                        {isUnsecuredClaim(n) && (
+                          <p className="mt-0.5 text-[12.5px] text-warn">
+                            Not secured yet, so the sender can still take it back.{" "}
+                            <Link
+                              href="/app/vault?tab=move"
+                              className="font-medium underline underline-offset-4"
+                            >
+                              Secure it
+                            </Link>
+                          </p>
+                        )}
                         {n.note && (
                           <PaymentNoteLine
                             note={n.note}
