@@ -190,7 +190,8 @@ export default function DocsPrivacyPage() {
       <h2 id="security">Security and compliance</h2>
       <h3>Passkey lock (optional)</h3>
       <p>
-        Your notes are encrypted at rest in this browser under a device key. In{" "}
+        Your notes, and the key that opens payments to your Gloam address, are
+        encrypted at rest in this browser under a device key. In{" "}
         <AppLink href="/app/settings">Settings</AppLink> you can protect that key with
         a passkey: Face ID, Touch ID or a security key. Gloam asks
         the passkey for a secret only it can produce (the WebAuthn PRF

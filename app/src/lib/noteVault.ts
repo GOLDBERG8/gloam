@@ -7,7 +7,8 @@
  * the working copy in memory and persists it to localStorage encrypted with
  * AES-GCM under a data key. A localStorage dump, backup, or shared-browser
  * snoop yields ciphertext, not spend keys. Other secret-bearing state (payroll
- * runs, schedules) is sealed under the same key through sealJson/openJson.
+ * runs, schedules, receive keys) is sealed under the same key through
+ * sealJson/openJson.
  *
  * Where the data key lives:
  *   - Device key (default): a non-extractable AES-GCM key in IndexedDB.
@@ -350,6 +351,31 @@ export function setAllNotes(next: LocalNote[]): void {
  */
 export async function sealJson(value: unknown): Promise<string> {
   return encrypt(JSON.stringify(value));
+}
+
+/** A value sealJson wrote (as opposed to plain JSON from before encryption at rest). */
+export function isSealedValue(value: string | null): boolean {
+  return Boolean(value?.startsWith(ENC_PREFIX));
+}
+
+/** Resolves once the data key is usable (after the passkey unlock, if one guards it). */
+export async function vaultKeyReady(): Promise<void> {
+  await getKey();
+}
+
+/** A passkey guards the data key and this tab has not unlocked it yet (demo or not). */
+export function dataKeyLocked(): boolean {
+  return typeof window !== "undefined" && passkeyOn() && !liveKey;
+}
+
+/**
+ * Like openJson, but throws when the value does not open (wrong key, damaged)
+ * instead of returning null, so a caller can tell that from a missing value.
+ * Waits for the unlock.
+ */
+export async function openJsonStrict<T>(blob: string): Promise<T> {
+  if (!isSealedValue(blob)) throw new Error("Not a sealed value.");
+  return JSON.parse(await decrypt(blob)) as T;
 }
 
 /** Decrypt a value sealed with sealJson. Returns null if it cannot be opened. */

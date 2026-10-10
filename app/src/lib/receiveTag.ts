@@ -7,7 +7,11 @@
  *
  * On-chain transfer is unchanged; ciphertext is still handed off off-chain
  * (QR/share) until we add an on-chain memo field. UX is address-like for the sender.
+ *
+ * The tag's private key is sealed at rest like the notes (see storage below).
  */
+
+import { readDemo } from "./demoFlag";
 
 const ID_KEY = "gloam.receive.identity.v1";
 /** Earlier receive keys, kept so payments sent to an older Gloam address still open. */
@@ -69,23 +73,94 @@ async function generateIdentity(): Promise<StoredIdentity> {
   };
 }
 
-function loadStored(): StoredIdentity | null {
-  if (typeof window === "undefined") return null;
+/* ------------------------------------------------------------ storage */
+
+/*
+ * The private halves are sealed at rest under the same data key as the notes
+ * (lib/noteVault: a non-extractable AES-GCM key in IndexedDB, or that key
+ * wrapped by a passkey), never kept as plain JSON. Sealed values carry the
+ * vault's prefix, so turning a passkey on or off reseals them with the notes.
+ * Keys an earlier version saved as plain JSON are sealed the first time they
+ * are read. Reads and writes run one at a time, so two callers can never make
+ * two different addresses or drop an earlier key.
+ */
+
+/** Thrown while the vault is locked behind a passkey (recording demo only; elsewhere reads wait for the unlock). */
+export class ReceiveKeysLocked extends Error {
+  constructor() {
+    super("Unlock Gloam to open your Gloam address.");
+    this.name = "ReceiveKeysLocked";
+  }
+}
+
+let queue: Promise<unknown> = Promise.resolve();
+function serial<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(task);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+/** Loaded on first use: this module also serves server code that only needs the prefixes. */
+function vault() {
+  return import("./noteVault");
+}
+
+/** Keep a copy of a value that would not open before anything can replace it. */
+function setAside(key: string, raw: string) {
+  const aside = `${key}.unreadable`;
   try {
-    const raw = localStorage.getItem(ID_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw) as StoredIdentity;
-    if (s?.v !== 1 || !s.privateJwk || !s.publicSpkiB64) return null;
-    return s;
+    const list = JSON.parse(localStorage.getItem(aside) ?? "[]") as unknown;
+    const kept = Array.isArray(list) ? list : [];
+    if (!kept.includes(raw)) localStorage.setItem(aside, JSON.stringify([...kept, raw]));
   } catch {
+    localStorage.setItem(aside, JSON.stringify([raw]));
+  }
+}
+
+/** One slot: sealed (opened), plain JSON from an earlier version (sealed now), or null. */
+async function readSlot(key: string): Promise<unknown> {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  const v = await vault();
+  if (!v.isSealedValue(raw)) {
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      setAside(key, raw);
+      return null;
+    }
+    localStorage.setItem(key, await v.sealJson(value));
+    return value;
+  }
+  if (readDemo() && v.dataKeyLocked()) throw new ReceiveKeysLocked();
+  // A key that cannot be had right now is not a damaged value: let it throw.
+  await v.vaultKeyReady();
+  try {
+    return await v.openJsonStrict(raw);
+  } catch {
+    setAside(key, raw);
     return null;
   }
 }
 
-function saveStored(s: StoredIdentity) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(ID_KEY, JSON.stringify(s));
+async function loadKeys(): Promise<{ current: StoredIdentity | null; previous: StoredIdentity[] }> {
+  if (typeof window === "undefined") return { current: null, previous: [] };
+  const current = await readSlot(ID_KEY);
+  const previous = await readSlot(PREV_KEY);
+  return {
+    current: validStored(current) ? current : null,
+    previous: Array.isArray(previous) ? previous.filter(validStored) : [],
+  };
+}
+
+async function saveCurrent(s: StoredIdentity) {
+  localStorage.setItem(ID_KEY, await (await vault()).sealJson(s));
   window.dispatchEvent(new Event(RECEIVE_IDENTITY_EVENT));
+}
+
+async function savePrevious(list: StoredIdentity[]) {
+  localStorage.setItem(PREV_KEY, await (await vault()).sealJson(list));
 }
 
 function validStored(s: unknown): s is StoredIdentity {
@@ -93,31 +168,13 @@ function validStored(s: unknown): s is StoredIdentity {
   return Boolean(x && x.v === 1 && x.privateJwk && typeof x.publicSpkiB64 === "string");
 }
 
-function loadPrevious(): StoredIdentity[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const list = JSON.parse(localStorage.getItem(PREV_KEY) ?? "[]") as unknown;
-    return Array.isArray(list) ? list.filter(validStored) : [];
-  } catch {
-    return [];
-  }
-}
-
-function savePrevious(list: StoredIdentity[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(PREV_KEY, JSON.stringify(list));
-}
-
-/** Keep `s` among the earlier keys, unless it is already there or is the current key. */
-function archive(s: StoredIdentity) {
-  const prev = loadPrevious();
-  if (prev.some((p) => p.publicSpkiB64 === s.publicSpkiB64)) return;
-  savePrevious([s, ...prev]);
+function identityOf(s: StoredIdentity): ReceiveIdentity {
+  return { tag: RECEIVE_TAG_PREFIX + s.publicSpkiB64, createdAt: s.createdAt };
 }
 
 /** Every receive key on this browser, for the recovery backup. */
-export function exportReceiveKeys(): { current: StoredIdentity | null; previous: StoredIdentity[] } {
-  return { current: loadStored(), previous: loadPrevious() };
+export function exportReceiveKeys(): Promise<{ current: StoredIdentity | null; previous: StoredIdentity[] }> {
+  return serial(loadKeys);
 }
 
 /**
@@ -126,46 +183,47 @@ export function exportReceiveKeys(): { current: StoredIdentity | null; previous:
  * given); a different local key is kept among the earlier ones, so nothing
  * stops opening.
  */
-export function importReceiveKeys(data: { current?: unknown; previous?: unknown } | null | undefined) {
-  if (!data || typeof window === "undefined") return;
-  const restored = validStored(data.current) ? data.current : null;
-  const local = loadStored();
-  const prev = loadPrevious();
-  const incoming = Array.isArray(data.previous) ? data.previous.filter(validStored) : [];
-  for (const p of incoming) {
-    if (!prev.some((x) => x.publicSpkiB64 === p.publicSpkiB64)) prev.push(p);
-  }
-  if (restored && local && local.publicSpkiB64 !== restored.publicSpkiB64) {
-    if (!prev.some((x) => x.publicSpkiB64 === local.publicSpkiB64)) prev.unshift(local);
-  }
-  const current = restored ?? local;
-  savePrevious(prev.filter((p) => p.publicSpkiB64 !== current?.publicSpkiB64));
-  if (restored && local?.publicSpkiB64 !== restored.publicSpkiB64) saveStored(restored);
+export function importReceiveKeys(data: { current?: unknown; previous?: unknown } | null | undefined): Promise<void> {
+  return serial(async () => {
+    if (!data || typeof window === "undefined") return;
+    const restored = validStored(data.current) ? data.current : null;
+    const { current: local, previous: prev } = await loadKeys();
+    const incoming = Array.isArray(data.previous) ? data.previous.filter(validStored) : [];
+    for (const p of incoming) {
+      if (!prev.some((x) => x.publicSpkiB64 === p.publicSpkiB64)) prev.push(p);
+    }
+    if (restored && local && local.publicSpkiB64 !== restored.publicSpkiB64) {
+      if (!prev.some((x) => x.publicSpkiB64 === local.publicSpkiB64)) prev.unshift(local);
+    }
+    const current = restored ?? local;
+    await savePrevious(prev.filter((p) => p.publicSpkiB64 !== current?.publicSpkiB64));
+    if (restored && local?.publicSpkiB64 !== restored.publicSpkiB64) await saveCurrent(restored);
+  });
 }
 
 /** Load or create sticky receive identity for this browser. */
-export async function getOrCreateReceiveIdentity(): Promise<ReceiveIdentity> {
-  let s = loadStored();
-  if (!s) {
-    s = await generateIdentity();
-    saveStored(s);
-  }
-  return {
-    tag: RECEIVE_TAG_PREFIX + s.publicSpkiB64,
-    createdAt: s.createdAt,
-  };
+export function getOrCreateReceiveIdentity(): Promise<ReceiveIdentity> {
+  return serial(async () => {
+    let { current } = await loadKeys();
+    if (!current) {
+      current = await generateIdentity();
+      await saveCurrent(current);
+    }
+    return identityOf(current);
+  });
 }
 
 /** New tag. Payments to the old tag still open: its key is kept among the earlier ones. */
-export async function rotateReceiveIdentity(): Promise<ReceiveIdentity> {
-  const old = loadStored();
-  if (old) archive(old);
-  const s = await generateIdentity();
-  saveStored(s);
-  return {
-    tag: RECEIVE_TAG_PREFIX + s.publicSpkiB64,
-    createdAt: s.createdAt,
-  };
+export function rotateReceiveIdentity(): Promise<ReceiveIdentity> {
+  return serial(async () => {
+    const { current: old, previous } = await loadKeys();
+    if (old && !previous.some((p) => p.publicSpkiB64 === old.publicSpkiB64)) {
+      await savePrevious([old, ...previous]);
+    }
+    const s = await generateIdentity();
+    await saveCurrent(s);
+    return identityOf(s);
+  });
 }
 
 export function isReceiveTag(input: string): boolean {
@@ -283,8 +341,8 @@ export async function decryptTicketWithLocalTag(
   if (!s.startsWith(PAY_TO_TAG_PREFIX)) {
     throw new Error("Not a pay-to-tag package (gloam2t…).");
   }
-  const current = loadStored();
-  const keys = [...(current ? [current] : []), ...loadPrevious()];
+  const { current, previous } = await serial(loadKeys);
+  const keys = [...(current ? [current] : []), ...previous];
   if (!keys.length) {
     throw new Error("No receive tag in this browser, generate one under Claim.");
   }

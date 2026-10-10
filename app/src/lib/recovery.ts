@@ -231,7 +231,7 @@ export async function passkeySecret(mode: "create" | "use"): Promise<Uint8Array>
 
 /* ------------------------------------------------------------ backup payload */
 
-type ReceiveKeys = ReturnType<typeof exportReceiveKeys>;
+type ReceiveKeys = Awaited<ReturnType<typeof exportReceiveKeys>>;
 
 type Payload = {
   v: 1;
@@ -244,8 +244,8 @@ function spendable(n: LocalNote): boolean {
   return n.status !== "recovered" && Boolean(n.secret) && n.secret !== "0x" && !n.id.startsWith("pay-");
 }
 
-function collect(): Payload {
-  return { v: 1, savedAt: Date.now(), notes: getAllNotes().filter(spendable), receive: exportReceiveKeys() };
+async function collect(): Promise<Payload> {
+  return { v: 1, savedAt: Date.now(), notes: getAllNotes().filter(spendable), receive: await exportReceiveKeys() };
 }
 
 async function aesKey(keys: RecoveryKeys): Promise<CryptoKey> {
@@ -389,7 +389,7 @@ async function saveConfig(next: Config | null) {
 async function upload(c: Config): Promise<void> {
   let current = c;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const blob = await seal(current, collect());
+    const blob = await seal(current, await collect());
     let res: Response;
     try {
       res = await fetch("/api/recovery", {
@@ -411,7 +411,7 @@ async function upload(c: Config): Promise<void> {
       if (remote) {
         const p = await open(current, remote.c);
         mergeNotes(p.notes);
-        importReceiveKeys({ current: null, previous: [p.receive?.current, ...(p.receive?.previous ?? [])] });
+        await importReceiveKeys({ current: null, previous: [p.receive?.current, ...(p.receive?.previous ?? [])] });
         current = { ...current, n: remote.n };
         continue;
       }
@@ -497,7 +497,7 @@ export async function connectRecovery(
     if (remote) {
       const p = await open(keys, remote.c);
       added = mergeNotes(p.notes, owner);
-      importReceiveKeys(p.receive);
+      await importReceiveKeys(p.receive);
     }
     const next: Config = { ...keys, n: remote?.n ?? 0, savedAt: remote?.t ?? null };
     await saveConfig(next);

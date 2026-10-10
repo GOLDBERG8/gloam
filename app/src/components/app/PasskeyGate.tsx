@@ -117,7 +117,7 @@ export function PasskeyGate() {
                 </div>
               ) : (
                 <div className="mt-3 rounded-[14px] bg-warn-soft px-4 py-3 text-warn">
-                  <p>Only a backup brings your balance back after this. Start over?</p>
+                  <p>Only a backup brings your balance and your Gloam address back after this. Start over?</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button type="button" disabled={busy} onClick={startOver} className="btn btn-ink btn-sm h-10">
                       Yes, start over
