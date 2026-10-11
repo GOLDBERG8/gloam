@@ -21,8 +21,30 @@ export function clientIp(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip")?.trim() || "local";
 }
 
+/**
+ * The unit a limit counts. An IPv4 address counts on its own. An IPv6 address
+ * counts by its /64 network, because one household or server can rotate
+ * through billions of addresses inside its /64 and dodge a per-address limit.
+ */
+export function ipBucket(ip: string): string {
+  const raw = ip.trim().toLowerCase().split("%")[0] ?? "";
+  if (!raw.includes(":")) return raw;
+  const mapped = raw.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped?.[1]) return mapped[1];
+  let groups: string[];
+  if (raw.includes("::")) {
+    const [head = "", tail = ""] = raw.split("::");
+    const h = head ? head.split(":") : [];
+    const t = tail ? tail.split(":") : [];
+    groups = [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+  } else {
+    groups = raw.split(":");
+  }
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
 function ipKey(ip: string): string {
-  return createHash("sha256").update(`gloam-mcp|${ip}`).digest("hex").slice(0, 32);
+  return createHash("sha256").update(`gloam-mcp|${ipBucket(ip)}`).digest("hex").slice(0, 32);
 }
 
 function memCounts(): Map<string, { n: number; exp: number }> {
@@ -44,6 +66,15 @@ function memIncr(key: string, now: number, windowSec: number): number {
   }
   cur.n++;
   return cur.n;
+}
+
+let lastMissLog = 0;
+/** A failed shared count falls back to this instance's memory; say so at most once a minute. */
+function logRedisMiss(e: unknown) {
+  const now = Date.now();
+  if (now - lastMissLog < 60_000) return;
+  lastMissLog = now;
+  console.warn("gloam_ratelimit_redis_miss", e instanceof Error ? e.message : "unknown");
 }
 
 async function redisIncr(key: string, windowSec: number): Promise<number> {
@@ -88,7 +119,8 @@ export async function hitRateLimit(
   if (redisConfigured()) {
     try {
       n = await redisIncr(key, span);
-    } catch {
+    } catch (e) {
+      logRedisMiss(e);
       n = memIncr(key, now, span);
     }
   } else {
