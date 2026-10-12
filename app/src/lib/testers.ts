@@ -124,8 +124,11 @@ async function applicationFor(address: string): Promise<TesterApplication | null
 
 /** How many paid tester spots there are. */
 export function testersCap(): number {
-  const n = Number(process.env.GLOAM_TESTERS_CAP);
-  return Number.isInteger(n) && n > 0 ? n : DEFAULT_CAP;
+  const raw = process.env.GLOAM_TESTERS_CAP?.trim();
+  if (!raw) return DEFAULT_CAP;
+  const n = Number(raw);
+  // 0 pauses paid spots: nobody is promised a reward (used while the list is being moved)
+  return Number.isInteger(n) && n >= 0 ? n : DEFAULT_CAP;
 }
 
 /** Paid spots still open. */
