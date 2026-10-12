@@ -24,6 +24,7 @@ import {
   demoLeafOpening,
   demoNotes,
   demoPoolDeposited,
+  demoSentLeaves,
   jitter,
   randomField,
   randomHex,
@@ -54,7 +55,9 @@ export async function demoRelay(body: Record<string, unknown>): Promise<Hex> {
   // A cash out pays the wallet; sends and memos only touch the vault.
   const wallet: [Address, bigint][] =
     body.action === "unshield" ? [[body.asset as Address, BigInt(body.amount as bigint)]] : [];
-  return submitDemoTx(Number(body.chainId), { wallet });
+  // A private send's payment (commitments[0]) takes a leaf, so its claim link can be claimed.
+  const sent = body.action === "transfer" ? [(body.commitments as readonly Hex[])[0]] : [];
+  return submitDemoTx(Number(body.chainId), { wallet, sent });
 }
 
 // ------------------------------------------------------------------ vault
@@ -71,6 +74,7 @@ export function demoSyncedTree(): SyncedTree | null {
   }
   const incoming = demoIncoming(net.chainId);
   if (incoming) indexByCommitment.set(incoming.commitment.toLowerCase(), incoming.leafIndex);
+  for (const [commitment, leaf] of demoSentLeaves(net.chainId)) indexByCommitment.set(commitment, leaf);
   return {
     scheme: "poseidon",
     leaves: [],

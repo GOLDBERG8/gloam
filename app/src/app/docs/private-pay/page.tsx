@@ -62,6 +62,17 @@ export default function DocsPrivatePayPage() {
         ]}
       />
 
+      <h2>Claim links you send</h2>
+      <p>
+        No Gloam address? Leave To empty and you get a claim link instead.
+        Every one you send is kept under <strong>Sent links</strong>, below
+        the Send privately form, encrypted in that browser like your balance.
+        Each shows whether its money has moved yet. Copy a code again, or take
+        back one nobody used into your own private balance. Taking back is not
+        a cancel: anyone who already has the link can still claim it until that
+        money moves, so if you shared it, send it on or cash out.
+      </p>
+
       <h2>Is RH “not able” to do Solana-style private send?</h2>
       <p>
         <strong>No.</strong> EVM supports the same ingredients: Merkle notes,

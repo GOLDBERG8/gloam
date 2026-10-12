@@ -13,7 +13,7 @@ import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient } from "@/lib/rhClient";
-import { HASH_SCHEME, gasFor, SHIELD_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, isNativeAsset, isShieldDeployed, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
+import { HASH_SCHEME, gasFor, SHIELD_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
 import { syncShieldTree } from "@/lib/treeSync";
 import { buildPoseidonUnshieldWitness } from "@/lib/proverPoseidon";
 import { buildTransferWitness } from "@/lib/proverTransfer";
@@ -26,8 +26,6 @@ import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenWallets } from "@/lib/screeningClient";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
 import { IssuerPolicyRow } from "./IssuerPolicyRow";
-import { noteNullifierPoseidon } from "@/lib/notePoseidon";
-import { fieldToHex, hexToField } from "@/lib/poseidon";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
 import {
   buildNotePackage,
@@ -86,6 +84,9 @@ import {
 } from "@/lib/firstPayment";
 import { DevKeysBanner } from "./DevKeysBanner";
 import { PaymentTicketShare } from "./PaymentTicketShare";
+import { SentLinks } from "./SentLinks";
+import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
+import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
 import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
 
@@ -305,6 +306,10 @@ export function MoveView() {
   );
   /** Analytics for the payment in flight: sent on a request, carrying a note. */
   const payTrack = useRef<{ chainId: number; request: boolean; note: boolean } | null>(null);
+  /** The payment's code for Sent links, saved once the payment lands. */
+  const pendingLink = useRef<SentLink | null>(null);
+  /** The saved Sent links record, dropped again if their heads-up posts. */
+  const savedLinkId = useRef<string | null>(null);
   /** After direct pay: post encrypted ticket on-chain (GloamPayMemo) */
   const pendingMemo = useRef<{
     paymentCommitment: Hex;
@@ -322,6 +327,11 @@ export function MoveView() {
       if (pendingAction.current === "memo") {
         pendingAction.current = null;
         pendingMemo.current = null;
+        // They got the heads-up, so the payment shows up on their side: no Sent links row needed.
+        if (savedLinkId.current) {
+          void removeSentLink(savedLinkId.current).catch(() => undefined);
+          savedLinkId.current = null;
+        }
         setMemoPosted(true);
         if (pendingShare.current) {
           setShareBlob(pendingShare.current.blob);
@@ -347,6 +357,14 @@ export function MoveView() {
         // step). Retires the first-payment nudge on this device.
         markPrivatePaid(network.chainId);
         setPaidPrivately(true);
+        // The payment landed: keep its code under Sent links, encrypted in this
+        // browser, so a lost code is not lost money (removed again if a heads-up posts).
+        const link = pendingLink.current;
+        pendingLink.current = null;
+        if (link) {
+          savedLinkId.current = link.id;
+          void saveSentLink(link).catch(() => undefined);
+        }
       }
 
       if (pendingAction.current === "send" && payTrack.current) {
@@ -455,12 +473,22 @@ export function MoveView() {
     if (!writeError) return;
     setBusy(false);
     setStatus(null);
+    // Only their heads-up failed: the payment already landed, so its code
+    // stays on screen (it is under Sent links too) instead of being dropped.
+    const landed = pendingAction.current === "memo" ? pendingShare.current : null;
     pendingChange.current = null;
     pendingShare.current = null;
     pendingMemo.current = null;
+    pendingLink.current = null;
     spentNoteId.current = null;
     payTrack.current = null;
-    setShareBlob(null);
+    setShareBlob(landed?.blob ?? null);
+    if (landed) {
+      setShareAmountLabel(landed.amountLabel);
+      setError(
+        "Payment sent, but their heads-up was not. Share the claim code below with them instead. It is also kept under Sent links."
+      );
+    }
   }, [writeError]);
 
   // Resolve leafIndex from tree when import left it missing
@@ -642,6 +670,8 @@ export function MoveView() {
     handledHash.current = null;
     pendingAction.current = "send";
     spentNoteId.current = selected.id;
+    pendingLink.current = null;
+    savedLinkId.current = null;
 
     try {
       const amountPay = parseAssetAmount(sendAmount, selected.asset);
@@ -723,6 +753,24 @@ export function MoveView() {
         blob: share,
         amountLabel: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
       };
+      // Sent links record. The nullifier is worked out now, the same way a claim
+      // does, so its status can be checked later without the phrase.
+      let linkNullifier: Hex | undefined;
+      try {
+        linkNullifier = await paymentNullifier(pack.secret, pack.commitment);
+      } catch {
+        /* the row shows Couldn't check */
+      }
+      pendingLink.current = makeSentLink({
+        code: share,
+        chainId: network.chainId,
+        pool: network.pool,
+        asset: pack.asset,
+        symbol: assetLabel(pack.asset),
+        amountWei: pack.amountWei,
+        nullifier: linkNullifier,
+        note: pack.note,
+      });
       setShareLocked(locked);
       setShareBlob(null);
       setMemoPosted(false);
@@ -788,6 +836,7 @@ export function MoveView() {
       pendingChange.current = null;
       pendingShare.current = null;
       pendingMemo.current = null;
+      pendingLink.current = null;
       payTrack.current = null;
     }
   }
@@ -830,78 +879,106 @@ export function MoveView() {
     }
   }
 
+  /**
+   * Claim a payment code into the connected wallet's private balance. Used by
+   * Receive > Claim a payment and by Sent links > Take back, so a locked code
+   * needs its phrase either way. Saves the note in this browser only; nothing
+   * goes on-chain. A payment already in this balance is not counted twice.
+   */
+  async function claimCode(
+    code: string,
+    passphrase?: string
+  ): Promise<{ label: string; note?: string; noteId: string; linked: boolean; already: boolean }> {
+    if (!network.pool || !address) {
+      throw new Error("Connect a wallet first.");
+    }
+    const pack = await decodeNotePackage(code, passphrase || undefined, {
+      tryTagDecrypt: true,
+    });
+    if (
+      pack.pool &&
+      pack.pool.toLowerCase() !== network.pool.toLowerCase()
+    ) {
+      throw new Error("This payment is for a different vault or network.");
+    }
+
+    const asset = pack.asset;
+    const secret = pack.secret;
+    const commitment = pack.commitment;
+    const label = formatAssetLabel(pack.amountWei, pack.asset);
+
+    // Already claimed in this browser (say, taken back twice): never count it twice.
+    const have = loadLocalNotes(address).find(
+      (n) =>
+        n.status !== "recovered" &&
+        Boolean(n.secret) &&
+        n.secret !== "0x" &&
+        n.commitment.toLowerCase() === commitment.toLowerCase()
+    );
+    if (have) {
+      return { label, note: pack.note, noteId: have.id, linked: have.leafIndex != null, already: true };
+    }
+
+    let nullifier: Hex | undefined;
+    try {
+      nullifier = await paymentNullifier(secret, commitment);
+    } catch {
+      /* optional */
+    }
+
+    await refreshTree();
+    const idx = leafIndexForCommitment(commitment);
+
+    const note: LocalNote = {
+      id: `imp-${Date.now()}`,
+      chainId: network.chainId,
+      pool: network.pool,
+      asset,
+      amountWei: pack.amountWei,
+      commitment,
+      secret,
+      nullifier,
+      bound: true,
+      scheme: "poseidon",
+      from: address,
+      createdAt: Date.now(),
+      status: "open",
+      source: "local",
+      leafIndex: idx ?? undefined,
+      // The payer's private note, kept with the balance (encrypted at rest).
+      ...(pack.note ? { note: pack.note } : {}),
+    };
+    saveLocalNote(note);
+    refreshNotes();
+    return { label, note: pack.note, noteId: note.id, linked: idx != null, already: false };
+  }
+
   async function onImportNote() {
     setError(null);
     setImportOk(null);
     try {
-      if (!network.pool || !address) {
-        throw new Error("Connect a wallet first.");
-      }
-      const pack = await decodeNotePackage(
-        importText,
-        importPassphrase || undefined,
-        { tryTagDecrypt: true }
-      );
-      if (
-        pack.pool &&
-        pack.pool.toLowerCase() !== network.pool.toLowerCase()
-      ) {
-        throw new Error("This payment is for a different vault or network.");
-      }
-
-      const asset = pack.asset;
-      const secret = pack.secret;
-      const commitment = pack.commitment;
-      let nullifier: Hex | undefined;
-      try {
-        const n = await noteNullifierPoseidon(
-          hexToField(secret),
-          hexToField(commitment)
-        );
-        nullifier = fieldToHex(n);
-      } catch {
-        /* optional */
-      }
-
-      await refreshTree();
-      const idx = leafIndexForCommitment(commitment);
-
-      const note: LocalNote = {
-        id: `imp-${Date.now()}`,
-        chainId: network.chainId,
-        pool: network.pool,
-        asset,
-        amountWei: pack.amountWei,
-        commitment,
-        secret,
-        nullifier,
-        bound: true,
-        scheme: "poseidon",
-        from: address,
-        createdAt: Date.now(),
-        status: "open",
-        source: "local",
-        leafIndex: idx ?? undefined,
-        // The payer's private note, kept with the balance (encrypted at rest).
-        ...(pack.note ? { note: pack.note } : {}),
-      };
-      saveLocalNote(note);
-      refreshNotes();
-      setSelectedId(note.id);
+      const r = await claimCode(importText, importPassphrase);
+      setSelectedId(r.noteId);
       setImportText("");
       setImportPassphrase("");
-      const ethLabel = formatAssetLabel(pack.amountWei, pack.asset);
       setImportOk({
-        text:
-          idx != null
-            ? `Claimed ${ethLabel} into your private balance. Send it or cash out when you are ready.`
-            : `Claimed ${ethLabel}. It shows up here once your balance refreshes.`,
-        note: pack.note,
+        text: r.already
+          ? `${r.label} is already in your private balance.`
+          : r.linked
+            ? `Claimed ${r.label} into your private balance. Send it or cash out when you are ready.`
+            : `Claimed ${r.label}. It shows up here once your balance refreshes.`,
+        note: r.note,
       });
       setMode("cashout");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
     }
+  }
+
+  /** Sent links > Take back: the same claim, into the sender's own balance. */
+  async function takeBackLink(code: string, passphrase?: string) {
+    const r = await claimCode(code, passphrase);
+    setSelectedId(r.noteId);
   }
 
   // Sticky receive tag for direct private pay
@@ -1535,6 +1612,8 @@ export function MoveView() {
             </div>
           ) : null}
 
+          {mode === "send" && shieldLive && <SentLinks onTakeBack={takeBackLink} />}
+
           {mode === "receive" && (
             <div className="mt-6 space-y-7">
               <section>
@@ -1918,7 +1997,7 @@ export function MoveView() {
               <p>
                 {memoPosted
                   ? "They got a private heads-up, so the payment shows up under Receive on their side. The claim code on the page is a backup."
-                  : "This code is the money. Copy, download or share it now: it can't be shown again. Anything left over stays in your private balance, in this browser."}
+                  : "This code is the money. Copy, download or share it now. A copy stays under Sent links in this browser only, and anything left over stays in your private balance."}
               </p>
               {sentNote && (
                 <p className="mt-3 break-words">

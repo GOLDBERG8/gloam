@@ -195,6 +195,8 @@ type ChainState = {
   /** Next free leaf in the vault tree. */
   nextLeaf: number;
   incoming: DemoIncoming;
+  /** Payments this wallet sent, by lowercased commitment: their leaf, so a claim link can be claimed (or taken back). */
+  sent?: Record<string, number>;
 };
 
 type DemoState = { notes: LocalNote[]; chains: Record<number, ChainState> };
@@ -348,8 +350,15 @@ export function demoLeafIndex(chainId: number, commitment: string): number | nul
   const c = commitment.toLowerCase();
   const note = state().notes.find((n) => n.chainId === chainId && n.commitment.toLowerCase() === c);
   if (note?.leafIndex != null) return note.leafIndex;
+  const sent = chain(chainId)?.sent?.[c];
+  if (sent != null) return sent;
   const incoming = chain(chainId)?.incoming;
   return incoming && incoming.commitment.toLowerCase() === c ? incoming.leafIndex : null;
+}
+
+/** Leaves of payments this wallet sent (claim links it may claim back). */
+export function demoSentLeaves(chainId: number): [string, number][] {
+  return Object.entries(chain(chainId)?.sent ?? {});
 }
 
 /** What opens a leaf: the secret, amount and asset behind it. */
@@ -460,6 +469,8 @@ export type DemoTxEffect = {
   wallet?: [Address, bigint][];
   /** Set when the wallet signed it, so the explorer lists it (relayed ones stay off). */
   activity?: { to: Address; valueWei: bigint };
+  /** Commitments of payments it sent, which take the next leaves as the pool would give them. */
+  sent?: Hex[];
 };
 
 const txs = new Map<string, "pending" | "confirmed">();
@@ -473,6 +484,10 @@ export function submitDemoTx(chainId: number, effect: DemoTxEffect = {}): Hex {
   setTimeout(() => {
     applyWallet(chainId, effect.wallet ?? []);
     const c = chain(chainId);
+    if (c && effect.sent?.length) {
+      c.sent = { ...c.sent };
+      for (const commitment of effect.sent) c.sent[commitment.toLowerCase()] = c.nextLeaf++;
+    }
     if (c && effect.activity) {
       c.activity = [
         {
@@ -511,6 +526,9 @@ export function demoWriteEffect(call: {
       return { wallet: [[args[0] as Address, -(args[1] as bigint)]], activity };
     case "unshield":
       return { wallet: [[args[3] as Address, args[5] as bigint]], activity };
+    case "transfer":
+      // newCommitments[0] is the payment; the change lands with its note.
+      return { activity, sent: [(args[3] as readonly Hex[])[0]] };
     case undefined:
       // A plain send of the native coin.
       return { wallet: [[zeroAddress, -(call.value ?? 0n)]], activity };
