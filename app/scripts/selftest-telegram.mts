@@ -50,6 +50,8 @@ delete process.env.CRON_SECRET;
 const {
   MAX_IMAGE_BYTES,
   TOPIC,
+  chainFix,
+  chainMismatch,
   cleanName,
   cleanReply,
   explicitReply,
@@ -165,6 +167,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (method === "deleteMessage") return reply({ ok: true, result: true });
     if (method === "getChatMemberCount") return reply({ ok: true, result: 123 });
     return reply({ ok: false });
+  }
+  if (url.host === "redis.test") {
+    // an Upstash that has spent its quota: every command comes back with an error
+    const cmds = JSON.parse(String(init?.body ?? "[]")) as unknown[];
+    calls.push({ host: url.host, method: "redis", body: {}, headers });
+    return reply(cmds.map(() => ({ error: "ERR max requests limit exceeded" })));
   }
   if (url.host === "api.anthropic.com") {
     const system = Array.isArray(body.system) ? String((body.system[0] as { text?: string })?.text ?? "") : "";
@@ -1582,6 +1590,54 @@ await test("team chat: a screenshot is read; one showing a secret, or a pasted s
   assert.equal(modelCalls().length, 0);
   assert.ok(String(sends()[0]!.body.text).includes("move your funds to a new wallet now"));
   assert.ok(!JSON.stringify(await dmHistory(YOMI.id)).includes("abandon"));
+});
+
+await test("wrong network: the error is read, answered without the team, and names stay plain", async () => {
+  const pasted =
+    "The current chain of the wallet (id: 4663) does not match the target chain for the transaction (id: 46630 – undefined). Current Chain ID: 4663 Expected Chain ID: 46630 – undefined";
+  assert.deepEqual(chainMismatch(pasted), { wallet: 4663, want: 46630 });
+  assert.deepEqual(chainMismatch("Current Chain ID: 1\nExpected Chain ID: 42431"), { wallet: 1, want: 42431 });
+  assert.equal(chainMismatch("my add failed, chain 46630"), null);
+  assert.equal(chainMismatch("Current Chain ID: 46630 Expected Chain ID: 46630"), null);
+  const fix = chainFix("lyke", { wallet: 4663, want: 46630 });
+  assert.ok(fix.includes("Robinhood Chain mainnet (4663)") && fix.includes("Robinhood Chain testnet (46630)") && fix.includes("Switch to Robinhood Chain"));
+  assert.ok(chainFix("Ada", { wallet: 46630, want: 42431 }).includes("Switch to Tempo"));
+  assert.equal(cleanName("lyke 🦀"), "lyke");
+  assert.equal(cleanName("🇳🇬 Tunde 👍🏾"), "Tunde");
+  assert.ok(knowledgeBlock(false).includes("chain ID 4663"));
+
+  reset();
+  const ghost = user(91, "lyke 🦀");
+  // Redis out of quota: the picture still gets a look (this instance counts instead)
+  process.env.GLOAM_PARTNERS_STORE = "";
+  process.env.UPSTASH_REDIS_REST_URL = "https://redis.test";
+  process.env.UPSTASH_REDIS_REST_TOKEN = "test";
+  try {
+    files.set("shot-chain", PNG);
+    const shot = inTopic(TOPIC.feedback, "", ghost, { text: undefined, photo: photo("shot-chain") });
+    modelReply = "[[SKIP]]";
+    await handleUpdate(upd(shot));
+    modelReply = "Your wallet is on Robinhood Chain mainnet (4663); switch it to the testnet (46630).";
+    await handleUpdate(upd(inTopic(TOPIC.feedback, "@glim_gloam_bot i switched to robinhood but got the same kind of error", ghost, { reply_to_message: shot })));
+    const last = modelCalls()[modelCalls().length - 1]!;
+    const content = (last.body.messages as { content: { type: string }[] }[])[0]!.content;
+    assert.equal(content[0]!.type, "image", "the replied-to screenshot reaches the model");
+    assert.ok(!promptOf(modelCalls().length - 1).includes("could not open"));
+    assert.equal(sends()[sends().length - 1]!.body.text, modelReply);
+
+    // the model has nothing: the pasted error still gets its fix, not a hand-off
+    const glimMsg = { message_id: nextId++, chat, from: BOT, date: 0, text: modelReply, message_thread_id: TOPIC.feedback, is_topic_message: true };
+    modelReply = "";
+    await handleUpdate(upd(inTopic(TOPIC.feedback, pasted, ghost, { reply_to_message: glimMsg })));
+    const answer = String(sends()[sends().length - 1]!.body.text);
+    assert.ok(answer.startsWith("Easy one, lyke. Your wallet is on Robinhood Chain mainnet (4663)."), answer);
+    assert.ok(!answer.includes("Not going to guess"));
+  } finally {
+    process.env.GLOAM_PARTNERS_STORE = "memory";
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  }
+  for (const x of sends()) assert.ok(!/[—\p{Extended_Pictographic}]/u.test(String(x.body.text)));
 });
 
 await test("nothing was ever sent outside the group or the team's private chats", () => {

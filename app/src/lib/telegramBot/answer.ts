@@ -284,20 +284,30 @@ async function callModel(
       cache: "no-store",
       signal: AbortSignal.timeout(o.image ? 30_000 : 20_000),
     });
-    if (!res.ok) return { miss: "failed" };
+    if (!res.ok) {
+      console.warn("telegram: model call failed", o.purpose, res.status);
+      return { miss: "failed" };
+    }
     const json = (await res.json()) as ApiResponse;
-    if (json.stop_reason === "refusal") return { miss: "failed" };
+    if (json.stop_reason === "refusal") {
+      console.warn("telegram: model refused", o.purpose);
+      return { miss: "failed" };
+    }
     const text = (json.content ?? [])
       .filter((b) => b.type === "text" && b.text)
       .map((b) => b.text)
       .join("")
       .trim();
-    if (!text) return { miss: "failed" };
+    if (!text) {
+      console.warn("telegram: model gave no text", o.purpose, json.stop_reason);
+      return { miss: "failed" };
+    }
     if (json.stop_reason !== "max_tokens") return { text };
     // cut off mid-thought: keep the full sentences
     const end = Math.max(text.lastIndexOf(". "), text.lastIndexOf("! "), text.lastIndexOf("? "), text.lastIndexOf("\n"));
     return end > 40 ? { text: text.slice(0, end + 1) } : { miss: "failed" };
-  } catch {
+  } catch (e) {
+    console.warn("telegram: model call failed", o.purpose, e instanceof Error ? e.name : "unknown");
     return { miss: "failed" };
   }
 }

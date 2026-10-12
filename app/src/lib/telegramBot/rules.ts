@@ -652,6 +652,8 @@ export function cleanName(raw: string | undefined, fallback = "friend"): string 
     .split(/\s+[|/\u00b7\u2022]\s+/)[0]!
     .replace(/\b([\p{L}\p{N}_-]+)\.(?:sol|eth|base|ton|bnb|arb|sui|apt|lens)\b/giu, "$1")
     .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+    // emoji, skin tones, flags and their joiners: the helper writes names plain
+    .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0E}\u{FE0F}\u{20E3}]/gu, "")
     .replace(LINK_RE, "")
     .replace(/@\w+/g, "")
     .replace(/<[^>]*>/g, "")
@@ -743,4 +745,52 @@ export function memoryText(raw: string): string | null {
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ---------------------------------------------------------------- wrong network
+
+/** Chains people's wallets end up on, by id. Gloam is on the two testnets only. */
+const CHAIN_NAMES: Record<number, string> = {
+  1: "Ethereum mainnet",
+  4663: "Robinhood Chain mainnet",
+  46630: "Robinhood Chain testnet",
+  42431: "Tempo testnet",
+};
+
+/** The wallet's network and the one the app wanted, from a pasted wrong-network error. */
+export type ChainMismatch = { wallet: number; want: number };
+
+/**
+ * Reads viem's "The current chain of the wallet (id: 4663) does not match the
+ * target chain for the transaction (id: 46630 ...)" and the "Current Chain ID /
+ * Expected Chain ID" lines some wallets show. Null for anything else.
+ */
+export function chainMismatch(text: string): ChainMismatch | null {
+  const t = text.replace(/\s+/g, " ");
+  const viem = /current chain of the (?:wallet|connector) \(id: ?(\d{1,7})\) does not match the (?:target chain for the transaction|connection's chain) \(id: ?(\d{1,7})/i.exec(t);
+  const lines = /current chain id:? ?(\d{1,7}).{0,40}?expected chain id:? ?(\d{1,7})/i.exec(t);
+  const m = viem ?? lines;
+  if (!m) return null;
+  const wallet = Number(m[1]);
+  const want = Number(m[2]);
+  return wallet !== want ? { wallet, want } : null;
+}
+
+const chainLabel = (id: number) => CHAIN_NAMES[id] ?? `chain ${id}`;
+
+/** The fix for a wrong-network error, in the helper's voice. */
+export function chainFix(name: string, m: ChainMismatch): string {
+  const want = m.want === 42431 ? "Tempo testnet (42431)" : m.want === 46630 ? "Robinhood Chain testnet (46630)" : chainLabel(m.want);
+  const button = m.want === 42431 ? "Switch to Tempo" : "Switch to Robinhood Chain";
+  const why =
+    m.wallet === 4663
+      ? "Your wallet is on Robinhood Chain mainnet (4663). Gloam runs on the testnet, so the wallet has to be on " + want + "."
+      : `Your wallet is on ${chainLabel(m.wallet)} and the app is on ${want}, so the wallet refuses the transaction.`;
+  return (
+    `Easy one, ${name}. ${why} Tap "${button}" on the wallet button at the top of the app (or Settings > Network > Add to wallet), ` +
+    `approve it in your wallet, then try again. If your wallet won't switch, add the testnet by hand: ` +
+    (m.want === 42431
+      ? "RPC https://rpc.moderato.tempo.xyz, chain ID 42431, currency USD."
+      : "RPC https://rpc.testnet.chain.robinhood.com, chain ID 46630, currency ETH.")
+  );
 }

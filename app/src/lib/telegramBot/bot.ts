@@ -51,6 +51,8 @@ import {
   MAX_IMAGE_BYTES,
   SHORT_CAPTION_WORDS,
   TOPIC,
+  chainFix,
+  chainMismatch,
   cleanName,
   cleanReply,
   explicitReply,
@@ -592,7 +594,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   const repliedText = !target && replied ? scanCodes(messageText(replied)).masked : "";
   const inHistory = history.some((l) => l.t === repliedText);
 
-  const { reply: answer, sentinel } = await compose({
+  const { reply: modelAnswer, sentinel } = await compose({
     c,
     me,
     from,
@@ -624,6 +626,9 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   }
   if (sentinel === "skip") return;
 
+  // a pasted wrong-network error has one fix, so it never waits on the model or the team
+  const mismatch = modelAnswer ? null : chainMismatch([targetText, text, repliedText].filter(Boolean).join(" "));
+  const answer = modelAnswer ?? (mismatch ? chainFix(askerName, mismatch) : null);
   const vague = !image && isVague(target ? `${targetText} ${text}` : text, c.persona);
   const fallback = fallbackKind({ vague, askerIsAdmin: isTrusted(asker, c), adminInvolved, handedOff });
   const reply = answer ?? (saved ? bugThanks(name) : tagged ? cantAnswer(c, askerName, topic, fallback) : null);

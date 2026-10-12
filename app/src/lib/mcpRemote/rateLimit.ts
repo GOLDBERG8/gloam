@@ -93,7 +93,11 @@ async function redisIncr(key: string, windowSec: number): Promise<number> {
   if (!res.ok) throw new Error(`redis ${res.status}`);
   const json = (await res.json()) as { result?: unknown; error?: string }[];
   const n = Number(json?.[0]?.result);
-  if (!Number.isFinite(n) || n < 1) throw new Error("redis: bad INCR result");
+  if (!Number.isFinite(n) || n < 1) {
+    // Upstash puts the reason (a spent quota, say) in the command's error
+    const why = typeof json?.[0]?.error === "string" ? `: ${json[0].error.slice(0, 160)}` : "";
+    throw new Error(`redis: bad INCR result${why}`);
+  }
   return n;
 }
 

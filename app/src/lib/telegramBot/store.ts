@@ -359,8 +359,12 @@ const lockedKey = (chatId: number, userId: number) => `${PREFIX}locked:${chatId}
 const handOffKey = (chatId: number, userId: number) => `${PREFIX}handoff:${chatId}:${userId}`;
 
 /** Takes one of this hour's picture reads. False once the cap is reached, or when the store is down. */
+/** This instance's own picture count for the hour, used while Redis is out. */
+const memImages = new Map<number, number>();
+
 export async function takeImageSlot(now = Date.now()): Promise<boolean> {
-  const key = `${PREFIX}images:${hourOf(now)}`;
+  const hour = hourOf(now);
+  const key = `${PREFIX}images:${hour}`;
   try {
     const [n] = await kv([
       ["INCR", key],
@@ -368,7 +372,11 @@ export async function takeImageSlot(now = Date.now()): Promise<boolean> {
     ]);
     return Number(n) <= IMAGES_PER_HOUR;
   } catch {
-    return false;
+    // Redis down is no reason to go blind: count here instead, same cap
+    const n = (memImages.get(hour) ?? 0) + 1;
+    memImages.clear();
+    memImages.set(hour, n);
+    return n <= IMAGES_PER_HOUR;
   }
 }
 
