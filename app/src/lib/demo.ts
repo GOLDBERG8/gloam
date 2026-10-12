@@ -13,9 +13,11 @@ import {
   useAccount,
   useBalance,
   useChainId,
+  useConfig,
   useReadContract,
   useReadContracts,
   useSendTransaction,
+  useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract,
   type ResolvedRegister,
@@ -176,6 +178,42 @@ function useDemoSigner() {
   return { ...state, sign, reset };
 }
 
+/** A wallet on the wrong network rejects a call with this, from viem. */
+const CHAIN_MISMATCH = /does not match the target chain|does not match the connection's chain/i;
+
+/**
+ * Moves the wallet to the network a call is for before the call, when it is
+ * somewhere else (Robinhood Chain mainnet, say). Without it the wallet rejects
+ * the call with a chain mismatch and the person has to fix it by hand.
+ */
+function useWalletOnChain() {
+  const { network } = useNetwork();
+  const { chainId: walletChain } = useAccount();
+  const { chains } = useConfig();
+  const { switchChainAsync } = useSwitchChain();
+  const [switching, setSwitching] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const nameOf = useCallback((id: number | undefined) => chains.find((c) => c.id === id)?.name ?? "the network you picked", [chains]);
+  const first = useCallback(
+    (want: number | undefined, then: () => void) => {
+      setError(null);
+      if (want === undefined || walletChain === undefined || walletChain === want) return then();
+      setSwitching(true);
+      switchChainAsync({ chainId: want as GloamChainId })
+        .then(then, () => setError(new Error(`Switch your wallet to ${nameOf(want)} and try again.`)))
+        .finally(() => setSwitching(false));
+    },
+    [walletChain, switchChainAsync, nameOf]
+  );
+  const explain = useCallback(
+    (e: Error | null) =>
+      e && CHAIN_MISMATCH.test(e.message) ? new Error(`Your wallet is on another network. Switch it to ${network.chain.name} and try again.`) : e,
+    [network.chain.name]
+  );
+  const reset = useCallback(() => setError(null), []);
+  return { first, switching, error, explain, reset };
+}
+
 type WriteContract = UseWriteContractReturnType<ResolvedRegister["config"]>["writeContract"];
 type SendTransaction = UseSendTransactionReturnType<ResolvedRegister["config"]>["sendTransaction"];
 
@@ -189,14 +227,32 @@ type AppWrite<F> = { data: Hex | undefined; isPending: boolean; error: Error | n
 export function useAppWriteContract(): AppWrite<{ writeContract: WriteContract }> {
   const demo = useDemo();
   const real = useWriteContract();
+  const onChain = useWalletOnChain();
   const signer = useDemoSigner();
   const { sign } = signer;
   const writeContract = useCallback<WriteContract>(
     (args) => sign(args as unknown as DemoCall),
     [sign]
   );
+  const { first } = onChain;
+  const realWrite = real.writeContract;
+  const realReset = real.reset;
+  const writeOnChain = useCallback<WriteContract>(
+    (args, opts) => first((args as { chainId?: number }).chainId, () => realWrite(args, opts)),
+    [first, realWrite]
+  );
+  const resetBoth = useCallback(() => {
+    onChain.reset();
+    realReset();
+  }, [onChain, realReset]);
   if (!demo) {
-    return { writeContract: real.writeContract, data: real.data, isPending: real.isPending, error: real.error, reset: real.reset };
+    return {
+      writeContract: writeOnChain,
+      data: real.data,
+      isPending: real.isPending || onChain.switching,
+      error: onChain.error ?? onChain.explain(real.error),
+      reset: resetBoth,
+    };
   }
   return { writeContract, data: signer.hash, isPending: signer.pending, error: null, reset: signer.reset };
 }
@@ -205,6 +261,7 @@ export function useAppWriteContract(): AppWrite<{ writeContract: WriteContract }
 export function useAppSendTransaction(): AppWrite<{ sendTransaction: SendTransaction }> {
   const demo = useDemo();
   const real = useSendTransaction();
+  const onChain = useWalletOnChain();
   const signer = useDemoSigner();
   const { sign } = signer;
   const sendTransaction = useCallback<SendTransaction>(
@@ -214,8 +271,25 @@ export function useAppSendTransaction(): AppWrite<{ sendTransaction: SendTransac
     },
     [sign]
   );
+  const { first } = onChain;
+  const realSend = real.sendTransaction;
+  const realReset = real.reset;
+  const sendOnChain = useCallback<SendTransaction>(
+    (args, opts) => first((args as { chainId?: number }).chainId, () => realSend(args, opts)),
+    [first, realSend]
+  );
+  const resetBoth = useCallback(() => {
+    onChain.reset();
+    realReset();
+  }, [onChain, realReset]);
   if (!demo) {
-    return { sendTransaction: real.sendTransaction, data: real.data, isPending: real.isPending, error: real.error, reset: real.reset };
+    return {
+      sendTransaction: sendOnChain,
+      data: real.data,
+      isPending: real.isPending || onChain.switching,
+      error: onChain.error ?? onChain.explain(real.error),
+      reset: resetBoth,
+    };
   }
   return { sendTransaction, data: signer.hash, isPending: signer.pending, error: null, reset: signer.reset };
 }
