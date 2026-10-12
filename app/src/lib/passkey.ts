@@ -37,6 +37,27 @@ export class PasskeyError extends Error {
   }
 }
 
+/** Shown where passkeys are hidden because the page is open inside a wallet app. */
+export const WALLET_BROWSER_NOTE =
+  "Passkeys don't work in a wallet app's built-in browser. Use your wallet here, or open gloam.trade in Safari or Chrome to use a passkey.";
+
+/** A passkey call that fails this fast never showed a prompt: the browser refused it outright. */
+const NO_PROMPT_MS = 1_000;
+export const PROMPT_DID_NOT_OPEN =
+  "The passkey prompt didn't open in this browser. Nothing changed. If you're in a wallet app's browser, use your wallet instead, or open gloam.trade in Safari or Chrome.";
+
+/** Wallet apps' own browsers (MetaMask, Trust, Coinbase, OKX, Bitget, Phantom, ...), which can't show passkey prompts. */
+const WALLET_APP_UA = /MetaMaskMobile|Trust\/|TrustWallet|CoinbaseWallet|OKApp|BitKeep|Bitget|Phantom|Rainbow|imToken|TokenPocket|SafePal|Rabby|Zerion/i;
+
+export function inWalletBrowser(): boolean {
+  if (typeof navigator === "undefined" || typeof window === "undefined") return false;
+  const ua = navigator.userAgent;
+  if (WALLET_APP_UA.test(ua)) return true;
+  // an in-app web view (Android "; wv)", or iOS without Safari's token) with an injected wallet
+  const webView = /; wv\)/.test(ua) || (/(iPhone|iPad|iPod)/.test(ua) && /AppleWebKit/.test(ua) && !/Safari\//.test(ua));
+  return webView && typeof (window as { ethereum?: unknown }).ethereum !== "undefined";
+}
+
 /** "no": skip the button. "yes" / "maybe": try (only the passkey itself can say for sure). */
 export type PasskeySupport = "yes" | "maybe" | "no";
 
@@ -45,7 +66,8 @@ export async function passkeySupport(): Promise<PasskeySupport> {
     typeof window === "undefined" ||
     !window.isSecureContext ||
     typeof window.PublicKeyCredential === "undefined" ||
-    !navigator.credentials?.create
+    !navigator.credentials?.create ||
+    inWalletBrowser()
   ) {
     return "no";
   }
@@ -64,9 +86,10 @@ export async function passkeySupport(): Promise<PasskeySupport> {
   return "maybe";
 }
 
-function mapError(e: unknown): PasskeyError {
+function mapError(e: unknown, ms = Infinity): PasskeyError {
   if (e instanceof PasskeyError) return e;
   const name = e instanceof DOMException ? e.name : "";
+  if (name === "NotAllowedError" && ms < NO_PROMPT_MS) return new PasskeyError(PROMPT_DID_NOT_OPEN, "unsupported");
   if (name === "NotAllowedError" || name === "AbortError") {
     return new PasskeyError("The passkey prompt was closed. Nothing changed.", "cancelled");
   }
@@ -93,6 +116,7 @@ function prfFirst(cred: PublicKeyCredential): Uint8Array | null {
 /** One passkey prompt: the PRF output for this vault's passkey. */
 async function evaluate(record: Pick<PasskeyWrapRecord, "credentialId" | "rpId" | "prfSalt">): Promise<Uint8Array> {
   let cred: PublicKeyCredential | null;
+  const t0 = Date.now();
   try {
     cred = (await navigator.credentials.get({
       publicKey: {
@@ -105,7 +129,7 @@ async function evaluate(record: Pick<PasskeyWrapRecord, "credentialId" | "rpId" 
       },
     })) as PublicKeyCredential | null;
   } catch (e) {
-    throw mapError(e);
+    throw mapError(e, Date.now() - t0);
   }
   if (!cred) throw new PasskeyError("The passkey prompt was closed. Nothing changed.", "cancelled");
   const out = prfFirst(cred);
@@ -130,6 +154,7 @@ export async function protectWithPasskey(): Promise<void> {
   const rpId = window.location.hostname;
   const prfSalt = randomBytes(32);
   let cred: PublicKeyCredential | null;
+  const t0 = Date.now();
   try {
     cred = (await navigator.credentials.create({
       publicKey: {
@@ -151,7 +176,7 @@ export async function protectWithPasskey(): Promise<void> {
       },
     })) as PublicKeyCredential | null;
   } catch (e) {
-    throw mapError(e);
+    throw mapError(e, Date.now() - t0);
   }
   if (!cred) throw new PasskeyError("The passkey prompt was closed. Nothing changed.", "cancelled");
 

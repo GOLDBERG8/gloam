@@ -16,6 +16,7 @@
 import { hexToBytes, keccak256, type Address, type Hex } from "viem";
 import { readDemo } from "./demoFlag";
 import { getAllNotes, onNotesSaved, openJson, sealJson, setAllNotes } from "./noteVault";
+import { PROMPT_DID_NOT_OPEN } from "./passkey";
 import { RECEIVE_IDENTITY_EVENT, exportReceiveKeys, importReceiveKeys } from "./receiveTag";
 import type { LocalNote } from "./shield";
 
@@ -141,9 +142,13 @@ function randomBytes(n: number): Uint8Array<ArrayBuffer> {
 const NO_PRF =
   "This browser or passkey can't create a recovery key. Use Chrome, Safari or Edge with a passkey saved to your Google or Apple account, or use your wallet.";
 
-function passkeyError(e: unknown): RecoveryError {
+/** A passkey call that fails this fast never showed a prompt: the browser refused it outright. */
+const NO_PROMPT_MS = 1_000;
+
+function passkeyError(e: unknown, ms = Infinity): RecoveryError {
   if (e instanceof RecoveryError) return e;
   const name = e instanceof DOMException ? e.name : "";
+  if (name === "NotAllowedError" && ms < NO_PROMPT_MS) return new RecoveryError(PROMPT_DID_NOT_OPEN, "unsupported");
   if (name === "NotAllowedError" || name === "AbortError") {
     return new RecoveryError("The passkey prompt was closed. Nothing changed.", "cancelled");
   }
@@ -162,6 +167,7 @@ function prfOutput(cred: PublicKeyCredential | null): Uint8Array | null {
 
 async function passkeyGet(rpId: string, salt: Uint8Array<ArrayBuffer>, credentialId?: ArrayBuffer): Promise<Uint8Array> {
   let cred: PublicKeyCredential | null;
+  const t0 = Date.now();
   try {
     cred = (await navigator.credentials.get({
       publicKey: {
@@ -174,7 +180,7 @@ async function passkeyGet(rpId: string, salt: Uint8Array<ArrayBuffer>, credentia
       },
     })) as PublicKeyCredential | null;
   } catch (e) {
-    throw passkeyError(e);
+    throw passkeyError(e, Date.now() - t0);
   }
   if (!cred) throw new RecoveryError("The passkey prompt was closed. Nothing changed.", "cancelled");
   const out = prfOutput(cred);
@@ -196,6 +202,7 @@ export async function passkeySecret(mode: "create" | "use"): Promise<Uint8Array>
   if (mode === "use") return passkeyGet(rpId, salt);
 
   let cred: PublicKeyCredential | null;
+  const t0 = Date.now();
   try {
     cred = (await navigator.credentials.create({
       publicKey: {
@@ -212,7 +219,7 @@ export async function passkeySecret(mode: "create" | "use"): Promise<Uint8Array>
       },
     })) as PublicKeyCredential | null;
   } catch (e) {
-    throw passkeyError(e);
+    throw passkeyError(e, Date.now() - t0);
   }
   if (!cred) throw new RecoveryError("The passkey prompt was closed. Nothing changed.", "cancelled");
   const direct = prfOutput(cred);

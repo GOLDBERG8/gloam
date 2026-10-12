@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useSignMessage } from "wagmi";
 import { useAppAccount } from "@/lib/demo";
-import { passkeySupport } from "@/lib/passkey";
+import { WALLET_BROWSER_NOTE, inWalletBrowser, passkeySupport } from "@/lib/passkey";
 import {
   RECOVERY_MESSAGE,
   RecoveryError,
@@ -57,13 +57,18 @@ function useRecovery() {
   const { address, isConnected, connector, demo } = useAppAccount();
   const { signMessageAsync } = useSignMessage();
   const [passkeyOk, setPasskeyOk] = useState(false);
+  const [walletBrowser, setWalletBrowser] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [message, setMessage] = useState<Message>(null);
 
   useEffect(() => {
     startRecoverySync();
     let live = true;
-    void passkeySupport().then((s) => live && setPasskeyOk(s !== "no"));
+    void passkeySupport().then((s) => {
+      if (!live) return;
+      setPasskeyOk(s !== "no");
+      setWalletBrowser(inWalletBrowser());
+    });
     return () => {
       live = false;
     };
@@ -131,7 +136,7 @@ function useRecovery() {
       return "Recovery is off and the backup is deleted. Your balance stays in this browser.";
     });
 
-  return { state, active, walletOk, passkeyOk, busy, message, turnOn, restore, save, off };
+  return { state, active, walletOk, passkeyOk, walletBrowser, busy, message, turnOn, restore, save, off };
 }
 
 function Note({ message }: { message: Message }) {
@@ -264,6 +269,9 @@ export function RecoverySettingsCard() {
                 </button>
               )}
             </Choice>
+            {r.walletBrowser && !r.passkeyOk && (
+              <p className="py-2 text-[12px] leading-relaxed text-mute">{WALLET_BROWSER_NOTE}</p>
+            )}
             {r.message && (
               <div className="py-3">
                 <Note message={r.message} />
