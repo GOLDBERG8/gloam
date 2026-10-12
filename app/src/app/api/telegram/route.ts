@@ -15,7 +15,9 @@ import type { TgUpdate } from "@/lib/telegramBot/telegram";
  *     random string), ANTHROPIC_API_KEY, and optionally TELEGRAM_GROUP_ID,
  *     TELEGRAM_ADMIN_HANDLES, TELEGRAM_OWNER_HANDLES (default dukedotsol),
  *     TELEGRAM_OWNER_IDS (wins over handles), TELEGRAM_BOT_MODEL,
- *     TELEGRAM_BOT_PERSONA, GLOAM_TESTING_OPEN, and for the daily report
+ *     TELEGRAM_BOT_PERSONA, GLOAM_TESTING_OPEN, TELEGRAM_ADMIN_IDS,
+ *     TELEGRAM_BOT_DAILY_ANSWERS / _CHECKS / _DMS (model calls a day; DMs
+ *     default 200), and for the daily report
  *     TELEGRAM_DAILY_REPORT=true plus CRON_SECRET. Memory, counters, welcomes
  *     and bug reports use the Upstash Redis already set for the partner
  *     program. Redeploy.
@@ -23,10 +25,12 @@ import type { TgUpdate } from "@/lib/telegramBot/telegram";
  *       node app/scripts/telegram-webhook.mjs
  *  5. Owner: open a private chat with the bot and send /start. That lists the
  *     commands and lets the daily report find you. /report sends the last 24
- *     hours on demand.
+ *     hours on demand. Admins can open one too.
  *
- * The bot talks only in the group. Private messages from anyone but the owner
- * get no reply at all, and the owner's chat is reports only.
+ * In private the bot talks only with the owner and the admins: they can just
+ * chat with it (what people asked, bugs, drafts, how to answer a member),
+ * using the group's live numbers. It never posts or acts from a private chat.
+ * Private messages from anyone else get no reply at all.
  *
  * Telegram sends the secret in X-Telegram-Bot-Api-Secret-Token; anything
  * without it gets a 401. A real update gets a 200 straight away and is

@@ -103,9 +103,24 @@ export function parseCommand(text: string, botUsername?: string): Command | null
   };
 }
 
-/** The owner asking for the report in plain words: "report", "daily report", "stats", "how was today". */
+const REPORT_LEAD = String.raw`(?:(?:hey|hi|yo|ok|okay|so|pls|please|can\s+i\s+(?:get|have|see)|send(?:\s+me)?|give\s+me|show\s+me|get\s+me|the|a|my|today'?s|daily|full|group|24h|24\s*hours?|last\s+24\s*hours?)[\s,]+)*`;
+const REPORT_ASK = new RegExp(
+  String.raw`^\/?${REPORT_LEAD}(?:report|stats|statistics|summary)(?:\s+(?:pls|please|for\s+today|today|now))*[\s?.!]*$`,
+  "i",
+);
+const DAY_ASK = new RegExp(
+  String.raw`^${REPORT_LEAD}how\s+(?:was|is|did)\s+(?:today|the\s+day|the\s+group|it\s+go)(?:\s+(?:today|so\s+far))?[\s?.!]*$`,
+  "i",
+);
+
+/**
+ * The owner asking for the report in plain words, and nothing else: "report",
+ * "daily report pls", "stats?", "how was today". Anything more ("summary of
+ * the Help topic", "draft a post about the report") is a chat.
+ */
 export function wantsReport(text: string): boolean {
-  return /\b(?:report|stats|statistics|summary)\b|\bhow\s+(?:was|is|did)\s+(?:today|the\s+day|the\s+group|it\s+go)\b/i.test(norm(text));
+  const t = norm(text).trim();
+  return REPORT_ASK.test(t) || DAY_ASK.test(t);
 }
 
 const PEOPLE = String.raw`(?:boss\s+duke|duke|the\s+team|an?\s+admin|the\s+admins)`;
@@ -545,10 +560,25 @@ const HUMAN_CLAIM =
   /\bi(?:'m| am)\s+(?:a\s+)?(?:real\s+)?(?:human|person|duke|an?\s+admin|a\s+mod(?:erator)?|a\s+team\s+member|(?:on|part\s+of)\s+the\s+(?:gloam\s+)?team)\b|\bi(?:'m| am)\s+not\s+a\s+bot\b/i;
 const AS_AN_AI = /[^.!?\n]*\bas an ai\b[^.!?\n]*[.!?]?\s*/gi;
 const MAX_REPLY = 900;
+/** A 0x contract or wallet address (40 hex characters; a 64-character hash does not match). */
+const EVM_ADDRESS = /\b0x[0-9a-fA-F]{40}\b/;
+const TOKEN_WORD = String.raw`(?:\b(?:tokens?|tge|presale|fdv|market\s*cap|valuation)\b|(?<![\w$])\$[A-Za-z]{2,10}\b)`;
+const MONEY = String.raw`(?:\$\s?\d[\d,.]*|\d[\d,.]*\s?(?:usd|usdc|usdt|cents?)\b)`;
+/** A token next to a price in the same sentence: "$GLOAM at $0.05", "FDV of $20m", "$0.10 per token". */
+const TOKEN_PRICE = new RegExp(
+  String.raw`${TOKEN_WORD}[^.!?\n]{0,80}?${MONEY}|${MONEY}[^.!?\n]{0,40}?\b(?:per\s+token|a\s+token|each\s+token|fdv|market\s*cap|valuation)\b`,
+  "i",
+);
 
 export type ReplyPolicy = {
   /** Handles the reply may name, without "@": admins, the asker, the bot. */
   handles: string[];
+  /** Longest reply in characters, cut at a full sentence. The group's default is 900. */
+  maxChars?: number;
+  /** A private chat with the team: also never a contract address or a token price, even in a draft. */
+  team?: boolean;
+  /** Values that must never appear in a reply: the deployment's own keys and tokens. */
+  secrets?: string[];
 };
 
 /** A link the helper may share: the website, the group, the X account. */
@@ -594,8 +624,10 @@ export function tidyReply(raw: string): string {
  * that mainnet is live or a date for it, or claiming to be a person.
  */
 export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
-  const text = clip(tidyReply(raw), MAX_REPLY);
+  const text = clip(tidyReply(raw), policy.maxChars ?? MAX_REPLY);
   if (!text) return null;
+  if (policy.secrets?.some((v) => v.length >= 8 && raw.includes(v))) return null;
+  if (policy.team && (EVM_ADDRESS.test(text) || TOKEN_PRICE.test(text))) return null;
   if ((text.match(LINK_RE) ?? []).some((l) => !linkAllowed(l))) return null;
   if ((text.match(EMAIL_RE) ?? []).some((e) => e.toLowerCase() !== "hello@gloam.trade")) return null;
   const okHandles = new Set(["gloamtrade", "gloamhq", ...policy.handles.map((h) => h.toLowerCase())]);
@@ -680,6 +712,23 @@ export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
 
 /** One line of a thread's recent history, as kept in the store. */
 export type ChatLine = { n: string; t: string; b?: 1 };
+
+/**
+ * Text fit to keep in a private chat's memory with the team, or null for
+ * anything shaped like a seed phrase or key. Codes are kept as labels. Unlike
+ * the group's memory it keeps line breaks (drafts) and scam-shaped text (an
+ * admin asking how to answer a scammer).
+ */
+export function teamMemoryText(raw: string, max: number): string | null {
+  const text = scanCodes(raw).masked;
+  if (secretLeak(text)) return null;
+  const t = text
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return t ? t.slice(0, max) : null;
+}
 
 /**
  * Text fit to keep in thread memory, or null for anything that looks like a

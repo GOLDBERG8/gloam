@@ -9,8 +9,10 @@
  *  - whole updates end to end, with Telegram and the model stubbed: replies go
  *    to the right topic, duplicates are dropped, limits hold, welcomes batch,
  *    bug reports are saved, other chats are ignored
- *  - private chats: silence for everyone but the owner, whose chat is reports
- *    only; the counters behind the report; the report with no data; the cron
+ *  - private chats: silence for everyone but the owner and the admins, who can
+ *    chat (the team prompt, the live context, memory, the DM cap, pictures,
+ *    the reply guards); the owner's /report; the counters behind the report;
+ *    the report with no data; the cron
  *  - payment codes, addresses and links: the classifier, the daily heads-up,
  *    and that none of them trips the secret or scam checks
  *  - pictures (getFile and the download stubbed): a question with a
@@ -71,16 +73,19 @@ const {
   secretLeak,
   tidyReply,
   topicOf,
+  teamMemoryText,
   wantsReport,
   webhookSecretOk,
   welcomeHtml,
 } = await import("../src/lib/telegramBot/rules");
 const { botConfig, handleUpdate } = await import("../src/lib/telegramBot/bot");
-const { systemPrompt, userPrompt } = await import("../src/lib/telegramBot/answer");
+const { DEFAULT_DAILY_DMS, systemPrompt, teamSystemPrompt, userPrompt } = await import("../src/lib/telegramBot/answer");
 const { knowledgeBlock } = await import("../src/lib/telegramBot/knowledge");
 const { personaName } = await import("../src/lib/telegramBot/persona");
-const { IMAGES_PER_HOUR, listBugReports, readLast24h, rememberOwnerChat, takeImageSlot } = await import("../src/lib/telegramBot/store");
-const { buildReport, formatReport } = await import("../src/lib/telegramBot/report");
+const { DM_TTL_SEC, IMAGES_PER_HOUR, dmHistory, listBugReports, readLast24h, rememberOwnerChat, takeImageSlot } = await import(
+  "../src/lib/telegramBot/store"
+);
+const { buildReport, formatReport, formatTeamContext } = await import("../src/lib/telegramBot/report");
 const { kv, resetMemoryKv } = await import("../src/lib/partnersKv");
 const { POST: telegramPost } = await import("../src/app/api/telegram/route");
 const { GET: cronGet } = await import("../src/app/api/telegram/report/route");
@@ -118,6 +123,9 @@ const upd = (message: TgMessage): TgUpdate => ({ update_id: nextId++, message })
 const dm = (from: TgUser, text: string): TgMessage => ({ message_id: nextId++, chat: { id: from.id, type: "private" }, from, date: 0, text });
 /** The default owner handle, in different case on purpose. */
 const OWNER = user(500, "Duke", "DukeDotSol");
+/** An admin by handle (TELEGRAM_ADMIN_HANDLES has yomi_ops), and one named only by id when a test sets TELEGRAM_ADMIN_IDS. */
+const YOMI = user(600, "Yomi", "Yomi_Ops");
+const ADMIN_BY_ID = user(777, "Tolu");
 
 // ---------------------------------------------------------------- fetch stub
 
@@ -180,6 +188,10 @@ function reset() {
   classifierReply = "NO";
   // each test starts with fresh answer limits (they live in process memory here)
   (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
+}
+/** The system blocks of the n-th model call of this test: the fixed prompt, then (in a DM) the live context. */
+function systemOf(n = 0): string[] {
+  return (modelCalls()[n]!.body.system as { text: string }[]).map((b) => b.text);
 }
 /** The text the model was sent, from the n-th model call of this test. */
 function promptOf(n = 0): string {
@@ -266,8 +278,21 @@ await test("bug reports: a problem word and a few words, not praise", () => {
 });
 
 await test("report words and admin hand-offs", () => {
-  for (const t of ["report", "/report", "Daily report pls", "stats?", "how was today", "How did it go"]) assert.ok(wantsReport(t), t);
-  for (const t of ["hello", "thanks", "I reported a bug yesterday"]) assert.ok(!wantsReport(t), t);
+  for (const t of ["report", "/report", "Daily report pls", "stats?", "how was today", "How did it go", "send me the report", "Can I get the daily report?"]) {
+    assert.ok(wantsReport(t), t);
+  }
+  // only the request on its own; anything more is a chat about it
+  for (const t of [
+    "hello",
+    "thanks",
+    "I reported a bug yesterday",
+    "summary of the Help topic",
+    "draft a post about the daily report",
+    "any bug reports today?",
+    "hey glim how was today in the group?",
+  ]) {
+    assert.ok(!wantsReport(t), t);
+  }
   assert.ok(handsToAdmin("I don't want to guess. An admin will follow up here."));
   assert.ok(handsToAdmin("Ha, classic testnet. I'll take this to Boss Duke."));
   assert.ok(handsToAdmin("Let me run it by the admins."));
@@ -796,15 +821,19 @@ await test("/bug saves a report and /help gives the guide in the group", async (
   assert.equal(modelCalls().length, 0);
 });
 
-await test("a DM from anyone but the owner gets no reply and no model call", async () => {
+await test("a DM from anyone but the owner or an admin gets no reply and no model call", async () => {
   reset();
   const ned = user(60, "Ned", "ned_n");
-  for (const text of ["what is gloam?", "/start", "/help", "/report", "/bug the faucet is broken", "report", SEED]) {
+  for (const text of ["what is gloam?", "hey Glim, can we chat?", "/start", "/help", "/report", "/bug the faucet is broken", "report", SEED]) {
     await handleUpdate(upd(dm(ned, text)));
   }
-  // the owner's first name is not enough
+  // a screenshot is not even fetched
+  files.set("shot-stranger", PNG);
+  await handleUpdate(upd({ ...dm(ned, ""), text: undefined, caption: "what is this?", photo: photo("shot-stranger") }));
+  // the owner's first name, or an admin's handle with something added, is not enough
   await handleUpdate(upd(dm(user(61, "Duke", "dukedotsol_fan"), "/report")));
-  assert.equal(calls.filter((x) => x.method === "sendMessage" || x.method === "deleteMessage").length, 0);
+  await handleUpdate(upd(dm(user(62, "Yomi", "yomi_ops_2"), "what did people ask today?")));
+  assert.equal(calls.filter((x) => x.method === "sendMessage" || x.method === "deleteMessage" || x.method === "getFile").length, 0);
   assert.equal(modelCalls().length, 0);
 });
 
@@ -900,12 +929,14 @@ await test("testing flag: closed by default, open with GLOAM_TESTING_OPEN=true",
   assert.equal(botConfig().dailyReport, false);
 });
 
-await test("the owner's DM: /start lists the commands, anything else gets the hint", async () => {
+await test("the owner's DM: /start lists the commands and says you can just talk", async () => {
   reset();
   await handleUpdate(upd(dm(OWNER, "/start")));
-  assert.ok(String(sends()[0]!.body.text).startsWith("Owner commands\n/report - the last 24 hours in the group"));
-  await handleUpdate(upd(dm(OWNER, "hello there")));
-  assert.equal(sends()[1]!.body.text, "Send /report for the last 24 hours in the group.");
+  const help = String(sends()[0]!.body.text);
+  assert.ok(help.startsWith("Owner commands\n/report - the last 24 hours in the group"));
+  assert.ok(help.includes("just talk to me here, no command needed"));
+  await handleUpdate(upd(dm(OWNER, "/bug something")));
+  assert.equal(sends()[1]!.body.text, help, "an unknown command gets the same list");
   assert.equal(modelCalls().length, 0);
   for (const x of sends()) assert.equal(x.body.chat_id, OWNER.id);
 });
@@ -1269,10 +1300,294 @@ await test("daily report cron: needs CRON_SECRET, off by default, only to owners
   delete process.env.CRON_SECRET;
 });
 
-await test("nothing was ever sent outside the group or the owners' private chats", () => {
+// ---------------------------------------------------------------- the team's private chats
+
+await test("team chat: the owner just talks and gets a real reply, as Boss Duke, in the DM only", async () => {
+  reset();
+  modelReply = "Quiet one so far, Boss Duke. Two people asked about Recovery.";
+  await handleUpdate(upd(dm(OWNER, "hey Glim, how's the group doing?")));
+  assert.equal(modelCalls().length, 1);
+  const req = modelCalls()[0]!;
+  const system = req.body.system as { text: string; cache_control?: unknown }[];
+  assert.equal(system.length, 2);
+  assert.ok(system[0]!.text.startsWith("You are Glim, Gloam's community helper bot."));
+  assert.deepEqual(system[0]!.cache_control, { type: "ephemeral" }, "the fixed prompt is cached");
+  assert.equal(system[1]!.cache_control, undefined, "the live context is not");
+  assert.ok(system[1]!.text.includes("You are talking with Boss Duke, the founder and owner of Gloam."));
+  assert.equal(req.body.max_tokens, 700);
+  assert.deepEqual(req.body.messages, [{ role: "user", content: "hey Glim, how's the group doing?" }]);
+  assert.equal(sends().length, 1);
+  assert.equal(sends()[0]!.body.chat_id, OWNER.id);
+  assert.equal(sends()[0]!.body.message_thread_id, undefined);
+  assert.equal(sends()[0]!.body.text, modelReply);
+
+  // "summary of the Help topic" is a chat, not the formatted report; the commands still work
+  reset();
+  await handleUpdate(upd(dm(OWNER, "summary of the Help topic")));
+  assert.equal(modelCalls().length, 1);
+  assert.ok(!String(sends()[0]!.body.text).startsWith("Gloam group report"));
+  await handleUpdate(upd(dm(OWNER, "/report")));
+  await handleUpdate(upd(dm(OWNER, "report")));
+  assert.ok(String(sends()[1]!.body.text).startsWith("Gloam group report"));
+  assert.ok(String(sends()[2]!.body.text).startsWith("Gloam group report"));
+});
+
+await test("team chat: admins by handle and by id get replies by first name; chat only", async () => {
+  reset();
+  process.env.TELEGRAM_ADMIN_IDS = String(ADMIN_BY_ID.id);
+  modelReply = "Mostly Recovery and the faucet.";
+  await handleUpdate(upd(dm(YOMI, "what did people ask today?")));
+  await handleUpdate(upd(dm(ADMIN_BY_ID, "any bugs today?")));
+  assert.equal(modelCalls().length, 2);
+  assert.ok(systemOf(0)[1]!.includes("You are talking with Yomi, one of the Gloam group's admins (not the owner)."));
+  assert.ok(systemOf(1)[1]!.includes("You are talking with Tolu, one of the Gloam group's admins (not the owner)."));
+  assert.deepEqual(sends().map((x) => x.body.chat_id), [YOMI.id, ADMIN_BY_ID.id]);
+
+  // /help is the chat note, /report stays the owner's, and a plain "report" from an admin is a chat
+  reset();
+  await handleUpdate(upd(dm(YOMI, "/help")));
+  assert.ok(String(sends()[0]!.body.text).startsWith("Hi Yomi. Just talk to me here, no command needed."));
+  await handleUpdate(upd(dm(YOMI, "/report")));
+  assert.ok(String(sends()[1]!.body.text).startsWith("The full report goes to Boss Duke"));
+  assert.equal(modelCalls().length, 0, "commands make no model call");
+  await handleUpdate(upd(dm(YOMI, "report")));
+  assert.equal(modelCalls().length, 1);
+
+  // asked to post in the group, it answers the DM and touches nothing else
+  reset();
+  modelReply = "I can't post from here, but here's the text: Testing opens soon, keep an eye on Announcements.";
+  await handleUpdate(upd(dm(YOMI, "post this in the group: testing opens soon")));
+  await handleUpdate(upd(dm(ADMIN_BY_ID, "delete the last message in Help and pin the guide")));
+  assert.deepEqual(sends().map((x) => x.body.chat_id), [YOMI.id, ADMIN_BY_ID.id]);
+  assert.equal(calls.filter((x) => x.host === "api.telegram.org" && !["sendMessage", "getMe", "getChatMemberCount"].includes(x.method)).length, 0);
+  assert.ok(teamSystemPrompt({ persona: "Glim", testingOpen: false, admins: [] }).includes("Chat only. You cannot post in the group"));
+
+  // off the list again: silence
+  reset();
+  delete process.env.TELEGRAM_ADMIN_IDS;
+  await handleUpdate(upd(dm(ADMIN_BY_ID, "still there?")));
+  assert.equal(sends().length, 0);
+  assert.equal(modelCalls().length, 0);
+});
+
+await test("team chat: memory carries a follow-up, per person, and ends after a few hours", async () => {
+  reset();
+  await kv([["DEL", `gloam:tg:v1:dm:${OWNER.id}`, `gloam:tg:v1:dm:${YOMI.id}`]]);
+  const first = "Turn on Recovery in Settings, so a cleared browser or a new phone never loses your private balance.";
+  modelReply = first;
+  await handleUpdate(upd(dm(OWNER, "draft a one-line reminder about Recovery")));
+  modelReply = "Turn on Recovery in Settings.";
+  await handleUpdate(upd(dm(OWNER, "shorter")));
+  assert.deepEqual(modelCalls()[1]!.body.messages, [
+    { role: "user", content: "draft a one-line reminder about Recovery" },
+    { role: "assistant", content: first },
+    { role: "user", content: "shorter" },
+  ]);
+  // someone else's chat starts fresh
+  await handleUpdate(upd(dm(YOMI, "hi Glim")));
+  assert.deepEqual(modelCalls()[2]!.body.messages, [{ role: "user", content: "hi Glim" }]);
+  // codes are kept as labels
+  reset();
+  await handleUpdate(upd(dm(OWNER, `is this a claim link? ${CLAIM}`)));
+  const lines = await dmHistory(OWNER.id);
+  assert.equal(lines.length, 6);
+  assert.equal(lines[4]!.t, "is this a claim link? [claim link]");
+  assert.equal(lines[5]!.b, 1);
+  assert.ok(!promptOf().includes(B), "the model never sees the code");
+  // three hours later it is gone
+  assert.ok(DM_TTL_SEC >= 60 * 60 && DM_TTL_SEC <= 6 * 60 * 60);
+  const realNow = Date.now;
+  Date.now = () => realNow() + DM_TTL_SEC * 1000 + 1_000;
+  try {
+    assert.equal((await dmHistory(OWNER.id)).length, 0);
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(teamMemoryText(`pay ${PLAIN}\n\n\n\nok`, 100), "pay [plain payment code]\n\nok");
+  assert.equal(teamMemoryText(SEED, 100), null);
+  assert.equal(teamMemoryText("how do I answer 'DM me for support'?", 100), "how do I answer 'DM me for support'?");
+});
+
+await test("team chat: the context carries the report's numbers and the store's records", async () => {
+  resetMemoryKv();
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.help, "How do I turn on recovery on a new phone?", user(301, "Ama"))));
+  // a reply that breaks the rules is never posted: the question goes on the unanswered list
+  modelReply = "Just DM @SomeoneElse for that.";
+  await handleUpdate(upd(inTopic(TOPIC.help, "Why is my USDG balance zero after adding?", user(302, "Bayo"))));
+  modelReply = "I'll take this to Boss Duke, an admin will follow up.";
+  await handleUpdate(upd(inTopic(TOPIC.help, "@glim_gloam_bot my payroll run vanished halfway", user(303, "Chi"))));
+  modelReply = "Thanks, saved for the team.";
+  await handleUpdate(upd(inTopic(TOPIC.feedback, "The faucet button is broken on Tempo again", user(304, "Dami", "dami_x"))));
+
+  reset();
+  modelReply = "Three questions today: Recovery on a new phone, a zero USDG balance, and a vanished payroll run.";
+  await handleUpdate(upd(dm(OWNER, "what did people ask today?")));
+  assert.equal(modelCalls().length, 1, "the context costs no model call (no summary)");
+  const ctx = systemOf(0)[1]!;
+  assert.ok(ctx.startsWith("TEAM CONTEXT\nYou are talking with Boss Duke"));
+  assert.ok(ctx.includes("These are the only numbers and records you have about the group."));
+  assert.ok(ctx.includes("- 123 members now; 0 joined, 0 left."));
+  assert.ok(ctx.includes("- 4 messages from 4 people. By topic: Help 3, Feedback 1."));
+  assert.ok(ctx.includes("- Questions seen: 3."));
+  assert.ok(ctx.includes("HANDED TO AN ADMIN (last 24 hours, newest first): 1\n"));
+  assert.match(ctx, /- \d{2}:\d{2} Chi in Help: @glim_gloam_bot my payroll run vanished halfway https:\/\/t\.me\/gloamhq\/\d+/);
+  assert.match(ctx, /QUESTIONS GLIM DID NOT ANSWER \(last 24 hours, newest first\): 1\n- \d{2}:\d{2} Bayo in Help, it had no answer it could post: Why is my USDG balance zero after adding\?/);
+  assert.ok(ctx.includes("BUG REPORTS: 1 in the last 24 hours. No status (open or fixed) is tracked."));
+  assert.match(ctx, /- \w{3} \d{1,2} \w{3} \d{2}:\d{2}, Dami in Feedback: The faucet button is broken on Tempo again https:\/\/t\.me\/gloamhq\/\d+/);
+  assert.ok(ctx.includes("WHAT PEOPLE ASKED (last 24 hours, newest first, 3 of 3):\n- @glim_gloam_bot my payroll run vanished halfway\n"));
+  assert.ok(ctx.includes("- How do I turn on recovery on a new phone?"));
+  assert.ok(ctx.includes("Help:\n- Ama: How do I turn on recovery on a new phone?\n- Glim (you): "));
+  assert.ok(ctx.includes("Testers:\n- Nothing recent."));
+  assert.ok(ctx.includes("<group_data>") && ctx.trimEnd().endsWith("</group_data>"));
+  assert.ok(!ctx.includes("dami_x"), "no member handles in the context");
+  assert.ok(!/[—\p{Extended_Pictographic}]/u.test(ctx));
+
+  // a question over the answer limit is on the list too
+  reset();
+  const pia = user(310, "Pip");
+  for (let i = 0; i < 5; i++) await handleUpdate(upd(inTopic(TOPIC.help, `How do I do task number ${i}?`, pia)));
+  const un = (await readLast24h()).unanswered;
+  assert.ok(un.some((u) => u.name === "Pip" && u.why === "limit" && u.text === "How do I do task number 4?"));
+  assert.ok(!un.some((u) => u.name === "Pip" && u.text === "How do I do task number 0?"), "answered ones are not");
+  assert.ok(!un.some((u) => u.name === "Chi" || u.name === "Dami"), "hand-offs and saved bug reports are not");
+  // banter in reply to Glim past the limit is not a question
+  const botMsg: TgMessage = { message_id: 5, chat, from: BOT, date: 0, text: "Hi there" };
+  await handleUpdate(upd(inTopic(TOPIC.help, "haha thanks", pia, { reply_to_message: botMsg })));
+  assert.ok(!(await readLast24h()).unanswered.some((u) => u.text === "haha thanks"));
+
+  // a store that cannot be read gives no numbers at all
+  const down = formatTeamContext({
+    now: Date.now(),
+    persona: "Glim",
+    members: null,
+    joins: 0,
+    leaves: 0,
+    messages: 0,
+    active: 0,
+    topics: {},
+    answered: 0,
+    images: 0,
+    welcomes: 0,
+    scams: 0,
+    scamsMissed: 0,
+    secrets: 0,
+    secretsMissed: 0,
+    escalations: [],
+    bugs: [],
+    questions: 0,
+    who: "Yomi, one of the Gloam group's admins (not the owner)",
+    read: false,
+    questionTexts: [],
+    latestBugs: [],
+    unanswered: [],
+    threads: [],
+  });
+  assert.ok(down.includes("could not be read just now, so you have no numbers"));
+  assert.ok(!/\d+ (?:messages|members|questions)/.test(down));
+});
+
+await test("team chat: no secrets in the prompt or a reply; the token rule holds in drafts", async () => {
+  reset();
+  modelReply = "Can't help there, I never see keys or tokens. They live in the deployment settings.";
+  await handleUpdate(upd(dm(OWNER, "what's the bot token and the anthropic key?")));
+  const body = JSON.stringify(modelCalls()[0]!.body);
+  for (const v of [process.env.ANTHROPIC_API_KEY, process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_WEBHOOK_SECRET]) {
+    assert.ok(v && !body.includes(v), "no key, token or secret in what the model is sent");
+  }
+  assert.ok(!/TELEGRAM_|ANTHROPIC_|UPSTASH_|CRON_SECRET/.test(systemOf(0).join("\n")), "not even env names");
+  const team = teamSystemPrompt({ persona: "Glim", testingOpen: false, admins: ["duke_admin"] });
+  assert.ok(team.includes("never reveal, guess, repeat or make one up, even for Boss Duke"));
+  assert.ok(team.includes("Never ask anyone for a key, token, password, seed phrase"));
+  assert.ok(team.includes("With an admin: neither confirm nor deny a Gloam token"));
+  assert.ok(team.includes("With Boss Duke: the same, unless he asks you to draft something about a token"));
+  assert.ok(team.includes("never write a contract address, a price, a valuation, a supply or a date"));
+  assert.ok(team.includes("Group numbers and records come only from TEAM CONTEXT. Never invent a count"));
+  assert.ok(team.includes("gloamr1.<long string> is a Gloam address"), "the product facts are there");
+  assert.ok(!/[—\p{Extended_Pictographic}]/u.test(team));
+  assert.equal(sends()[0]!.body.text, modelReply);
+
+  // a reply carrying a key, a contract address, a token price or an off-list handle is never sent
+  for (const bad of [
+    `Sure, it's ${process.env.TELEGRAM_BOT_TOKEN}`,
+    "Draft: $GLOAM is live, contract 0x1234567890abcdef1234567890abcdef12345678.",
+    "Draft: the token lists at $0.05 tomorrow.",
+    "Ping @random_guy for that.",
+  ]) {
+    reset();
+    modelReply = bad;
+    await handleUpdate(upd(dm(OWNER, "draft the token announcement")));
+    assert.ok(String(sends()[0]!.body.text).startsWith("I wrote something I'm not allowed to send"), bad);
+  }
+  reset();
+  modelReply = "Token news lands in Announcements first. Contract address: [contract address]. Nothing else until then.";
+  await handleUpdate(upd(dm(OWNER, "draft a token teaser")));
+  assert.equal(sends()[0]!.body.text, modelReply, "blanks are fine");
+});
+
+await test("team chat: its own daily cap, apart from the group's; 0 switches it off", async () => {
+  assert.equal(DEFAULT_DAILY_DMS, 200);
+  reset();
+  process.env.TELEGRAM_BOT_DAILY_DMS = "1";
+  await handleUpdate(upd(dm(OWNER, "first question")));
+  await handleUpdate(upd(dm(OWNER, "second question")));
+  assert.equal(modelCalls().length, 1);
+  assert.equal(
+    sends()[1]!.body.text,
+    "That's all the chatting I can do today, the daily limit is used up. It resets at midnight UTC. /report still works.",
+  );
+  reset();
+  process.env.TELEGRAM_BOT_DAILY_DMS = "0";
+  await handleUpdate(upd(dm(YOMI, "hello")));
+  assert.equal(modelCalls().length, 0);
+  assert.equal(sends()[0]!.body.text, "Chatting is switched off for me right now.");
+  delete process.env.TELEGRAM_BOT_DAILY_DMS;
+  // the group's cap does not stop the team's chat, and a failed call says so
+  reset();
+  process.env.TELEGRAM_BOT_DAILY_ANSWERS = "0";
+  await handleUpdate(upd(dm(OWNER, "still with me?")));
+  assert.equal(modelCalls().length, 1);
+  delete process.env.TELEGRAM_BOT_DAILY_ANSWERS;
+  reset();
+  modelReply = "";
+  await handleUpdate(upd(dm(YOMI, "you there?")));
+  assert.equal(sends()[0]!.body.text, "My light flickered and I couldn't answer that. Try again in a minute.");
+});
+
+await test("team chat: a screenshot is read; one showing a secret, or a pasted seed phrase, is deleted", async () => {
+  reset();
+  files.set("shot-dm", PNG);
+  modelReply = "That's the Tempo faucet saying the wallet already holds enough test funds.";
+  await handleUpdate(upd({ ...dm(OWNER, ""), text: undefined, caption: "what does this mean?", photo: photo("shot-dm") }));
+  assert.deepEqual(calls.filter((x) => x.method === "getFile").map((x) => x.body.file_id), ["shot-dm"]);
+  const turns = modelCalls()[0]!.body.messages as { role: string; content: { type: string; text?: string }[] }[];
+  const last = turns[turns.length - 1]!;
+  assert.equal(last.content[0]!.type, "image");
+  assert.equal(last.content[1]!.text, "what does this mean?");
+  assert.ok(turns.slice(0, -1).every((t) => typeof t.content === "string"), "older turns carry no pictures");
+  assert.equal(sends()[0]!.body.text, modelReply);
+  const lines = await dmHistory(OWNER.id);
+  assert.equal(lines[lines.length - 2]!.t, "[picture] what does this mean?");
+
+  files.set("shot-dm-seed", PNG);
+  modelReply = "[[SECRET]]";
+  const shot = { ...dm(YOMI, ""), text: undefined, photo: photo("shot-dm-seed") };
+  await handleUpdate(upd(shot));
+  assert.deepEqual(deletes().map((x) => x.body.message_id), [shot.message_id]);
+  assert.ok(String(sends()[1]!.body.text).startsWith("Yomi, I removed your message because it looked like a seed phrase or private key."));
+
+  reset();
+  await handleUpdate(upd(dm(YOMI, `is this safe to share? ${SEED}`)));
+  assert.equal(deletes().length, 1);
+  assert.equal(modelCalls().length, 0);
+  assert.ok(String(sends()[0]!.body.text).includes("move your funds to a new wallet now"));
+  assert.ok(!JSON.stringify(await dmHistory(YOMI.id)).includes("abandon"));
+});
+
+await test("nothing was ever sent outside the group or the team's private chats", () => {
   assert.ok(everySend.length > 10);
-  const ownerChats = new Set([OWNER.id, 501]);
-  for (const x of everySend) assert.ok(x.body.chat_id === GROUP || ownerChats.has(Number(x.body.chat_id)), String(x.body.chat_id));
+  const teamChats = new Set([OWNER.id, 501, YOMI.id, ADMIN_BY_ID.id]);
+  for (const x of everySend) assert.ok(x.body.chat_id === GROUP || teamChats.has(Number(x.body.chat_id)), String(x.body.chat_id));
 });
 
 console.log(`\ntelegram: ${passed} passed`);

@@ -9,9 +9,12 @@
  *  - new members waiting for the next batched welcome
  *  - bug reports, for the admin dashboard
  *  - counters for the owner's report: hourly buckets kept three days, the
- *    people active, joining and leaving each hour, escalations, and the
- *    question texts (48 hours, about 100 a day, never anything secret-shaped)
+ *    people active, joining and leaving each hour, escalations, questions it
+ *    did not answer, and the question texts (48 hours, about 100 a day, never
+ *    anything secret-shaped)
  *  - the owner's private chat, so a scheduled report knows where to go
+ *  - each team member's private chat with the helper: the last ten exchanges,
+ *    for three hours, so follow-ups make sense (never anything secret-shaped)
  *  - small flags with short lives: pictures read this hour (the cap), albums
  *    already looked at, who got today's code heads-up, a locked code waiting
  *    to see if its phrase follows, and who was handed to an admin lately
@@ -58,6 +61,18 @@ export async function threadThenRemember(chatId: number, topic: number, line: Ch
   const [raw] = await kv(cmds);
   const lines = (Array.isArray(raw) ? raw : []).map((r) => jsonOf<ChatLine>(r)).filter((l): l is ChatLine => Boolean(l?.n && l?.t));
   return lines.reverse();
+}
+
+/** The recent lines of several topics, oldest first in each, without adding anything. */
+export async function recentThreads(chatId: number, topics: number[]): Promise<Map<number, ChatLine[]>> {
+  const res = await kv(topics.map((t) => ["LRANGE", threadKey(chatId, t), 0, THREAD_KEEP - 1]));
+  const out = new Map<number, ChatLine[]>();
+  topics.forEach((t, i) => {
+    const raw = res[i];
+    const lines = (Array.isArray(raw) ? raw : []).map((r) => jsonOf<ChatLine>(r)).filter((l): l is ChatLine => Boolean(l?.n && l?.t));
+    out.set(t, lines.reverse());
+  });
+  return out;
 }
 
 /** Adds one line (the helper's own reply) to a topic's history. */
@@ -145,6 +160,8 @@ const QUESTIONS_TTL_SEC = 48 * 60 * 60;
 const QUESTIONS_PER_DAY = 100;
 const ESCALATIONS = `${PREFIX}escalations`;
 const ESCALATIONS_MAX = 100;
+const UNANSWERED = `${PREFIX}unanswered`;
+const UNANSWERED_MAX = 50;
 const OWNER_CHATS = `${PREFIX}owner:chats`;
 
 const hourOf = (now: number) => Math.floor(now / HOUR_MS);
@@ -202,6 +219,22 @@ export async function logEscalation(e: Escalation): Promise<void> {
   ]);
 }
 
+/**
+ * A question the helper was asked (tagged, or a question in the open) but did
+ * not answer: it was over its answer limits, or it had no answer it could post
+ * (the model gave nothing usable, so it stayed quiet or said it would not
+ * guess). Hand-offs are escalations, not this.
+ */
+export type Unanswered = Escalation & { why: "limit" | "no_answer" };
+
+export async function logUnanswered(u: Unanswered): Promise<void> {
+  await kv([
+    ["LPUSH", UNANSWERED, JSON.stringify(u)],
+    ["LTRIM", UNANSWERED, 0, UNANSWERED_MAX - 1],
+    ["EXPIRE", UNANSWERED, STATS_TTL_SEC],
+  ]);
+}
+
 /** Keeps a question's text (already checked for secrets) for the report's summary. */
 export async function logQuestion(text: string, now = Date.now()): Promise<void> {
   const key = questionsKey(watDay(now));
@@ -219,6 +252,9 @@ export type Last24h = {
   joins: number;
   leaves: number;
   escalations: Escalation[];
+  /** Questions it did not answer, newest first. */
+  unanswered: Unanswered[];
+  /** Question texts, newest first. */
   questions: string[];
 };
 
@@ -232,7 +268,12 @@ export async function readLast24h(now = Date.now()): Promise<Last24h> {
     ["SMEMBERS", peopleKey("joins", h)],
     ["SMEMBERS", peopleKey("leaves", h)],
   ]);
-  cmds.push(["LRANGE", ESCALATIONS, 0, -1], ["LRANGE", questionsKey(watDay(now)), 0, -1], ["LRANGE", questionsKey(watDay(now) - 1), 0, -1]);
+  cmds.push(
+    ["LRANGE", ESCALATIONS, 0, -1],
+    ["LRANGE", questionsKey(watDay(now)), 0, -1],
+    ["LRANGE", questionsKey(watDay(now) - 1), 0, -1],
+    ["LRANGE", UNANSWERED, 0, -1],
+  );
   const res = await kv(cmds);
 
   const counts: Record<string, number> = {};
@@ -252,7 +293,10 @@ export async function readLast24h(now = Date.now()): Promise<Last24h> {
     .map((r) => jsonOf<{ t: string; at: number }>(r))
     .filter((q): q is { t: string; at: number } => Boolean(q && q.t && q.at > since))
     .map((q) => q.t);
-  return { counts, active: people.active.size, joins: people.joins.size, leaves: people.leaves.size, escalations, questions };
+  const unanswered = (Array.isArray(tail[3]) ? tail[3] : [])
+    .map((r) => jsonOf<Unanswered>(r))
+    .filter((u): u is Unanswered => Boolean(u && u.at > since && u.text));
+  return { counts, active: people.active.size, joins: people.joins.size, leaves: people.leaves.size, escalations, unanswered, questions };
 }
 
 /** Remembers the owner's private chat (its id is theirs) for scheduled reports. */
@@ -270,6 +314,35 @@ export async function ownerChats(): Promise<{ chatId: number; username: string }
     if (Number.isSafeInteger(chatId) && chatId > 0) out.push({ chatId, username: String(raw[i + 1] ?? "") });
   }
   return out;
+}
+
+// ---------------------------------------------------------------- the team's private chats
+
+/** Lines kept per private chat: ten exchanges, the person's message and the helper's reply. */
+export const DM_KEEP = 20;
+/** A private chat's memory ends this long after its last message. */
+export const DM_TTL_SEC = 3 * 60 * 60;
+
+const dmKey = (userId: number) => `${PREFIX}dm:${userId}`;
+
+/** The private chat's recent lines, oldest first. Lines with `b` are the helper's. */
+export async function dmHistory(userId: number): Promise<ChatLine[]> {
+  const [raw] = await kv([["LRANGE", dmKey(userId), 0, DM_KEEP - 1]]);
+  return (Array.isArray(raw) ? raw : [])
+    .map((r) => jsonOf<ChatLine>(r))
+    .filter((l): l is ChatLine => Boolean(l?.n && l?.t))
+    .reverse();
+}
+
+/** Adds lines to a private chat's memory, oldest first, and starts its three hours again. */
+export async function rememberDm(userId: number, lines: ChatLine[]): Promise<void> {
+  if (lines.length === 0) return;
+  const key = dmKey(userId);
+  await kv([
+    ...lines.map((l) => ["LPUSH", key, JSON.stringify(l)]),
+    ["LTRIM", key, 0, DM_KEEP - 1],
+    ["EXPIRE", key, DM_TTL_SEC],
+  ]);
 }
 
 // ---------------------------------------------------------------- short-lived flags

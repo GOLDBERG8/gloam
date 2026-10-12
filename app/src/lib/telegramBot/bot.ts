@@ -2,11 +2,16 @@
  * Glim, the Gloam community helper on Telegram: what it does with each update
  * the webhook (app/api/telegram) hands it. Server only.
  *
- * It talks only in the Gloam group (TELEGRAM_GROUP_ID). Private messages get
- * no reply at all, with one exception: the owner (TELEGRAM_OWNER_IDS, else
- * TELEGRAM_OWNER_HANDLES), who can ask for the 24-hour report there. It never
- * starts a DM; the scheduled report goes only to a chat an owner opened.
- * Every other chat is ignored. In the group:
+ * It talks in the Gloam group (TELEGRAM_GROUP_ID) and, in private, only with
+ * the team: the owner (TELEGRAM_OWNER_IDS, else TELEGRAM_OWNER_HANDLES) and the
+ * admins (TELEGRAM_ADMIN_IDS or TELEGRAM_ADMIN_HANDLES). Anyone else's private
+ * message gets no reply and costs no model call. With the team it chats: it
+ * answers in its own voice from the product facts and the group's live
+ * numbers, drafts posts and replies, and remembers the last few exchanges for
+ * a few hours. The owner also gets /report. A private chat is chat only: it
+ * never posts in the group or acts on anything from there. It never starts a
+ * DM; the scheduled report goes only to a chat an owner opened. Every other
+ * chat is ignored. In the group:
  *  - a seed phrase or private key gets deleted (when the bot is admin) and a
  *    warning to move funds now; an obvious scam gets deleted and a short "admins
  *    never DM first" note
@@ -28,9 +33,20 @@
  * an hour; past a limit it stays quiet. It solves what it can and hands a
  * person to an admin only when it has to, at most once per conversation.
  */
-import { askModel, systemPrompt, userPrompt, wantsHelper, type AskInput, type ModelImage } from "./answer";
+import {
+  askModel,
+  askTeamChat,
+  systemPrompt,
+  teamSystemPrompt,
+  userPrompt,
+  wantsHelper,
+  type AskInput,
+  type ChatTurn,
+  type ModelImage,
+  type ModelMiss,
+} from "./answer";
 import { personaName } from "./persona";
-import { buildReport } from "./report";
+import { buildReport, teamContext } from "./report";
 import {
   MAX_IMAGE_BYTES,
   SHORT_CAPTION_WORDS,
@@ -57,6 +73,7 @@ import {
   sharesPhrase,
   sniffImage,
   tagsSomeone,
+  teamMemoryText,
   topicName,
   topicOf,
   wantsReport,
@@ -74,15 +91,18 @@ import {
   codeTipDue,
   countMembers,
   countMessage,
+  dmHistory,
   firstOfAlbum,
   handedOffLately,
   lockedCodeNear,
   logEscalation,
   logQuestion,
+  logUnanswered,
   markHandOff,
   markSeen,
   queueJoiners,
   remember,
+  rememberDm,
   rememberOwnerChat,
   saveBugReport,
   takeImageSlot,
@@ -128,7 +148,7 @@ export type BotConfig = {
   admins: string[];
   /** TELEGRAM_ADMIN_IDS: admins by numeric id, which survives a handle change. */
   adminIds: number[];
-  /** Who may DM the bot for reports. Ids win over handles when any are set. */
+  /** Who gets /report in a DM. Ids win over handles when any are set. */
   owners: { ids: number[]; handles: string[] };
   /** TELEGRAM_DAILY_REPORT: the cron sends the report at 21:00 WAT. */
   dailyReport: boolean;
@@ -172,9 +192,14 @@ export function isOwner(u: { id: number; username?: string }, c: BotConfig): boo
   return Boolean(u.username && c.owners.handles.includes(u.username.toLowerCase()));
 }
 
-/** The owner or an admin: their warnings are not scams, and they never get code heads-ups or hand-offs. */
+/** An admin, by TELEGRAM_ADMIN_IDS or TELEGRAM_ADMIN_HANDLES. */
+export function isAdmin(u: { id: number; username?: string }, c: BotConfig): boolean {
+  return c.adminIds.includes(u.id) || Boolean(u.username && c.admins.includes(u.username.toLowerCase()));
+}
+
+/** The owner or an admin: their warnings are not scams, they never get code heads-ups or hand-offs, and they can chat in a DM. */
 function isTrusted(u: TgUser, c: BotConfig): boolean {
-  return isOwner(u, c) || c.adminIds.includes(u.id) || Boolean(u.username && c.admins.includes(u.username.toLowerCase()));
+  return isOwner(u, c) || isAdmin(u, c);
 }
 
 // ---------------------------------------------------------------- copy
@@ -190,17 +215,41 @@ function groupGuide(c: BotConfig): string {
   );
 }
 
+const CHAT_HELP =
+  "Or just talk to me here, no command needed. Ask what people asked today, whether there are bugs, how to answer a member, " +
+  "or for a draft announcement. Screenshots work too. I remember the last few messages for a few hours.";
+
 function ownerHelp(c: BotConfig): string {
   const daily = c.dailyReport ? "\nA report also arrives here every day at 21:00 WAT." : "";
   return (
     `Owner commands\n` +
     `/report - the last 24 hours in the group: members, activity, what ${c.persona} did, bug reports and what people asked\n` +
     `/help - this list\n` +
-    `You can also just say "report" or "how was today".${daily}`
+    `You can also just say "report" or "how was today".\n\n${CHAT_HELP}${daily}`
   );
 }
 
-const OWNER_HINT = "Send /report for the last 24 hours in the group.";
+function adminHelp(name: string): string {
+  return (
+    `Hi ${name}. Just talk to me here, no command needed. Ask what people asked today, whether there are bugs, ` +
+    `how to answer a member, or for a draft announcement. Screenshots work too. I remember the last few messages for a few hours. ` +
+    `I can only chat from here: I won't post in the group or do anything else.\n/help - this note`
+  );
+}
+
+const ADMIN_REPORT =
+  'The full report goes to Boss Duke, but ask me in words and I\'ll tell you what I have, like "what did people ask today?" or "any bugs?"';
+
+/** What a team member hears when the model gave no reply. */
+function chatMiss(miss: ModelMiss, owner: boolean): string {
+  const report = owner ? " /report still works." : "";
+  if (miss === "off") return `Chatting is switched off for me right now.${report}`;
+  if (miss === "cap") return `That's all the chatting I can do today, the daily limit is used up. It resets at midnight UTC.${report}`;
+  return `My light flickered and I couldn't answer that. Try again in a minute.${report}`;
+}
+
+const CHAT_REFUSED =
+  "I wrote something I'm not allowed to send (a link, handle, address or detail off my list), so I binned it. Try asking another way.";
 
 function bugThanks(name: string): string {
   return `Thanks ${name}, saved for the team, and I'll make sure Boss Duke sees it. An admin will take a look. Steps, a screenshot or a transaction link make you everyone's favourite tester.`;
@@ -508,7 +557,24 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   if (bareShot && !bug && msg.media_group_id && !(await firstOfAlbum(msg.media_group_id).catch(() => false))) return;
 
   const saved = bug ? await saveBug(msg, from, text, topicName(topic)) : false;
-  if (!(await withinLimits(from.id))) return;
+  // asked or tagged and not answered: kept for the team (a saved bug report is answered by being saved,
+  // and a tag with nothing to go on, like "haha thanks" to Glim, is not a question)
+  const missed = async (why: "limit" | "no_answer") => {
+    if (saved || !(tagged || asked)) return;
+    if (!asked && !ownPicture && isVague(target ? `${targetText} ${text}` : text, c.persona)) return;
+    const t = memoryText(target ? targetText || text : text) ?? (ownPicture ? "[screenshot]" : null);
+    if (!t) return;
+    const who = target?.from ?? from;
+    await logUnanswered({
+      at: Date.now(),
+      name: target ? firstName(who, c) : name,
+      topic: topicName(topic),
+      text: t.slice(0, 200),
+      link: messageLink(target ?? msg),
+      why,
+    }).catch(() => {});
+  };
+  if (!(await withinLimits(from.id))) return missed("limit");
 
   // the picture: this message's own, else the one on the message it was tagged on
   const pictureMsg = ownPicture ? msg : tagged && !toBot && replied && imageRef(replied) ? replied : null;
@@ -561,10 +627,12 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   const vague = !image && isVague(target ? `${targetText} ${text}` : text, c.persona);
   const fallback = fallbackKind({ vague, askerIsAdmin: isTrusted(asker, c), adminInvolved, handedOff });
   const reply = answer ?? (saved ? bugThanks(name) : tagged ? cantAnswer(c, askerName, topic, fallback) : null);
-  if (!reply) return;
+  if (!reply) return missed("no_answer");
   const replyTo = target ? target.message_id : msg.message_id;
   const sent = await sendMessage(chatId, reply, { threadId, replyTo });
-  if (!sent) return;
+  if (!sent) return missed("no_answer");
+  // "not going to guess" with no hand-off (an admin asked, or admins are on it): still a question nobody answered
+  if (!answer && (fallback === "unsure" || fallback === "admins_here")) await missed("no_answer");
   await remember(chatId, topic, { n: c.persona, t: reply.slice(0, 400), b: 1 }).catch(() => {});
   if (answer) await count("answered");
   // handed to a person: the hand-off fallback, or an answer that says an admin will follow up (bug thanks aside).
@@ -584,19 +652,88 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
 
 // ---------------------------------------------------------------- private chats
 
+/** Longest reply in a private chat, in characters (Telegram's limit is 4096). */
+const DM_MAX_REPLY = 3000;
+/** What a private chat keeps of each message: the person's, and the helper's reply. */
+const DM_KEEP_ASKED = 800;
+const DM_KEEP_REPLY = 1500;
+
+/** Every key and token this deployment holds (public NEXT_PUBLIC_ values aside), so a reply can never carry one, even by accident. */
+function deploymentSecrets(): string[] {
+  return Object.entries(process.env)
+    .filter(([k, v]) => /KEY|TOKEN|SECRET|PASSWORD|PRIVATE|PEPPER/i.test(k) && !k.startsWith("NEXT_PUBLIC_") && typeof v === "string" && v.trim().length >= 8)
+    .map(([, v]) => v!.trim());
+}
+
 /**
- * The owner's private chat: reports only. /report or a plain "report" sends the
- * last 24 hours, /help lists the commands, anything else gets a one-line hint.
- * Everyone else gets no reply at all and costs no model call.
+ * A chat message from the owner or an admin: the reply in the helper's voice,
+ * from the facts and the group's live numbers, with the last few exchanges.
+ * Nothing it says can reach the group; it only ever answers this chat.
+ */
+async function chatWithTeam(msg: TgMessage, from: TgUser, c: BotConfig, owner: boolean, text: string, picture: ImageRef | null): Promise<void> {
+  const chatId = msg.chat.id;
+  const name = firstName(from, c);
+  const who = owner ? "Boss Duke, the founder and owner of Gloam" : `${name}, one of the Gloam group's admins (not the owner)`;
+  const [history, context, image] = await Promise.all([
+    dmHistory(from.id).catch(() => []),
+    teamContext(c.groupId, c.persona, who).catch(
+      () => `TEAM CONTEXT\nYou are talking with ${who}.\nThe group's numbers and records could not be read just now, so you have none to give. Say so if asked.`,
+    ),
+    picture ? loadPicture(picture) : Promise.resolve(null),
+  ]);
+  const said = picture
+    ? image
+      ? text || "(a picture, no caption)"
+      : `(sent a picture you could not open)${text ? ` ${text}` : ""}`
+    : text;
+  const turns: ChatTurn[] = [
+    ...history.map((l): ChatTurn => ({ role: l.b ? "assistant" : "user", text: l.t })),
+    { role: "user", text: said },
+  ];
+  const r = await askTeamChat(teamSystemPrompt({ persona: c.persona, testingOpen: c.testingOpen, admins: c.admins }), context, turns, image);
+  if (!("text" in r)) {
+    await sendMessage(chatId, chatMiss(r.miss, owner));
+    return;
+  }
+  const { sentinel, text: out } = readSentinel(r.text);
+  if (image && sentinel === "secret") {
+    const removed = await deleteMessage(chatId, msg.message_id);
+    await sendMessage(chatId, leakWarning(firstName(from), removed));
+    return;
+  }
+  const me = await getMe();
+  const handles = [...c.admins, ...c.owners.handles, from.username, me?.username].filter((h): h is string => Boolean(h));
+  const reply = out ? cleanReply(out, { handles, maxChars: DM_MAX_REPLY, team: true, secrets: deploymentSecrets() }) : null;
+  if (!reply) {
+    await sendMessage(chatId, CHAT_REFUSED);
+    return;
+  }
+  if (!(await sendMessage(chatId, reply))) return;
+  const asked = teamMemoryText(picture ? `[picture]${text ? ` ${text}` : ""}` : text, DM_KEEP_ASKED);
+  const kept = teamMemoryText(reply, DM_KEEP_REPLY);
+  if (asked && kept) await rememberDm(from.id, [{ n: name, t: asked }, { n: c.persona, t: kept, b: 1 }]).catch(() => {});
+}
+
+/**
+ * A private chat. The owner and the admins can talk to the helper; everyone
+ * else gets no reply at all and costs no model call. /help lists what it can
+ * do, the owner's /report (or a plain "report") sends the last 24 hours, and
+ * anything else is a chat. A pasted seed phrase or key is deleted with a
+ * warning, as in the group.
  */
 async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
   const from = msg.from;
-  if (!from || from.is_bot || !isOwner(from, c)) return;
+  if (!from || from.is_bot) return;
+  const owner = isOwner(from, c);
+  if (!owner && !isAdmin(from, c)) return;
   const chatId = msg.chat.id;
-  await rememberOwnerChat(chatId, from.username).catch(() => {});
-  const text = messageText(msg);
-  if (!text) return;
-  if (secretLeak(scanCodes(text).masked)) {
+  if (owner) await rememberOwnerChat(chatId, from.username).catch(() => {});
+  const raw = messageText(msg);
+  const picture = imageRef(msg);
+  if (!raw && !picture) return;
+  // codes and links become labels, so the model never sees a bearer code
+  const text = scanCodes(raw).masked;
+  if (secretLeak(text)) {
     const removed = await deleteMessage(chatId, msg.message_id);
     await sendMessage(chatId, leakWarning(firstName(from), removed));
     return;
@@ -605,10 +742,18 @@ async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
   const me = await getMe();
   const cmd = parseCommand(text, me?.username);
   if (cmd?.forOther) return;
-  let reply = OWNER_HINT;
-  if (cmd?.name === "help" || cmd?.name === "start") reply = ownerHelp(c);
-  else if (cmd ? cmd.name === "report" : wantsReport(text)) reply = await buildReport(c.groupId, c.persona);
-  await sendMessage(chatId, reply);
+  if (cmd) {
+    const name = firstName(from, c);
+    let reply = owner ? ownerHelp(c) : adminHelp(name);
+    if (cmd.name === "report") reply = owner ? await buildReport(c.groupId, c.persona) : ADMIN_REPORT;
+    await sendMessage(chatId, reply);
+    return;
+  }
+  if (owner && !picture && wantsReport(text)) {
+    await sendMessage(chatId, await buildReport(c.groupId, c.persona));
+    return;
+  }
+  await chatWithTeam(msg, from, c, owner, text, picture);
 }
 
 // ---------------------------------------------------------------- entry
