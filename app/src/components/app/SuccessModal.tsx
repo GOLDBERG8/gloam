@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
@@ -21,6 +21,8 @@ export function SuccessModal({
   primaryLabel,
   secondaryLabel = "Done",
   footer,
+  detail,
+  hold,
   onClose,
 }: {
   open: boolean;
@@ -31,8 +33,16 @@ export function SuccessModal({
   secondaryLabel?: string;
   /** Optional extra step under the actions (e.g. sharing a private payment). */
   footer?: React.ReactNode;
+  /** Full-width content between the message and the buttons (e.g. a claim code to save). */
+  detail?: React.ReactNode;
+  /** While set, the dialog cannot be closed and the close button shows this instead. */
+  hold?: string | null;
   onClose: () => void;
 }) {
+  // nothing closes the dialog while something on it must be done first
+  const close = useCallback(() => {
+    if (!hold) onClose();
+  }, [hold, onClose]);
   const reduce = useReducedMotion();
   // Portals need document.body, so render only on the client.
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
@@ -40,7 +50,7 @@ export function SuccessModal({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close();
     };
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -49,7 +59,7 @@ export function SuccessModal({
       document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose]);
+  }, [open, close]);
 
   if (!open || !mounted) return null;
 
@@ -67,7 +77,7 @@ export function SuccessModal({
         type="button"
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         aria-label="Close"
-        onClick={onClose}
+        onClick={close}
         initial={reduce ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
@@ -119,6 +129,7 @@ export function SuccessModal({
           <div className="mx-auto mt-3 max-w-[34ch] text-[14px] leading-relaxed text-mute">
             {body}
           </div>
+          {detail && <div className="mt-5 text-left">{detail}</div>}
 
           <div className="mt-8 flex gap-2 max-sm:flex-col">
             {primaryHref &&
@@ -133,12 +144,12 @@ export function SuccessModal({
                   {primaryLabel}
                 </a>
               ) : (
-                <Link href={primaryHref} onClick={onClose} className="btn btn-ink sm:flex-1">
+                <Link href={primaryHref} onClick={close} className="btn btn-ink sm:flex-1">
                   {primaryLabel}
                 </Link>
               ))}
-            <button type="button" onClick={onClose} className="btn btn-ghost sm:flex-1">
-              {secondaryLabel}
+            <button type="button" onClick={close} disabled={Boolean(hold)} className="btn btn-ghost sm:flex-1">
+              {hold ?? secondaryLabel}
             </button>
           </div>
           {footer && <div className="mt-6 border-t border-line pt-5">{footer}</div>}

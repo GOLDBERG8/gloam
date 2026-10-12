@@ -15,10 +15,16 @@ export function PaymentTicketShare({
   code,
   amountLabel,
   locked,
+  stacked = false,
+  onSaved,
 }: {
   code: string;
   amountLabel?: string | null;
   locked: boolean;
+  /** QR above the text, for narrow spots like the success dialog. */
+  stacked?: boolean;
+  /** Called once the code is copied, downloaded or shared. */
+  onSaved?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -53,6 +59,7 @@ export function PaymentTicketShare({
   async function copy() {
     try {
       await navigator.clipboard.writeText(code);
+      onSaved?.();
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -68,6 +75,7 @@ export function PaymentTicketShare({
     a.download = `gloam-ticket-${amountLabel?.replace(/\s/g, "") ?? "pay"}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+    onSaved?.();
   }
 
   async function nativeShare() {
@@ -81,6 +89,7 @@ export function PaymentTicketShare({
           ? `Gloam private payment${amountLabel ? ` (${amountLabel})` : ""}. This is locked. Ask me for the passphrase separately.\n\n${code}`
           : `Gloam private payment${amountLabel ? ` (${amountLabel})` : ""}. To claim it, open Gloam and go to Vault, Pay, Receive.\n\n${code}`,
       });
+      onSaved?.();
       setShared(true);
       setTimeout(() => setShared(false), 2000);
     } catch {
@@ -94,7 +103,7 @@ export function PaymentTicketShare({
 
   return (
     <div className="gl-tile p-[16px] sm:p-5">
-      <div className="flex gap-5 max-sm:flex-col max-sm:items-center">
+      <div className={stacked ? "flex flex-col items-center gap-4" : "flex gap-5 max-sm:flex-col max-sm:items-center"}>
         {qrDataUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -110,7 +119,7 @@ export function PaymentTicketShare({
           </div>
         )}
 
-        <div className="min-w-0 flex-1 max-sm:w-full">
+        <div className={stacked ? "w-full min-w-0" : "min-w-0 flex-1 max-sm:w-full"}>
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-[15px] font-medium text-foreground">
               {isAddress ? "Scan to pay privately" : "Claim link ready"}

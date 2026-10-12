@@ -149,6 +149,8 @@ export function MoveView() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shareBlob, setShareBlob] = useState<string | null>(null);
+  /** The claim code the sender has copied, downloaded or shared, so the success dialog can let go. */
+  const [savedCode, setSavedCode] = useState<string | null>(null);
   const [shareAmountLabel, setShareAmountLabel] = useState<string | null>(null);
   const [sendPassphrase, setSendPassphrase] = useState("");
   const [importText, setImportText] = useState("");
@@ -168,6 +170,16 @@ export function MoveView() {
   >([]);
   const [inboxStatus, setInboxStatus] = useState<string | null>(null);
   const [memoPosted, setMemoPosted] = useState(false);
+  /** A claim code nobody else will get (no heads-up reached a Gloam address): the sender must keep it. */
+  const mustSaveCode = Boolean(shareBlob) && !memoPosted;
+
+  // leaving with an unsaved claim code loses the money in it
+  useEffect(() => {
+    if (!mustSaveCode || savedCode === shareBlob) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [mustSaveCode, savedCode, shareBlob]);
   const [contacts, setContacts] = useState<GloamContact[]>([]);
   /** Relay: submit proven actions from the Gloam relay so the wallet never shows. */
   const [relayAvailable, setRelayAvailable] = useState(false);
@@ -1393,6 +1405,7 @@ export function MoveView() {
                       code={shareBlob}
                       amountLabel={shareAmountLabel}
                       locked={shareLocked}
+                      onSaved={() => setSavedCode(shareBlob)}
                     />
                   )}
                 </div>
@@ -1885,6 +1898,18 @@ export function MoveView() {
       <SuccessModal
         open={showSuccess && Boolean(txHash)}
         title={successTitle}
+        hold={mustSaveCode && savedCode !== shareBlob ? "Save the code to finish" : null}
+        detail={
+          mustSaveCode && shareBlob ? (
+            <PaymentTicketShare
+              code={shareBlob}
+              amountLabel={shareAmountLabel}
+              locked={shareLocked}
+              stacked
+              onSaved={() => setSavedCode(shareBlob)}
+            />
+          ) : undefined
+        }
         body={
           pendingAction.current === "send" ||
           pendingAction.current === "memo" ||
@@ -1892,8 +1917,8 @@ export function MoveView() {
             <>
               <p>
                 {memoPosted
-                  ? "They got a private heads-up, so the payment shows up under Receive on their side. The claim code below is a backup."
-                  : "Share the claim code below if they need it. Anything left over stays in your private balance, in this browser."}
+                  ? "They got a private heads-up, so the payment shows up under Receive on their side. The claim code on the page is a backup."
+                  : "This code is the money. Copy, download or share it now: it can't be shown again. Anything left over stays in your private balance, in this browser."}
               </p>
               {sentNote && (
                 <p className="mt-3 break-words">
