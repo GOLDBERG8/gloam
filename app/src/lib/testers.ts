@@ -9,7 +9,7 @@
  * An application holds a name, Telegram and X handles, the network the person
  * wants to test, their device and wallet, a short note, and the EVM address
  * tester rewards are paid to (privately, through Gloam). No IP address is kept
- * with it; the rate limit holds a hashed IP for about two minutes.
+ * with it; the rate limit holds a hashed IP for up to two hours.
  */
 import { randomUUID } from "crypto";
 import { getAddress, isAddress } from "viem";

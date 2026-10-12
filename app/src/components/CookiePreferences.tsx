@@ -24,10 +24,10 @@ export function CookiePreferences() {
         Current choice:{" "}
         <span className="text-foreground">
           {current === "all"
-            ? "All (analytics on)"
+            ? "Accept all (our visit count on)"
             : current === "essential"
               ? "Essential only"
-              : "Not set"}
+              : "Not set (works as Essential only)"}
         </span>
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -43,7 +43,7 @@ export function CookiePreferences() {
           onClick={() => save("all")}
           className="btn btn-ink btn-sm"
         >
-          Accept analytics
+          Accept all
         </button>
       </div>
       {saved && (

@@ -29,8 +29,10 @@ export function CookieBanner() {
       <div className="rounded-[20px] border border-line bg-panel/95 p-5 shadow-pop backdrop-blur-xl">
         <p className="text-[14px] text-foreground">Cookies</p>
         <p className="mt-1.5 text-[13px] leading-relaxed text-mute">
-          Essential cookies run the site. Analytics are first-party and load
-          only if you allow them. See{" "}
+          We set no ad or tracking cookies. Essential only keeps what the site
+          needs to work, plus anonymous counts with no cookies: page views and
+          app steps. Accept all adds our own count of visits, also anonymous.
+          See{" "}
           <Link href="/cookies" className="text-foreground underline underline-offset-2">
             Cookies
           </Link>{" "}

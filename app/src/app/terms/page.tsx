@@ -5,22 +5,61 @@ export const metadata: Metadata = { title: "Terms of Use" };
 
 export default function TermsPage() {
   return (
-    <LegalLayout title="Terms of Use" updated="July 14, 2026">
+    <LegalLayout title="Terms of Use" updated="October 12, 2026">
       <p>
         These Terms of Use (“Terms”) govern access to and use of the websites,
         applications, documentation, and interfaces operated under gloam.trade
         (collectively, the “Services”) by Gloam (“Gloam,” “we,” “us”). By using
-        the Services, you agree to these Terms.
+        the Services, you agree to these Terms. Our{" "}
+        <a href="/privacy">Privacy Policy</a> and{" "}
+        <a href="/cookies">Cookie Policy</a> explain what information we
+        handle.
       </p>
-      <h2>1. Experimental software</h2>
+      <h2>1. Testnet only</h2>
+      <p>
+        Gloam runs only on test networks: Tempo Moderato testnet and Robinhood
+        Chain testnet. The tokens you use with it are test tokens with no
+        monetary value. Do not send real assets to any Gloam address or
+        contract.
+      </p>
+      <p>
+        We may change, pause, reset or remove any part of the Services at any
+        time, including redeploying contracts, which can leave earlier test
+        balances unusable. Testnets themselves can also be reset or stop
+        working. We do not guarantee that the Services, or any test balance,
+        will be available.
+      </p>
+      <h2>2. Experimental software</h2>
       <p>
         Gloam is early-stage, experimental software for interacting with
-        blockchain networks, including Robinhood Chain. Features such as
-        shielded balances, private transfers, and private trading may be
-        incomplete, unavailable, or change without notice. There is no guarantee
-        of uptime, correctness, or fitness for any purpose.
+        blockchain networks, including Tempo and Robinhood Chain. Features such
+        as private balances, private payments, payroll, proofs and private
+        trading may be incomplete, unavailable, or change without notice. There
+        is no guarantee of uptime, correctness, or fitness for any purpose.
       </p>
-      <h2>2. Eligibility</h2>
+      <h2>3. No custody</h2>
+      <p>
+        Gloam is self-custodial. Gloam never holds your keys, your seed phrase,
+        your note secrets or your funds. Your notes and their secrets are kept
+        in your browser, and proofs are made there. Money in the Gloam vault
+        contract leaves only with a valid proof, and there is no admin
+        withdraw.
+      </p>
+      <p>
+        You are responsible for your wallets, private keys, seed phrases,
+        devices and sign-in methods, for your notes and their backups, and for
+        the proofs you make and who you share them with. If you lose your keys
+        or your notes without a backup, we cannot recover them. Transactions
+        you sign are final when confirmed on-chain.
+      </p>
+      <h2>4. Tester program</h2>
+      <p>
+        Taking part in the Gloam testers program is voluntary. Any tester
+        rewards are as described in the program&apos;s announcement and are at
+        Gloam&apos;s discretion. Once the paid spots are filled, new testers
+        join as volunteers. Volunteer testing is unpaid.
+      </p>
+      <h2>5. Eligibility</h2>
       <p>
         You must be able to form a binding contract under applicable law and
         must not use the Services if you are a person or entity prohibited from
@@ -28,21 +67,14 @@ export default function TermsPage() {
         administered by relevant authorities. You are solely responsible for
         compliance with local law.
       </p>
-      <h2>3. Not financial advice</h2>
+      <h2>6. Not financial advice</h2>
       <p>
         Nothing on the Services is an offer, solicitation, or recommendation to
         buy, sell, or hold any asset, security, or derivative. Tokenized equities
         and other digital assets involve substantial risk of loss. We do not
         provide investment, legal, accounting, or tax advice.
       </p>
-      <h2>4. Wallets and keys</h2>
-      <p>
-        You are solely responsible for your wallets, private keys, seed phrases,
-        devices, and authentication methods. We never custody your keys. Loss of
-        keys may result in irreversible loss of assets. Transactions you sign
-        are final when confirmed on-chain.
-      </p>
-      <h2>5. Privacy features</h2>
+      <h2>7. Privacy features</h2>
       <p>
         Privacy-enhancing features do not guarantee anonymity, unlinkability, or
         immunity from investigation. Unshielded activity, bridges, third-party
@@ -50,33 +82,37 @@ export default function TermsPage() {
         privacy features at your own risk and are responsible for understanding
         their limitations.
       </p>
-      <h2>6. Prohibited use</h2>
+      <h2>8. Prohibited use</h2>
       <p>
         You may not use the Services to violate law, evade sanctions, commit
         fraud, launder funds, exploit vulnerabilities, attack infrastructure, or
         interfere with other users. We may restrict access where we believe
         misuse is occurring, to the extent we control the interface.
       </p>
-      <h2>7. Third-party services</h2>
+      <h2>9. Third-party services</h2>
       <p>
-        The Services may link to or depend on third parties (RPCs, wallets,
-        bridges, indexers, DEXs, analytics). We do not control those services and
-        are not liable for their acts, failures, or terms.
+        The Services may link to or depend on third parties (the Tempo and
+        Robinhood Chain testnets, RPCs, wallets, Tempo&apos;s fee sponsor,
+        bridges, indexers, DEXs, analytics, Telegram, and Anthropic, whose API
+        writes the answers of Glim, our Telegram helper). We do not control
+        those services and are not liable for their acts, failures, or terms.
+        Glim&apos;s answers are written by an AI model and can be wrong, so
+        check the docs before you act on one.
       </p>
-      <h2>8. Intellectual property</h2>
+      <h2>10. Intellectual property</h2>
       <p>
         Gloam branding, site design, and original content are owned by us or our
         licensors. You may not copy or reverse engineer the Services except as
         permitted by law. Open-source components are governed by their licenses.
       </p>
-      <h2>9. Disclaimers</h2>
+      <h2>11. Disclaimers</h2>
       <p>
         THE SERVICES ARE PROVIDED “AS IS” AND “AS AVAILABLE” WITHOUT WARRANTIES
         OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A
         PARTICULAR PURPOSE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE
         SERVICES WILL BE SECURE, ERROR-FREE, OR UNINTERRUPTED.
       </p>
-      <h2>10. Limitation of liability</h2>
+      <h2>12. Limitation of liability</h2>
       <p>
         TO THE MAXIMUM EXTENT PERMITTED BY LAW, GLOAM AND ITS CONTRIBUTORS SHALL
         NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR
@@ -84,18 +120,18 @@ export default function TermsPage() {
         YOUR USE OF THE SERVICES OR BLOCKCHAIN NETWORKS, EVEN IF ADVISED OF THE
         POSSIBILITY.
       </p>
-      <h2>11. Indemnity</h2>
+      <h2>13. Indemnity</h2>
       <p>
         You agree to indemnify and hold harmless Gloam and its contributors from
         claims arising out of your use of the Services, your violation of these
         Terms, or your violation of any rights of another.
       </p>
-      <h2>12. Changes</h2>
+      <h2>14. Changes</h2>
       <p>
         We may update these Terms by posting a revised version with a new “Last
         updated” date. Continued use after changes constitutes acceptance.
       </p>
-      <h2>13. Contact</h2>
+      <h2>15. Contact</h2>
       <p>
         Questions: <a href="mailto:hello@gloam.trade">hello@gloam.trade</a> or{" "}
         <a href="https://x.com/gloamtrade">

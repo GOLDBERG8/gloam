@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { track } from "@/lib/track";
@@ -198,6 +199,22 @@ export function TestersForm({ paidFull, paidSpots }: { paidFull: boolean; paidSp
           We never ask for a recovery phrase or private key.
         </p>
       </div>
+
+      <p className="text-[12.5px] leading-relaxed text-mute">
+        By applying you agree to our{" "}
+        <Link href="/terms" className="text-foreground underline underline-offset-2">
+          Terms of Use
+        </Link>
+        . Our{" "}
+        <Link href="/privacy" className="text-foreground underline underline-offset-2">
+          Privacy Policy
+        </Link>{" "}
+        and{" "}
+        <Link href="/cookies" className="text-foreground underline underline-offset-2">
+          Cookie Policy
+        </Link>{" "}
+        explain what we keep and for how long.
+      </p>
     </form>
   );
 }

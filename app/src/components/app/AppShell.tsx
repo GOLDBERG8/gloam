@@ -315,6 +315,9 @@ export function AppShell({
               <Link href="/terms" className="hover:text-foreground">
                 Terms
               </Link>
+              <Link href="/cookies" className="hover:text-foreground">
+                Cookies
+              </Link>
               <a href="https://t.me/gloamhq" target="_blank" rel="noreferrer" className="hover:text-foreground">
                 Telegram
               </a>
