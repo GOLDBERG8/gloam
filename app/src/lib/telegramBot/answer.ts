@@ -20,7 +20,8 @@ import { secretLeak, tidyReply, type ChatLine } from "./rules";
 
 const API = "https://api.anthropic.com/v1/messages";
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
-const MAX_TOKENS = 350;
+/** Group replies are short (persona.ts asks for about 60 words); this is the ceiling, cut at a sentence. */
+const MAX_TOKENS = 240;
 /** Private chats with the team: room for a draft announcement, still bounded. */
 const TEAM_MAX_TOKENS = 700;
 
@@ -249,7 +250,7 @@ export type ModelImage = { mediaType: "image/jpeg" | "image/png" | "image/webp";
 const CLASSIFIER_MODEL = "claude-haiku-5-5";
 const CLASSIFIER_SYSTEM = `You decide whether Glim, the helper bot in Gloam's Telegram group, should reply to a member's message. Gloam is private stablecoin payments on testnet. Answer with exactly YES or NO.
 YES when the message asks for help (even without a question mark), describes a problem or an error, states something about how Gloam works that may be wrong, or gives product feedback the helper can usefully respond to.
-NO for greetings, hype, jokes, thanks, chat between members that needs no help, or anything not about Gloam or wallets.`;
+NO for greetings, hype, jokes, thanks, chat between members that needs no help, someone sharing a payment code, claim link or their Gloam address for others to use, or anything not about Gloam or wallets.`;
 
 /** For a message not phrased as a question: should the helper answer it anyway? */
 export async function wantsHelper(text: string): Promise<boolean> {
@@ -257,7 +258,6 @@ export async function wantsHelper(text: string): Promise<boolean> {
   return /^\s*yes\b/i.test(out ?? "");
 }
 
-/** Why a call gave no text: no key or the kind is switched off (cap 0), today's cap is spent, or the call failed. */
 /** Why there is no text: switched off, past the daily cap, the API erred (worth a retry), or no usable answer. */
 export type ModelMiss = "off" | "cap" | "error" | "failed";
 

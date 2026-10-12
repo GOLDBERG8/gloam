@@ -181,6 +181,20 @@ const MY_PROBLEM =
 const HELP_HINT =
   /\b(?:gloam|glim|wallet|network|chain|faucet|tempo|robinhood|testnet|tokens?|deposit|add(?:ed|ing)?|privately|claim|code|phrase|error|can'?t|cannot|not working|stuck|fail\w*|issue|bug|testers?|rewards?|app|site|website|recovery|passkey|proofs?|payments?|send|receive|balance|eth|usdg|stocks?)\b/i;
 
+/** A code, claim link, request or address label, as scanCodes leaves them in the text. */
+const SHARED_LABEL = /\[(?:Gloam address|sealed payment|plain payment code|locked payment code|claim link[^\]]*|payment request link)\]/i;
+
+/**
+ * Someone sharing a payment, a claim link or their address for others to use,
+ * like the app's own "Gloam private payment ... Ask me for the passphrase
+ * separately" text. Not for the helper unless it also asks or reports a problem.
+ */
+export function isShare(text: string): boolean {
+  if (!SHARED_LABEL.test(text)) return false;
+  const rest = text.replace(new RegExp(SHARED_LABEL.source, "gi"), " ");
+  return !rest.includes("?") && !BUG_WORDS.test(rest) && !/\b(?:help|how do i|can't|cant|cannot|won't|doesn't|didn't)\b/i.test(rest);
+}
+
 /** Long enough and on topic: worth asking the model whether the helper should reply. */
 export function mayNeedHelp(text: string): boolean {
   const t = norm(text).replace(URL_RE, " ").trim();

@@ -24,6 +24,9 @@ export const OFFICIAL_LINKS = [
 ];
 
 const ABOUT = `
+HOW TO USE THESE FACTS
+- These facts cover every screen and feature of the app. If someone asks for a feature that is not described here, say plainly it isn't in the app yet and that they can suggest it in the Feedback topic. One or two sentences, no hedging.
+
 WHAT GLOAM IS
 - Gloam is private money on public chains: private stablecoin payments, payroll and proofs. You add money to a shared vault, pay people privately inside it, and cash out with a real zero-knowledge proof. What you hold and how much you move stays private instead of sitting on a public wallet.
 - It runs on two testnets: Tempo Moderato testnet (chain ID 42431), a payments chain where you use test stablecoins such as PathUSD and OUSD and fees are paid in stablecoins, and Robinhood Chain testnet (chain ID 46630), with test ETH, sample stock tokens (TSLA, AMZN, PLTR, NFLX, AMD) and USDG. The network selector in the app header switches between them.
@@ -41,17 +44,32 @@ WHAT STAYS PRIVATE AND WHAT IS PUBLIC
 
 WHAT YOU CAN DO (LIVE ON TESTNET)
 - Add privately: move money from your wallet into your private balance (the docs call this shield).
-- Private payments: in Move, pay someone's Gloam address (it starts with gloamr1) or make a claim link for someone without one. Paying a Gloam address seals the payment to that person: only they can open it. A claim link or plain payment code is bearer: anyone who has it can claim it, so send it only to that person; you can lock it with a phrase. Both are fine for testing in the group on testnet, it is play money. The person you paid finds it under Receive in Move.
-- Cash out: from Move, back to a public wallet. This part is public.
-- Private payroll: in Payroll, pick USDG (Robinhood Chain) or PathUSD (Tempo) and upload a CSV with name, gloam_address, amount. A blank address gets a claim link; a public 0x address is refused on purpose. About 8 seconds per person, keep the tab open; if it closes, open Payroll and press Resume. Schedules (monthly, every two weeks, weekly or one time) with a cap per run show a "Payroll due" reminder that runs in one click. Gloam never holds your keys, so it never pays on its own.
-- Payment requests: a link or QR that fills in what someone should pay you.
-- Proofs, in Prove: Exact balance (one balance, exactly), At least (proof of funds: at least an amount, backed by up to four balances in the same asset), Payment (a private payment of an exact or minimum amount was made into a note the prover holds; it does not show who paid whom, and the payer could make the same proof), and Payroll total (a run of N payments adding up to a total, funded by the prover, without showing any one payment or who was paid; up to 32 payments per part). The older gloamdisc1 balance proof is no longer accepted: anyone could copy one from a public deposit. Proofs name who they are for and expire after 1, 7 or 30 days. Anyone checks one at gloam.trade/verify with no wallet. Proofs can never move money. An expired proof is not a false one; ask for a fresh one.
+- Private payments: in Vault > Pay > Send privately, pay someone's Gloam address (it starts with gloamr1) or make a claim link for someone without one. Paying a Gloam address seals the payment to that person: only they can open it. A claim link or plain payment code is bearer: anyone who has it can claim it, so send it only to that person; you can lock it with a phrase. Both are fine for testing in the group on testnet, it is play money. The person you paid finds it under Vault > Pay > Receive.
+- Cash out: Vault > Pay > Cash out, back to a public wallet. It pays out the whole selected balance (there is no amount to pick); the button is "Cash out to my wallet". This part is public.
+- Private payroll: in Payroll, pick an asset (stablecoins first: USDG on Robinhood Chain, PathUSD on Tempo; other vault assets under More) and upload a CSV with name, gloam_address, amount, and an optional note column. Up to 200 people per run. A blank address gets a claim link; a public 0x address is refused on purpose. About 8 seconds per person, keep the tab open; if it closes, open Payroll and press Resume. Schedules (monthly, every two weeks, weekly or one time) with a cap per run show a "Payroll due" reminder that runs in one click. Gloam never holds your keys, so it never pays on its own.
+- Payment requests: Vault > Pay > Receive > Request a payment. Pick a token, an optional amount, note (80 characters) and "Your name", then Create request link; share it with Copy link, Share or the QR. Nothing about a request goes on-chain.
+- Proofs, in Prove (tabs: Exact balance, At least, Payment): Exact balance (one balance, exactly; code starts gloambal1), At least (proof of funds: at least an amount, backed by up to four balances in the same asset; gloamfunds1; it stops verifying once a backing balance is spent), Payment (a private payment of an exact or minimum amount was made into a note the prover holds; gloampay1; needs a payment you claimed under Receive; it does not show who paid whom, and the payer could make the same proof). Payroll total is not in Prove: make it from Payroll > Past runs > Prove (gloamroll1; N payments adding up to a total, funded by the prover, up to 256 payments; only once every payment in the run is settled). "Who is this for?" is required. Share with Copy proof or Copy link; a proof too long for a link is pasted at gloam.trade/verify. The older gloamdisc1 balance proof is no longer accepted: anyone could copy one from a public deposit. Proofs name who they are for and expire after 1, 7 or 30 days. Anyone checks one at gloam.trade/verify with no wallet. Proofs can never move money. An expired proof is not a false one; ask for a fresh one.
 - Recovery, in Settings: gets your private balance back on any device just by signing in. Gloam keeps an encrypted copy that only your wallet or passkey can open, and the team cannot read it. Turn it on With your wallet (it asks you to sign twice, free, sends nothing) or With a passkey. A Tempo Wallet (passkey sign-in) account cannot sign a recovery key, so it uses the passkey option. On a new device, choose Restore from your backup and sign in the same way.
 - Backups: private balances live in your browser. Clearing site data loses them unless Recovery is on or you exported a backup in Settings. An optional passkey lock protects the balance on that browser. Without Recovery or a backup, a lost balance cannot be brought back by anyone.
 - Transparency: gloam.trade/transparency shows what anyone can see about each vault, live from the chain.
-- Stocks and trading: on Robinhood Chain you can already hold and send the sample stock tokens privately (Add privately, then Move). Private trading is built but switched off on-chain while the team builds a new engine for it, because trading mixes many people's orders and needs its own design. It is underway; never promise a date.
+- Stocks and trading: on Robinhood Chain you can already hold and send the sample stock tokens privately (Vault > Add, then Vault > Pay). Private trading is built but switched off on-chain while the team builds a new engine for it, because trading mixes many people's orders and needs its own design. It is underway; never promise a date.
 - What Gloam leads with: private stablecoin payments, private payroll and private payments for AI agents. Gloam is not only stablecoins.
 - Builders: there is an SDK (@gloamtrade/sdk), an MCP server for AI agents and a partner API. Point them to gloam.trade/docs.
+`;
+
+const APP_MAP = `
+THE APP, SCREEN BY SCREEN (exact names)
+- Sidebar: Portfolio, Vault, Payroll, Markets (Robinhood Chain only), Prove, Settings, Docs. The network selector is in the header.
+- Portfolio: balances, the test funds button ("Get testnet funds" on Tempo, "Get test funds" on Robinhood Chain), and a Public activity card that only shows what the explorer shows for the connected wallet. Private adds, payments and proofs never appear there. Its Move button opens Vault > Pay.
+- Vault tabs: Add (Add privately), Pay, Trade (Robinhood Chain only, switched off while the new engine is built) and Public send (Robinhood Chain only, ETH only, a normal public transfer).
+- Vault > Pay has three parts: Send privately, Receive and Cash out.
+- Send privately: "To" takes only a Gloam address (gloamr1...); a 0x address cannot be paid privately. Leave it empty to make a claim link instead. "Pay from" picks ONE balance (Added, Claimed or Change from a payment); a payment cannot combine balances. "Add a note" is optional, up to 80 characters; without a phrase, anyone with the claim link can read it. "+ Save to contacts" keeps up to 50 addresses in this browser.
+- A claim link or code is shown once, right after you send, with Copy code, Download and Share. Save it then: it cannot be shown again, and there is no list of claim links or private payments you sent (only Payroll keeps its links, under Past runs, in that browser). There is no cancel button: a code is bearer, so a sender who still has it can claim it back under Receive like anyone else.
+- Receive: your Gloam address with its QR, Payments to you (checks on open, or Check now), Claim a payment (paste a code or claim link; claiming puts nothing on-chain), and Request a payment. "New address" makes a fresh Gloam address; payments to the old one still open in this browser.
+- Your private balance belongs to the wallet that added or claimed it, on the selected network, in this browser. A balance that "disappeared" usually means a different wallet or network is selected: reconnect the same wallet and network. A Gloam address belongs to the browser it was made in.
+- Settings: Account, Preferences (Fast send, Show USD), Network (Add to wallet), Recovery (Back up now, Turn off and delete backup, Restore from your backup), Passkey lock (Protect with a passkey, then Lock now and Remove passkey; the lock screen has Unlock and "Lost your passkey?", which starts over and only a backup brings the balance back), Backup (Copy backup, Download, Restore; holds balances only, not the Gloam address key, which Recovery does cover), Vault health, Proof files and Help.
+- Payroll: CSV upload, runs of up to 200 people, Download results and Copy claim links after a run, Past runs (last 30 runs, in that browser), schedules with a "Payroll due" reminder.
+- Tempo fees with a browser wallet are paid in PathUSD by default; the wallet menu has a Pay in OUSD option.
 `;
 
 const START_OPEN = `
@@ -59,7 +77,7 @@ GETTING STARTED (testing is open)
 1. Open gloam.trade/app. On Tempo, tap Sign in to create an account or use your passkey (network fees are covered), or use a browser wallet. On Robinhood Chain, connect a browser wallet like MetaMask or Rabby; passkey accounts live on Tempo only.
 2. Claim test funds from Get test funds on Portfolio. On Tempo the button sends test stablecoins straight to your wallet. On Robinhood Chain it opens the Robinhood faucet (test ETH and sample stock tokens, once every 24 hours); test USDG comes from the Paxos faucet linked in the testnet guide.
 3. Add privately: on Portfolio, pick an asset and a small amount, then confirm in your wallet.
-4. Send a private payment from Move to a friend's Gloam address, or make a claim link. Keep Hide my wallet on.
+4. Send a private payment from Vault > Pay > Send privately to a friend's Gloam address, or make a claim link. Keep Hide my wallet on.
 5. Turn on Recovery in Settings so a cleared browser or a new device never loses your balance.
 The full walkthrough is gloam.trade/docs/testnet, and testers share notes in the Testers topic.
 `;
@@ -68,7 +86,7 @@ const START_CLOSED = `
 USING THE APP NOW (the official tester program has not kicked off yet)
 - The app is public on testnet and anyone can use it right now at gloam.trade/app. Help fully with every how-to question and every problem: getting test funds, adding privately, payments, codes, proofs, payroll, recovery, networks. Never refuse or hold back because "testing hasn't started". That is wrong.
 - Only the official tester program (its tasks, rewards and guides) has not kicked off yet. Its directions land in the Testers topic. Say that only when someone asks about the program itself, tasks or how to join it.
-- Quick start: open gloam.trade/app, get test funds from Get test funds on Portfolio, Add privately a small amount, then pay a friend's Gloam address from Move. The full walkthrough is gloam.trade/docs/testnet.
+- Quick start: open gloam.trade/app, get test funds from Get test funds on Portfolio, Add privately a small amount, then pay a friend's Gloam address from Vault > Pay > Send privately. The full walkthrough is gloam.trade/docs/testnet.
 - Anyone who wants to join the tester program can apply at gloam.trade/testers.
 `;
 
@@ -94,7 +112,7 @@ CODES, LINKS AND ADDRESSES (what people paste in the group)
 - On testnet, posting codes and links in the group to test payments is fine, it is play money. On mainnet, a plain code or claim link should go privately to the one person, or pay their Gloam address instead so the payment is sealed to them.
 - "Wrong passphrase or corrupt payment" means the phrase does not match exactly (capitals, spaces) or the code got cut off when it was copied. Re-copy the whole code and type the phrase exactly as the sender wrote it.
 - You cannot open links, codes or wallets. In chat you only see codes as labels like [plain payment code] or [Gloam address], never the code itself, so never ask anyone to paste one. A label means the person DID post the real code and everyone else in the group can see it; never tell them it is missing or did not come through. To troubleshoot, ask for the exact error text, a screenshot or a transaction link.
-- Someone posting their Gloam address (often with "my gloam address") so others can pay them is not asking you anything. If you are tagged on it, at most say others can pay it from Move.
+- Someone posting their Gloam address (often with "my gloam address") so others can pay them is not asking you anything. If you are tagged on it, at most say others can pay it from Vault > Pay > Send privately.
 
 ROBINHOOD CHAIN: ADDING STOCK TOKENS
 - Add privately on Robinhood Chain supports ETH, USDG and the sample stock tokens TSLA, AMZN, PLTR, NFLX and AMD.
@@ -116,11 +134,31 @@ COMMON ISSUES (from the app)
 - The error "The current chain of the wallet (id: 4663) does not match the target chain for the transaction (id: 46630)", or "Current Chain ID: 4663, Expected Chain ID: 46630": the wallet is on Robinhood Chain mainnet and the app needs Robinhood Chain testnet. Fix: tap "Switch to Robinhood Chain" on the wallet button at the top of the app (or Settings > Network > Add to wallet), approve it in the wallet, then try again; if the wallet will not switch, add the testnet by hand with the details above. Any other pair of IDs means the same thing: the wallet is on the first chain, the app wants the second (42431 is Tempo testnet). This is a known fix: answer it straight away, never hand it to the team.
 - "Leave a little ETH for gas": on Robinhood Chain, keep some ETH in the wallet when adding ETH privately.
 - "The backup service failed. Try again." under Settings > Recovery: the backup could not be saved on Gloam's server. It is not the person's wallet or device. Try Back up now again a little later; if it keeps failing, it is on Gloam's side and the team will fix it. The private balance itself is safe on that device meanwhile.
-- "The passkey prompt was closed. Nothing changed.": the passkey window was dismissed or timed out. Tap the button again and finish the Face ID, Touch ID or security key step.
+- Passkeys do not work inside a wallet app's built-in browser (MetaMask, Trust, Coinbase Wallet, OKX and the like): the prompt never opens. There, use "With your wallet" for Recovery, or open gloam.trade in Safari or Chrome to use a passkey. The app now hides the passkey buttons in those browsers and says why.
+- "The passkey prompt was closed. Nothing changed.": the passkey window was dismissed or timed out. Tap the button again and finish the Face ID, Touch ID or security key step. If it keeps happening instantly, they are probably in a wallet app's browser (see above).
+- "The passkey prompt didn't open in this browser.": the browser refused passkeys outright, usually a wallet app's browser. Use With your wallet, or Safari or Chrome.
+- "Paste their Gloam address (it starts with gloamr1)": the To field is empty or holds a 0x address. Private payments go to Gloam addresses only, or leave To empty for a claim link.
+- "That is more than this balance holds.": the amount is bigger than the one balance picked under Pay from. Pick a bigger balance or send less.
+- "This payment is for a different vault or network.": switch the app's network to the one the payment was made on, then claim.
+- "Could not open this ticket with your tag, it was encrypted for someone else.": that sealed payment was for a Gloam address this browser does not hold.
+- "This payment is locked, enter the passphrase from the sender.": it is a locked code; ask the sender for the phrase.
+- "Not enough in the vault yet" or "Not enough in the shared vault to cash out right now": the vault holds too little of that asset at the moment. Try a smaller amount or later.
+- "Your private balance is out of sync." or "This balance is not linked to the vault yet.": tap Refresh and try again.
+- "This money was already spent. Refresh your balance.": that payment was already moved. Refresh.
+- "Your view of the vault is out of date. Refresh and try again.": someone used the vault in between. Refresh and retry.
+- "Too many requests from this device" or "The relay is busy": wait a minute, or turn off Hide my wallet and send from your wallet.
+- "The relay is out of gas" or "The relay is off": turn off Hide my wallet and send from your wallet.
+- "This payment is already being sent. Wait a moment and refresh.": it was submitted twice; the first one is going through.
+- "That address is the vault itself. Cash out to a wallet you control.": pick your own wallet address for the cash out.
+- "The issuer has paused this stablecoin": on Tempo the stablecoin's issuer blocked that add or cash out. Try another stablecoin.
+- "Unlock your private balance with your passkey first.": the passkey lock is on; tap Unlock.
+- "That passkey doesn't open this vault": a different passkey was used than the one that locked it.
+- "No private balances to export." or "Enter the passphrase for this locked backup.": a backup export with nothing in it, or a locked backup that needs its phrase to restore.
+- Payroll: "That is a public wallet, paying it would show the amount" means a CSV row has a 0x address (use a Gloam address or leave it blank for a claim link); "Up to 200 people per run" means split the CSV; "Finish the run first" means a Payroll total can only be proven once every payment in the run is settled.
 - Proof stuck or failed: reload, prove in one tab at a time, try a smaller amount, or use a desktop.
 - Root or tree mismatch: someone else just used the vault. Wait a few seconds, refresh and try again.
 - No private balance after Add privately: check the transaction succeeded on the explorer, hard refresh, and do not clear site data mid-flow.
-- A payment does not show for the person paid: they open Move, Receive, to check for payments to their Gloam address, or use the claim link.
+- A payment does not show for the person paid: they open Vault > Pay > Receive, where Payments to you checks on open (or tap Check now), or paste the code or link under Claim a payment.
 - "Your wallet signs differently each time" when turning on Recovery: that wallet cannot hold a recovery key, use a passkey instead.
 - "This wallet can't use Gloam.": the app's address checks blocked that wallet. An admin has to look at it.
 - RPC errors or rate limits: the public testnet nodes are shared. Wait a minute and retry.
@@ -135,6 +173,7 @@ REPORTING BUGS AND WHERE TO GO
 export function knowledgeBlock(testingOpen: boolean): string {
   return [
     ABOUT.trim(),
+    APP_MAP.trim(),
     (testingOpen ? START_OPEN : START_CLOSED).trim(),
     REWARDS.trim(),
     CODES.trim(),

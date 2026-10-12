@@ -54,6 +54,7 @@ const {
   chainMismatch,
   cleanName,
   cleanReply,
+  isShare,
   explicitReply,
   handsToAdmin,
   hasBearerCode,
@@ -669,7 +670,7 @@ await test("a question in Help gets an answer in Help, as a reply, without a lin
 
   const req = modelCalls()[0]!;
   assert.equal(req.body.model, "claude-sonnet-5-5");
-  assert.equal(req.body.max_tokens, 350);
+  assert.equal(req.body.max_tokens, 240);
   assert.deepEqual(req.body.thinking, { type: "between_tools" });
   assert.equal(req.headers["anthropic-beta"], "server-side-fallback-2026-07-01");
   assert.equal(req.headers["anthropic-version"], "2023-06-01");
@@ -1693,6 +1694,27 @@ await test("sharper: shares are not questions, outages are named, albums get one
   reset();
   await handleUpdate(upd(inTopic(TOPIC.help, "how do I back up my balance?", user(95, "Ola"))));
   assert.ok(!promptOf(0).includes("server storage is down"));
+});
+
+await test("shares: a posted payment, claim link or address gets no reply unless it asks something", async () => {
+  const shareText = scanCodes(`Gloam private payment (0.0001 ETH). This is locked. Ask me for the passphrase separately.\n\ngloam1e.${"A".repeat(120)}`).masked;
+  assert.ok(isShare(shareText), shareText);
+  assert.ok(isShare("[Gloam address] my gloam address"));
+  assert.ok(!isShare("[locked payment code] how do I claim this?"));
+  assert.ok(!isShare("[claim link] this is not working for me"));
+  assert.ok(!isShare("how do I make a claim link"));
+
+  reset();
+  classifierReply = "YES";
+  const ghost = user(96, "lyke");
+  await handleUpdate(upd(inTopic(TOPIC.feedback, `Gloam private payment (0.0001 ETH). This is locked. Ask me for the passphrase separately.\n\ngloam1e.${"A".repeat(120)}`, ghost)));
+  assert.equal(sends().length, 0, "no lecture on a share");
+  assert.equal(classifyCalls().length, 0, "no check either");
+  // asking about it still gets an answer
+  await handleUpdate(upd(inTopic(TOPIC.feedback, "is there a way to track all claim links i've created?", ghost)));
+  assert.equal(sends().length, 1);
+  assert.ok(systemOf(0).join("\n").includes("Never talk about your sources"));
+  assert.ok((modelCalls()[0]!.body.max_tokens as number) <= 240);
 });
 
 await test("nothing was ever sent outside the group or the team's private chats", () => {

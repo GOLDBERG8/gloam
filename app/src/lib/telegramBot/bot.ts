@@ -54,6 +54,7 @@ import {
   chainFix,
   chainMismatch,
   cleanName,
+  isShare,
   cleanReply,
   explicitReply,
   handsToAdmin,
@@ -535,11 +536,14 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   // tagged on another member's message: that message is the question, and the answer goes to its author
   const target = tagged && !toBot && replied && otherMembers(replied, from, me) ? replied : null;
   const targetText = target ? scanCodes(messageText(target)).masked : "";
-  let asked = looksLikeQuestion(text);
+  // a payment, claim link or address shared for others (the app's own share text included) needs no reply
+  const share = isShare(text);
+  let asked = !share && looksLikeQuestion(text);
   // no question mark, but asking for help, reporting a problem or getting Gloam wrong: a quick check decides
   if (
     !asked &&
     !tagged &&
+    !share &&
     !ownPicture &&
     mayNeedHelp(text) &&
     (await hitRateLimit("tg:classify", "tg-classify", CLASSIFY_PER_MIN)).allowed &&
