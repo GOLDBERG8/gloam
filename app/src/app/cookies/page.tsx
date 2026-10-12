@@ -14,9 +14,9 @@ export default function CookiesPage() {
       </p>
       <p>
         The short version: we set no advertising or tracking cookies. The only
-        cookies we set are sign-in cookies, and only when you sign in. Anonymous
-        usage counts run for everyone and use no cookies. &ldquo;Accept
-        all&rdquo; adds one more anonymous count.
+        cookies we set are sign-in cookies, and only when you sign in. Usage
+        counts are anonymous, use no cookies, and run only if you choose
+        &ldquo;Accept all&rdquo;.
       </p>
       <h2>Your preferences</h2>
       <CookiePreferences />
@@ -46,8 +46,13 @@ export default function CookiesPage() {
         except an encrypted recovery backup if you turn recovery on.
       </p>
       <p>
-        <strong>Anonymous usage counts, with no cookies.</strong>{" "}Two kinds run
-        for everyone, whatever you choose:
+        Nothing is counted with &ldquo;Essential only&rdquo;, or before you
+        choose.
+      </p>
+      <h2>What &ldquo;Accept all&rdquo; adds</h2>
+      <p>
+        <strong>Anonymous usage counts, with no cookies.</strong>{" "}Three kinds,
+        all off until you choose &ldquo;Accept all&rdquo;:
       </p>
       <ul>
         <li>
@@ -71,6 +76,12 @@ export default function CookiesPage() {
           proof, even if a browser sends it. No cookie or ID is used, and your
           IP address is not kept with the event.
         </li>
+        <li>
+          <strong>Visits.</strong>{" "}A visit event when you load the site (the
+          page you land on and the site that sent you), and which network you
+          view on the Transparency page, with the same fields as the product
+          counts.
+        </li>
       </ul>
       <p>
         We use these counts to see which parts of Gloam work and where people
@@ -80,14 +91,6 @@ export default function CookiesPage() {
           Privacy Policy
         </a>
         .
-      </p>
-      <h2>What &ldquo;Accept all&rdquo; adds</h2>
-      <p>
-        One more anonymous count of our own, with no cookies: a visit event when
-        you load the site (the page you land on and the site that sent you),
-        and which network you view on the Transparency page. It holds the same
-        fields as the product counts above. With &ldquo;Essential only,&rdquo;
-        or before you choose, it is never sent.
       </p>
       <h2>Changing your choice</h2>
       <p>

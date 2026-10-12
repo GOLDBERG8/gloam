@@ -65,13 +65,15 @@ export default function PrivacyPage() {
         (the line that names your browser and system). It drops anything that
         could be an amount, an address, a name, a label, a note or a proof,
         even if a browser sends it. No cookie or ID is used, and your IP address
-        is not kept with the event. These counts are always on. We keep the
+        is not kept with the event. These counts run only if you choose
+        &ldquo;Accept all&rdquo; in the cookie banner. We keep the
         latest 5,000 events, daily totals for 120 days, and running totals. We
         may also post the events to a private team chat.
       </p>
       <p>
         <strong>Vercel Web Analytics.</strong>{" "}Our hosting provider, Vercel,
-        counts page views for us. It is always on and sets no cookies. Vercel
+        counts page views for us. It runs only if you choose &ldquo;Accept
+        all&rdquo; and sets no cookies. Vercel
         says it tells visits apart with a hash of the request that it discards
         after 24 hours, and records the page, the referring site, your rough
         location (country, region, city), and your browser, operating system

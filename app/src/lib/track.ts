@@ -1,8 +1,9 @@
 /**
  * Product analytics → POST /api/collect → traction store + /admin.
  *
- * Product funnel events always fire (first-party ops metrics).
- * Marketing pageviews still respect cookie consent.
+ * Nothing is sent unless the visitor chose "Accept all" in the cookie banner:
+ * no product events, no pageviews. "Essential only", or no choice yet, counts
+ * nothing.
  */
 
 import { analyticsAllowed } from "@/lib/consent";
@@ -38,14 +39,15 @@ function send(body: TrackPayload) {
   }
 }
 
-/** Product / funnel events, always recorded for traction (no ad cookies). */
+/** Product / funnel events, only after "Accept all" (anonymous, no cookies). */
 export function track(
   event: string,
   meta?: TrackPayload["meta"],
-  opts?: { requireConsent?: boolean },
+  _opts?: { requireConsent?: boolean },
 ) {
+  void _opts; // kept so older callers compile; every event needs consent now
   if (typeof window === "undefined") return;
-  if (opts?.requireConsent && !analyticsAllowed()) return;
+  if (!analyticsAllowed()) return;
   // Recording demo: pretend activity never counts toward real traction.
   if (readDemo()) return;
 
