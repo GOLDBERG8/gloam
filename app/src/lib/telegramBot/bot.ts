@@ -126,6 +126,8 @@ export type BotConfig = {
   testingOpen: boolean;
   /** Admin handles, lower case, without "@". */
   admins: string[];
+  /** TELEGRAM_ADMIN_IDS: admins by numeric id, which survives a handle change. */
+  adminIds: number[];
   /** Who may DM the bot for reports. Ids win over handles when any are set. */
   owners: { ids: number[]; handles: string[] };
   /** TELEGRAM_DAILY_REPORT: the cron sends the report at 21:00 WAT. */
@@ -140,6 +142,14 @@ function handles(raw: string): string[] {
     .filter((h) => /^[a-z0-9_]{3,32}$/.test(h));
 }
 
+/** Numeric Telegram ids from a comma-separated env value (ids never change, handles can). */
+function ids(raw: string | undefined): number[] {
+  return (raw ?? "")
+    .split(",")
+    .map((v) => Number(v.trim()))
+    .filter((n) => Number.isSafeInteger(n) && n > 0);
+}
+
 export function botConfig(): BotConfig {
   const group = Number(process.env.TELEGRAM_GROUP_ID?.trim());
   return {
@@ -147,11 +157,9 @@ export function botConfig(): BotConfig {
     persona: personaName(),
     testingOpen: /^(1|true|yes|on)$/i.test(process.env.GLOAM_TESTING_OPEN?.trim() ?? ""),
     admins: handles(process.env.TELEGRAM_ADMIN_HANDLES ?? ""),
+    adminIds: ids(process.env.TELEGRAM_ADMIN_IDS),
     owners: {
-      ids: (process.env.TELEGRAM_OWNER_IDS ?? "")
-        .split(",")
-        .map((v) => Number(v.trim()))
-        .filter((n) => Number.isSafeInteger(n) && n > 0),
+      ids: ids(process.env.TELEGRAM_OWNER_IDS),
       handles: handles(process.env.TELEGRAM_OWNER_HANDLES ?? "dukedotsol"),
     },
     dailyReport: /^(1|true|yes|on)$/i.test(process.env.TELEGRAM_DAILY_REPORT?.trim() ?? ""),
@@ -166,7 +174,7 @@ export function isOwner(u: { id: number; username?: string }, c: BotConfig): boo
 
 /** The owner or an admin: their warnings are not scams, and they never get code heads-ups or hand-offs. */
 function isTrusted(u: TgUser, c: BotConfig): boolean {
-  return isOwner(u, c) || Boolean(u.username && c.admins.includes(u.username.toLowerCase()));
+  return isOwner(u, c) || c.adminIds.includes(u.id) || Boolean(u.username && c.admins.includes(u.username.toLowerCase()));
 }
 
 // ---------------------------------------------------------------- copy
