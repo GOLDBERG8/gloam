@@ -84,9 +84,43 @@ export function withoutTag(text: string, username?: string): string {
 }
 
 /** The persona's name used as a word ("hey Glim", "thanks glim!"). */
+/**
+ * Speaking to the helper by name: "Glim, ...", "hey glim", "thanks glim!",
+ * "what do you think, glim?". Talking about it ("Glim's answer was wrong") is
+ * not a call for it.
+ */
 export function namesPersona(text: string, name: string): boolean {
   if (!name) return false;
-  return new RegExp(`(^|[^\\p{L}\\p{N}_])${escapeRe(name)}($|[^\\p{L}\\p{N}_])`, "iu").test(text);
+  const n = escapeRe(name);
+  const t = text.replace(/^(?:@\w+[\s,:]*)+/, "").trim();
+  const start = new RegExp(`^(?:(?:hey|hi|hello|yo|ok|okay|thanks|thank you|thx|pls|please|gm|oi)[\\s,]+)?${n}(?![\\p{L}\\p{N}_'\u2019])`, "iu");
+  const end = new RegExp(`(?:^|[\\s,])${n}\\s*[?!.]*$`, "iu");
+  return start.test(t) || end.test(t);
+}
+
+/** Group replies past this many words are cut back to whole paragraphs, then whole sentences. */
+export const REPLY_MAX_WORDS = 75;
+
+const wordsIn = (s: string) => s.split(/\s+/).filter(Boolean).length;
+
+/** Keeps a group reply short when the model runs long. Numbered steps are left whole. */
+export function trimReply(text: string, max = REPLY_MAX_WORDS): string {
+  if (wordsIn(text) <= max || /^\s*\d+[.)]\s/m.test(text)) return text;
+  const paras = text.split(/\n\s*\n/);
+  let out = "";
+  for (const p of paras) {
+    const next = out ? `${out}\n\n${p}` : p;
+    if (wordsIn(next) > max) break;
+    out = next;
+  }
+  if (out) return out;
+  const sentences = paras[0]!.match(/[^.!?]+[.!?]+["')\]]*(?:\s+|$)/g) ?? [paras[0]!];
+  let acc = "";
+  for (const sentence of sentences) {
+    if (acc && wordsIn(acc + sentence) > max) break;
+    acc += sentence;
+  }
+  return acc.trim();
 }
 
 export type Command = { name: string; args: string; forOther: boolean };

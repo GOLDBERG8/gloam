@@ -55,6 +55,7 @@ import {
   chainMismatch,
   cleanName,
   isShare,
+  trimReply,
   cleanReply,
   explicitReply,
   handsToAdmin,
@@ -428,7 +429,7 @@ async function compose(x: Compose): Promise<{ reply: string | null; sentinel: Se
   if (x.image && sentinel === "skip" && (x.input.picture?.mayIgnore || !text)) return { reply: null, sentinel };
   if (!text) return { reply: null, sentinel: null };
   const handles = [...x.c.admins, x.from.username, x.me.username].filter((h): h is string => Boolean(h));
-  return { reply: cleanReply(text, { handles }), sentinel: null };
+  return { reply: cleanReply(trimReply(text), { handles }), sentinel: null };
 }
 
 // ---------------------------------------------------------------- welcomes

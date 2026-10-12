@@ -55,6 +55,7 @@ const {
   cleanName,
   cleanReply,
   isShare,
+  trimReply,
   explicitReply,
   handsToAdmin,
   hasBearerCode,
@@ -1715,6 +1716,46 @@ await test("shares: a posted payment, claim link or address gets no reply unless
   assert.equal(sends().length, 1);
   assert.ok(systemOf(0).join("\n").includes("Never talk about your sources"));
   assert.ok((modelCalls()[0]!.body.max_tokens as number) <= 240);
+});
+
+await test("talking about Glim is not tagging it, and long replies are cut to whole sentences", async () => {
+  assert.ok(namesPersona("thanks glim!", "Glim"));
+  assert.ok(namesPersona("Glim, are you a bot?", "Glim"));
+  assert.ok(namesPersona("hey glim what is a claim link", "Glim"));
+  assert.ok(namesPersona("what do you think, glim?", "Glim"));
+  assert.ok(!namesPersona("Quick correction on Glim's answer. Once a claim link is made, the money leaves", "Glim"));
+  assert.ok(!namesPersona("the issues glim raised are fixed now", "Glim"));
+  assert.ok(!namesPersona("glimmer of hope", "Glim"));
+
+  const long =
+    "No need to be scared, lyke, and no clock is ticking on it. A claim link doesn't expire, and the money just sits inside the link until someone claims it. " +
+    "And since a code is bearer, if you still have it you can claim it back yourself under Vault > Pay > Receive > Claim a payment, same as anyone else. " +
+    "The real risk is losing the link, because there's no list to pull it back up from. So when you send, hit Copy code or Download right then. " +
+    "Plus it's testnet play money, so nothing real is at stake while you get the hang of it.";
+  const cut = trimReply(long);
+  assert.ok(cut.split(/\s+/).length <= 75, cut);
+  assert.ok(cut.endsWith("same as anyone else."), cut);
+  assert.equal(trimReply("Short and sweet."), "Short and sweet.");
+  const steps = `Do this:\n1. Open Vault\n2. Tap Pay\n${"word ".repeat(100)}`;
+  assert.equal(trimReply(steps), steps, "numbered steps stay whole");
+  assert.equal(trimReply(`First paragraph with the answer.\n\nSecond paragraph ${"extra ".repeat(80)}`), "First paragraph with the answer.");
+
+  // the owner correcting Glim on a member's message does not set Glim off
+  reset();
+  const ghost = user(97, "lyke");
+  files.set("shot-q", PNG);
+  const shot = inTopic(TOPIC.feedback, "", ghost, { text: undefined, caption: "also this doesn't work", photo: photo("shot-q") });
+  modelReply = "[[SKIP]]";
+  await handleUpdate(upd(shot));
+  const before = sends().length;
+  await handleUpdate(upd(inTopic(TOPIC.feedback, "The issues have been fixed. Quick correction on Glim's answer: once a claim link is made, the money leaves your balance.", OWNER, { reply_to_message: shot })));
+  assert.equal(sends().length, before, "no reply to the owner's correction");
+
+  // and a long model answer reaches the group trimmed
+  reset();
+  modelReply = long;
+  await handleUpdate(upd(inTopic(TOPIC.help, "is there a return period if a claim link isn't claimed?", ghost)));
+  assert.ok(String(sends()[0]!.body.text).split(/\s+/).length <= 75);
 });
 
 await test("nothing was ever sent outside the group or the team's private chats", () => {
