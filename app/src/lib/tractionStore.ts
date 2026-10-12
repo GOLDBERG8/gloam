@@ -143,6 +143,13 @@ function bump(m: Map<string, number>, k: string) {
   m.set(k, (m.get(k) ?? 0) + 1);
 }
 
+/** Days this instance has already set the day counter's expiry for. */
+const expirySet = new Set<string>();
+/** Events this instance has stored since it last trimmed the recent list. */
+let sinceTrim = 0;
+/** Trim the recent list every this many events per instance, not on every one. */
+const TRIM_EVERY = 25;
+
 export async function recordTractionEvent(ev: StoredEvent): Promise<void> {
   mem.unshift(ev);
   if (mem.length > MEM_MAX) mem.length = MEM_MAX;
@@ -163,15 +170,23 @@ export async function recordTractionEvent(ev: StoredEvent): Promise<void> {
   if (!redisConfigured()) return;
   try {
     const dayKey = `${REDIS_DAY_PREFIX}${day}`;
+    // each command is billed, so the list trim and the day's expiry run now and then, not per event
+    const trim = ++sinceTrim >= TRIM_EVERY;
+    const expire = !expirySet.has(day);
     await redisPipeline([
       ["LPUSH", REDIS_LIST, JSON.stringify(ev)],
-      ["LTRIM", REDIS_LIST, 0, REDIS_MAX - 1],
+      ...(trim ? [["LTRIM", REDIS_LIST, 0, REDIS_MAX - 1]] : []),
       ["HINCRBY", REDIS_COUNTERS, ev.t, 1],
       ["HINCRBY", REDIS_COUNTERS, "total", 1],
       ...dims.map((d) => ["HINCRBY", REDIS_DIMS, d, 1]),
       ["HINCRBY", dayKey, ev.t, 1],
-      ["EXPIRE", dayKey, DAY_TTL_SEC],
+      ...(expire ? [["EXPIRE", dayKey, DAY_TTL_SEC]] : []),
     ]);
+    if (trim) sinceTrim = 0;
+    if (expire) {
+      if (expirySet.size > 7) expirySet.clear();
+      expirySet.add(day);
+    }
   } catch {
     /* non-fatal, memory still has it for this instance */
   }

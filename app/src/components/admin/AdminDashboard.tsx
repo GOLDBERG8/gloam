@@ -41,6 +41,9 @@ type MetricsPayload = {
 type Tab = "overview" | "users" | "events" | "partners" | "testers" | "bugs";
 
 /** Events added for proofs, the public ledger, requests and notes; shown first in the breakdowns. */
+/** How often an open admin tab refreshes. Only while it is on screen: each refresh reads Redis. */
+const ADMIN_REFRESH_MS = 60_000;
+
 const NEW_EVENTS = [
   "proof_created",
   "proof_create_failed",
@@ -174,7 +177,9 @@ export function AdminDashboard() {
 
   useEffect(() => {
     if (!authed) return;
-    const id = window.setInterval(() => void loadMetrics(), 45_000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadMetrics();
+    }, ADMIN_REFRESH_MS);
     return () => window.clearInterval(id);
   }, [authed, loadMetrics]);
 
@@ -816,7 +821,9 @@ function PartnersPanel() {
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 45_000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, ADMIN_REFRESH_MS);
     return () => {
       live = false;
       window.clearInterval(id);
@@ -925,7 +932,9 @@ function TestersPanel() {
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 45_000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, ADMIN_REFRESH_MS);
     return () => {
       live = false;
       window.clearInterval(id);
@@ -1045,7 +1054,9 @@ function BugsPanel() {
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 45_000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, ADMIN_REFRESH_MS);
     return () => {
       live = false;
       window.clearInterval(id);

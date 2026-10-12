@@ -2,15 +2,40 @@
  * Per-IP rate limits, shared by the hosted MCP server and the API routes.
  * Fixed windows: one minute unless the caller asks for longer (an hour, a day).
  *
- * Counts live in Upstash Redis (UPSTASH_REDIS_REST_URL + _TOKEN, the same REST
- * pipeline as lib/tractionStore) so every serverless instance shares them, and
- * fall back to process memory when Redis is not set or does not answer.
+ * Counts that guard money, accounts or paid APIs live in Upstash Redis
+ * (UPSTASH_REDIS_REST_URL + _TOKEN, the same REST pipeline as lib/tractionStore)
+ * so every serverless instance shares them, and fall back to process memory
+ * when Redis is not set or does not answer. Counts for cheap reads (LOCAL_BUCKETS)
+ * stay in memory: every request there used to cost Redis commands, and the
+ * Vercel firewall already limits each IP across instances.
  * IPs are stored hashed, never in the clear, and expire with their window.
  */
 import { createHash } from "crypto";
 import { redisConfigured } from "@/lib/tractionStore";
 
 const WINDOW_SEC = 60;
+
+/**
+ * Buckets counted per instance, never in Redis: public reads, page analytics,
+ * MCP requests and the helper bot's per-minute limits. What stays shared: the
+ * relay, sign-in recovery, the testers form, admin and partner sign-in, partner
+ * writes, address screening (a paid API) and the bot's daily model caps.
+ */
+const LOCAL_BUCKETS = new Set([
+  "req",
+  "verify",
+  "collect",
+  "markets",
+  "activity",
+  "vault-leaves",
+  "api-ip",
+  "screen-policy",
+  "tg-user",
+  "tg-global",
+  "tg-bug",
+  "tg-warn",
+  "tg-classify",
+]);
 const PREFIX = "gloam:mcp:rl:";
 const MEM_MAX_KEYS = 10_000;
 
@@ -77,27 +102,32 @@ function logRedisMiss(e: unknown) {
   console.warn("gloam_ratelimit_redis_miss", e instanceof Error ? e.message : "unknown");
 }
 
-async function redisIncr(key: string, windowSec: number): Promise<number> {
+/** Upstash's REST pipeline: results in order, with the reason when a command fails. */
+async function redisCall(cmds: (string | number)[][]): Promise<{ result?: unknown; error?: string }[]> {
   const url = process.env.UPSTASH_REDIS_REST_URL!.trim().replace(/\/$/, "");
   const token = process.env.UPSTASH_REDIS_REST_TOKEN!.trim();
   const res = await fetch(`${url}/pipeline`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify([
-      ["INCR", key],
-      ["EXPIRE", key, windowSec * 2],
-    ]),
+    body: JSON.stringify(cmds),
     cache: "no-store",
     signal: AbortSignal.timeout(2_000),
   });
   if (!res.ok) throw new Error(`redis ${res.status}`);
-  const json = (await res.json()) as { result?: unknown; error?: string }[];
+  return (await res.json()) as { result?: unknown; error?: string }[];
+}
+
+/** One command per hit: the window's first hit also sets the expiry. */
+async function redisIncr(key: string, windowSec: number): Promise<number> {
+  const json = await redisCall([["INCR", key]]);
   const n = Number(json?.[0]?.result);
   if (!Number.isFinite(n) || n < 1) {
     // Upstash puts the reason (a spent quota, say) in the command's error
     const why = typeof json?.[0]?.error === "string" ? `: ${json[0].error.slice(0, 160)}` : "";
     throw new Error(`redis: bad INCR result${why}`);
   }
+  // if this fails the key only lingers in storage; the next window counts under a new key
+  if (n === 1) await redisCall([["EXPIRE", key, windowSec * 2]]).catch(() => {});
   return n;
 }
 
@@ -120,7 +150,7 @@ export async function hitRateLimit(
   const slot = span === WINDOW_SEC ? `${window}` : `${span}s:${window}`;
   const key = `${PREFIX}${bucket}:${ipKey(ip)}:${slot}`;
   let n: number;
-  if (redisConfigured()) {
+  if (redisConfigured() && !LOCAL_BUCKETS.has(bucket)) {
     try {
       n = await redisIncr(key, span);
     } catch (e) {
