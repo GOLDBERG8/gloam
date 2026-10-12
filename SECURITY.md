@@ -27,6 +27,15 @@ If a scanner still flags a **public** tx hash or zkey, mark as false positive. I
 - Settings → backup: plain JSON or passphrase-locked (`gloambak1.…`).
 - Anyone with an unlocked backup can spend those notes.
 
-## Report
+## Reporting a vulnerability
 
-Operational security issues for the product: email [hello@gloam.trade](mailto:hello@gloam.trade) or open a private channel with `@gloamtrade`. Testnet funds only until production ceremony + audit.
+Thank you for looking. Please report privately; don't open a public issue or post details until a fix ships.
+
+- **Where:** email [hello@gloam.trade](mailto:hello@gloam.trade) with "Security" in the subject, or DM [@gloamtrade](https://x.com/gloamtrade). A machine-readable contact is at [gloam.trade/.well-known/security.txt](https://gloam.trade/.well-known/security.txt).
+- **What helps:** the affected contract, route or page, exact steps or a proof of concept, and the impact you saw. Tests on a fork or a local chain are ideal.
+- **What's in scope:** the vault and verifier contracts, the circuits, the app and API at gloam.trade, the relay, the SDK and the MCP server.
+- **Please don't:** run attacks that degrade the service for others, touch other people's data or notes, or use social engineering.
+- **What to expect:** we aim to reply within 3 days, keep you updated, and credit you once it's fixed if you'd like that.
+- **Rewards:** Gloam is testnet only and does not run a paid bug bounty yet. We'll say so here when that changes.
+
+Past reviews and every finding with its status: [`contracts/audit/REMEDIATION.md`](./contracts/audit/REMEDIATION.md).

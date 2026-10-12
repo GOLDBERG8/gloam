@@ -10,18 +10,21 @@
 | Public swap (when pools exist) | No — existing DEX router |
 | **Shield / private send / private trade / cash out** | **Yes — this package** |
 
-## Live (RH testnet)
+## Live (testnet)
 
-Product vault (sealed): **`0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740`**
+| Network | Vault `ShieldPoolPoseidon` | Pay memo board |
+| --- | --- | --- |
+| Robinhood Chain testnet `46630` | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` | `0x689ebd9d30E0235c73fd8f10236F850CDB3c5DCE` |
+| Tempo Moderato testnet `42431` | `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb` | `0x3ca88712e9219b5ee4c82d31cafeab64c9e9b4e3` |
 
-Full addresses: [deployments/poseidon-testnet.json](./deployments/poseidon-testnet.json)
+Full addresses, verifiers and superseded pools: [deployments/poseidon-testnet.json](./deployments/poseidon-testnet.json) and [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 | Feature | Status |
 | --- | --- |
-| Shield / unshield / transfer | Live (dev keys) |
-| Sealed private trade | Built, switched off on-chain pending audit |
+| Shield / unshield / transfer | Live (dev keys), no admin withdraw, 3-day timelock on rule changes |
+| Sealed private trade | Built, switched off on-chain; must not be re-enabled until the H1 and ZK-1 fixes land (see audit/REMEDIATION.md) |
 | Pay memos | Live |
-| Production keys | Not yet |
+| Production keys | Not yet: a multi-party ceremony comes before mainnet |
 
 ## Stack
 
