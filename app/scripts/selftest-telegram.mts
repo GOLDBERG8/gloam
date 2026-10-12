@@ -136,6 +136,8 @@ const calls: Call[] = [];
 /** Every message sent in the whole run, never reset. */
 const everySend: Call[] = [];
 let modelReply = "Sure, Add privately is on Portfolio. Proofs take about 10 to 30 seconds.";
+/** How many of the next answer calls fail with a server error. */
+let modelFailures = 0;
 /** What the "should I answer this?" check says. */
 let classifierReply = "NO";
 /** Files Telegram would serve, by file_id. */
@@ -181,6 +183,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return reply({ content: [{ type: "text", text: classifierReply }], stop_reason: "end_turn" });
     }
     calls.push({ host: url.host, method: "messages", body, headers });
+    if (modelFailures > 0) {
+      modelFailures--;
+      return new Response("overloaded", { status: 529 });
+    }
     return reply({ content: [{ type: "text", text: modelReply }], stop_reason: "end_turn" });
   }
   throw new Error(`unexpected fetch to ${url.host}`);
@@ -194,6 +200,7 @@ function reset() {
   calls.length = 0;
   modelReply = "Sure, Add privately is on Portfolio. Proofs take about 10 to 30 seconds.";
   classifierReply = "NO";
+  modelFailures = 0;
   // each test starts with fresh answer limits (they live in process memory here)
   (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
 }
@@ -1638,6 +1645,54 @@ await test("wrong network: the error is read, answered without the team, and nam
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
   }
   for (const x of sends()) assert.ok(!/[—\p{Extended_Pictographic}]/u.test(String(x.body.text)));
+});
+
+await test("sharper: shares are not questions, outages are named, albums get one look, a failed model gets a second try", async () => {
+  assert.equal(looksLikeQuestion("My gloam address"), false);
+  assert.equal(looksLikeQuestion("my balance is not showing after the deposit"), true);
+  assert.equal(looksLikeQuestion("my tx failed"), true);
+  assert.equal(looksLikeBugReport("Backup is not currently working"), true);
+  assert.equal(looksLikeBugReport("the faucet keeps failing for me"), true);
+  const kb = knowledgeBlock(false);
+  assert.ok(kb.includes("A label means the person DID post the real code"));
+  assert.ok(kb.includes("The backup service failed. Try again."));
+
+  // a model that fails once: the smaller model answers instead of the fixed hand-off
+  reset();
+  modelFailures = 1;
+  modelReply = "Proofs run in your browser, so give it 10 to 30 seconds.";
+  await handleUpdate(upd(inTopic(TOPIC.help, "why is my proof taking so long?", user(92, "Rae"))));
+  assert.equal(modelCalls().length, 2);
+  assert.equal(modelCalls()[1]!.body.model, "claude-haiku-5-5");
+  assert.equal(sends()[0]!.body.text, modelReply);
+
+  // Redis out: an album with a caption gets one reply that names the outage
+  reset();
+  process.env.GLOAM_PARTNERS_STORE = "";
+  process.env.UPSTASH_REDIS_REST_URL = "https://redis.test";
+  process.env.UPSTASH_REDIS_REST_TOKEN = "test";
+  try {
+    const eph = user(93, "E");
+    files.set("backup-1", PNG);
+    files.set("backup-2", PNG);
+    modelReply = "That one's on our side, E: the backup store is down right now. Try Back up now again later; your private balance is safe.";
+    await handleUpdate(upd(inTopic(TOPIC.feedback, "", eph, { text: undefined, caption: "Backup is not currently working", photo: photo("backup-1"), media_group_id: "alb-1" })));
+    await handleUpdate(upd(inTopic(TOPIC.feedback, "", eph, { text: undefined, photo: photo("backup-2"), media_group_id: "alb-1" })));
+    assert.equal(sends().length, 1, "one reply for the album");
+    assert.ok(promptOf(0).includes("Gloam's server storage is down"));
+    // a shared address needs no reply
+    const before = sends().length;
+    await handleUpdate(upd(inTopic(TOPIC.general, "My gloam address", user(94, "GodSpeed"))));
+    assert.equal(sends().length, before);
+  } finally {
+    process.env.GLOAM_PARTNERS_STORE = "memory";
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  }
+  // with storage up, no outage note
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.help, "how do I back up my balance?", user(95, "Ola"))));
+  assert.ok(!promptOf(0).includes("server storage is down"));
 });
 
 await test("nothing was ever sent outside the group or the team's private chats", () => {

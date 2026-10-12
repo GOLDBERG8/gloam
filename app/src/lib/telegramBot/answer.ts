@@ -167,6 +167,8 @@ export type AskInput = {
   adminInvolved?: boolean;
   /** The helper already handed this person to an admin in this conversation. */
   handedOff?: boolean;
+  /** Gloam's own storage is failing right now (the helper's reads and writes fail too). */
+  storageDown?: boolean;
 };
 
 /** Keeps quoted chat text from closing the tags around it. */
@@ -203,6 +205,12 @@ export function userPrompt(i: AskInput): string {
   if (i.picture) notes.push(pictureLine(i.picture, quote(i.asker)));
   if (i.adminInvolved) notes.push("An admin is already in this conversation, so do not say you'll flag it or take it to Boss Duke. Just help.");
   else if (i.handedOff) notes.push("You already handed this person to Boss Duke earlier in this conversation. Do not hand off again; keep helping or ask for the exact error.");
+  if (i.storageDown) {
+    notes.push(
+      "Right now Gloam's server storage is down and the team is fixing it. Until then, things the app saves on Gloam's server fail: recovery backups (\"The backup service failed. Try again.\"), the testers form and saved partner settings. " +
+        "Private balances, deposits and payments are not affected. If this message is about one of those failures, say it is a known outage on Gloam's side, nothing is wrong with their wallet or device, and to try again later. Do not hand it to the team.",
+    );
+  }
   const extra = notes.length ? `\n${notes.join("\n")}` : "";
   return `${where}${bug}${history}
 
@@ -250,7 +258,8 @@ export async function wantsHelper(text: string): Promise<boolean> {
 }
 
 /** Why a call gave no text: no key or the kind is switched off (cap 0), today's cap is spent, or the call failed. */
-export type ModelMiss = "off" | "cap" | "failed";
+/** Why there is no text: switched off, past the daily cap, the API erred (worth a retry), or no usable answer. */
+export type ModelMiss = "off" | "cap" | "error" | "failed";
 
 type Turn = { role: "user" | "assistant"; content: unknown };
 
@@ -286,7 +295,7 @@ async function callModel(
     });
     if (!res.ok) {
       console.warn("telegram: model call failed", o.purpose, res.status);
-      return { miss: "failed" };
+      return { miss: "error" };
     }
     const json = (await res.json()) as ApiResponse;
     if (json.stop_reason === "refusal") {
@@ -308,7 +317,7 @@ async function callModel(
     return end > 40 ? { text: text.slice(0, end + 1) } : { miss: "failed" };
   } catch (e) {
     console.warn("telegram: model call failed", o.purpose, e instanceof Error ? e.name : "unknown");
-    return { miss: "failed" };
+    return { miss: "error" };
   }
 }
 
@@ -331,12 +340,16 @@ export async function askModel(
   model = botModel(),
   purpose: ModelPurpose = "answer",
 ): Promise<string | null> {
-  const r = await callModel([{ text: system, cache: true }], [{ role: "user", content: withImage(user, image) }], {
-    model,
-    purpose,
-    maxTokens: MAX_TOKENS,
-    image: Boolean(image),
-  });
+  const ask = (m: string) =>
+    callModel([{ text: system, cache: true }], [{ role: "user", content: withImage(user, image) }], {
+      model: m,
+      purpose,
+      maxTokens: MAX_TOKENS,
+      image: Boolean(image),
+    });
+  let r = await ask(model);
+  // the API erred (overloaded, a timeout): one more try on the smaller model before the fixed reply
+  if ("miss" in r && r.miss === "error" && model !== CLASSIFIER_MODEL) r = await ask(CLASSIFIER_MODEL);
   return "text" in r ? r.text : null;
 }
 

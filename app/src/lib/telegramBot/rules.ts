@@ -168,7 +168,10 @@ export function isVague(text: string, persona: string): boolean {
 const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
 const GREETING = /^(?:(?:hi|hey|hello|yo|gm|hiya|guys|all|everyone|team|folks|pls|please|ok|okay|okk|so|hmm|wait|but|then|also|alright|bro|boss)\b[\s,!.:-]*)+/i;
 const QUESTION_START =
-  /^(?:how|what|why|where|when|wen|who|which|whats|can|could|would|will|should|does|do|did|is|are|has|have|any|anyone|anybody|my|i can't(?! wait)|i cant(?! wait)|i cannot|i can not|not working|error|pls|please explain)(?![\p{L}\p{N}_])/iu;
+  /^(?:how|what|why|where|when|wen|who|which|whats|can|could|would|will|should|does|do|did|is|are|has|have|any|anyone|anybody|i can't(?! wait)|i cant(?! wait)|i cannot|i can not|not working|error|pls|please explain)(?![\p{L}\p{N}_])/iu;
+/** "my ..." is a question only with a problem in it: "my balance is gone", not "my gloam address". */
+const MY_PROBLEM =
+  /\b(?:not|no longer|isn't|isnt|wasn't|won't|wont|can't|cant|cannot|didn't|didnt|doesn't|doesnt|missing|gone|disappeared|vanished|showing|shows|stuck|zero|empty|lost|wrong|failed|fails|error|broken|pending)\b/i;
 
 /**
  * Reads like a question, which the helper answers unprompted in every topic
@@ -193,11 +196,12 @@ export function looksLikeQuestion(text: string): boolean {
     .trim();
   if (t.length < 8 || t.split(/\s+/).length < 2) return false;
   if (t.includes("?")) return true;
+  if (/^my\b/i.test(t)) return MY_PROBLEM.test(t);
   return QUESTION_START.test(t);
 }
 
 const BUG_WORDS =
-  /\b(?:bugs?|buggy|broken|crash(?:ed|es|ing)?|glitch(?:y|es)?|not working|isn't working|doesn't work|does not work|didn't work|won't (?:load|open|work|connect|send|go through)|stuck|fail(?:s|ed|ing|ure)?|errors?)\b/i;
+  /\b(?:bugs?|buggy|broken|crash(?:ed|es|ing)?|glitch(?:y|es)?|not (?:[a-z]+ ){0,2}working|isn't (?:[a-z]+ ){0,2}working|no longer works?|keeps? failing|doesn't work|does not work|didn't work|won't (?:load|open|work|connect|send|go through)|stuck|fail(?:s|ed|ing|ure)?|errors?)\b/i;
 const NOT_A_BUG = /\b(?:no|zero|without|any|found no)\s+(?:bugs?|issues?|errors?)\b|\bbug[- ]free\b/i;
 
 /** Reads like a bug report, for Testers and Feedback. Needs a few words and a problem word. */

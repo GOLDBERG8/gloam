@@ -381,9 +381,20 @@ export async function takeImageSlot(now = Date.now()): Promise<boolean> {
 }
 
 /** True for the first picture of an album, so an album of screenshots gets one look, not one each. */
-export async function firstOfAlbum(mediaGroupId: string): Promise<boolean> {
-  const [r] = await kv([["SET", `${PREFIX}album:${mediaGroupId}`, "1", "EX", ALBUM_TTL_SEC, "NX"]]);
-  return r !== null;
+/** Albums this instance has seen, used while Redis is out. */
+const memAlbums = new Map<string, number>();
+
+export async function firstOfAlbum(mediaGroupId: string, now = Date.now()): Promise<boolean> {
+  try {
+    const [r] = await kv([["SET", `${PREFIX}album:${mediaGroupId}`, "1", "EX", ALBUM_TTL_SEC, "NX"]]);
+    return r !== null;
+  } catch {
+    // Redis down is no reason to skip a screenshot: remember the album here instead
+    for (const [id, at] of memAlbums) if (now - at > ALBUM_TTL_SEC * 1000) memAlbums.delete(id);
+    if (memAlbums.has(mediaGroupId)) return false;
+    memAlbums.set(mediaGroupId, now);
+    return true;
+  }
 }
 
 /** One payment-code heads-up per person per day: true (and noted) when this one is due. */

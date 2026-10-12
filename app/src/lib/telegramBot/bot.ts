@@ -556,7 +556,9 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   const kept = question ? memoryText(question) : null;
   if (kept) await logQuestion(kept).catch(() => {});
   if (!tagged && !bug && !asked && !bareShot) return;
-  if (bareShot && !bug && msg.media_group_id && !(await firstOfAlbum(msg.media_group_id).catch(() => false))) return;
+  // every handled album message marks the album, so a captioned first picture also covers the rest
+  const albumFirst = msg.media_group_id ? await firstOfAlbum(msg.media_group_id).catch(() => true) : true;
+  if (bareShot && !bug && !albumFirst) return;
 
   const saved = bug ? await saveBug(msg, from, text, topicName(topic)) : false;
   // asked or tagged and not answered: kept for the team (a saved bug report is answered by being saved,
@@ -613,6 +615,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
       picture: pictureMsg ? { seen: Boolean(image), mayIgnore: bareShot, fromReply: pictureMsg !== msg && pictureMsg !== target } : null,
       adminInvolved,
       handedOff,
+      storageDown,
     },
   });
 
@@ -764,8 +767,15 @@ async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
 // ---------------------------------------------------------------- entry
 
 /** Handles one authenticated update. Never throws for a bad update; network failures are swallowed. */
+/** Whether this update found Gloam's storage failing: the helper's own first write is the probe. */
+let storageDown = false;
+
 export async function handleUpdate(update: TgUpdate, c: BotConfig = botConfig()): Promise<void> {
-  const seen = await markSeen(update.update_id).catch(() => ({ fresh: true, welcomePending: false }));
+  storageDown = false;
+  const seen = await markSeen(update.update_id).catch(() => {
+    storageDown = true;
+    return { fresh: true, welcomePending: false };
+  });
   if (!seen.fresh) return;
 
   if (update.chat_member) {
