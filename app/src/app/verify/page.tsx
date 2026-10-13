@@ -221,17 +221,83 @@ const FACTS = [
   },
 ];
 
+/**
+ * After a proof is checked: the person who opened it can make one of their
+ * own. Shown under every finished result, shared link or pasted.
+ */
+function MakeYourOwn({ from }: { from: "link" | "page" }) {
+  return (
+    <div className="gl-card mt-4 p-5 sm:p-7">
+      <p className="text-[18px] leading-snug tracking-[-0.01em] text-foreground">Make your own proof</p>
+      <p className="mt-1.5 max-w-[52ch] text-[14px] leading-relaxed text-mute">
+        Prove you hold at least an amount, that you paid someone, or what a payroll run added up to.
+        Nothing else about you shows.
+      </p>
+      <AppLink
+        href="/app/disclose"
+        onClick={() => track("verify_make_own", { from })}
+        className="btn btn-ink btn-lg btn-block mt-5 sm:w-auto"
+      >
+        Make your own proof
+      </AppLink>
+      <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
+        Free on testnet: add some test money privately, then prove only what you choose.
+      </p>
+    </div>
+  );
+}
+
+/** The result of a check, in the order it appears: working, refused, or the verdict. */
+function ResultView({ result }: { result: Result }) {
+  if (result.kind === "checking") {
+    return (
+      <div className="gl-card mt-4 p-5 sm:p-7" aria-live="polite">
+        <div className="h-6 w-24 animate-pulse rounded-full bg-surface" />
+        <div className="mt-5 h-9 w-3/4 animate-pulse rounded-lg bg-surface" />
+        <p className="mt-4 text-[13.5px] text-mute">{result.step}…</p>
+      </div>
+    );
+  }
+  if (result.kind === "bad") {
+    return (
+      <div role="alert" className="mt-4 rounded-[18px] bg-danger-soft p-5 sm:p-6">
+        <p className="text-[13px] font-medium text-danger">{result.title ?? "Not verified"}</p>
+        <p className="mt-1.5 text-[15px] text-foreground">{result.reason}</p>
+      </div>
+    );
+  }
+  if (result.kind === "proof") return <ProofVerdict proof={result.p} result={result.r} checkedAt={result.at} />;
+  if (result.kind === "legacy") {
+    return (
+      <div role="alert" className="mt-4 rounded-[18px] bg-warn-soft p-5 sm:p-6">
+        <p className="text-[13px] font-medium text-warn">Can&apos;t confirm who holds this</p>
+        <p className="tnum mt-1.5 text-[15px] text-foreground">
+          {`It claims ${amountOf(result.d.amount, assetAddress(result.d.asset))} ${symbolOf(
+            assetAddress(result.d.asset),
+            Number(result.d.chainId)
+          )} in Gloam's vault.`}
+        </p>
+        <p className="mt-1.5 text-[14px] leading-relaxed text-soft">{LEGACY_DISCLOSURE}</p>
+      </div>
+    );
+  }
+  return null;
+}
+
 export default function VerifyPage() {
   const urlProof = useSyncExternalStore(onUrlChange, proofFromUrl, noProof);
   const [typed, setTyped] = useState<string | null>(null);
   const token = typed ?? urlProof ?? "";
   const [result, setResult] = useState<Result>({ kind: "idle" });
+  // Opened from a shared link (and not swapped for another proof): the result
+  // leads the page, phone first, instead of the hero.
+  const shared = Boolean(urlProof) && typed === null;
 
-  // Opened from a shared link: check the proof straight away and bring the result into view.
+  // Opened from a shared link: check the proof straight away.
   useEffect(() => {
     if (!urlProof) return;
     const t = window.setTimeout(() => {
-      document.getElementById("proof")?.scrollIntoView({ block: "start" });
+      setTyped(null); // a new link replaces whatever was pasted
       void onVerify(urlProof);
     }, 0);
     return () => window.clearTimeout(t);
@@ -312,156 +378,185 @@ export default function VerifyPage() {
   }
 
   const checking = result.kind === "checking";
+  const finished = result.kind === "proof" || result.kind === "legacy" || result.kind === "bad";
+
+  /** Leave the shared proof for the paste box, without the old proof in the address bar. */
+  function checkAnother() {
+    window.history.replaceState(null, "", "/verify");
+    setTyped("");
+    setResult({ kind: "idle" });
+    // straight to the paste box (on a phone the section heading sits far above it)
+    window.setTimeout(() => {
+      const box = document.getElementById("disc");
+      box?.scrollIntoView({ block: "center" });
+      box?.focus({ preventScroll: true });
+    }, 0);
+  }
 
   return (
     <div className="relative min-h-screen bg-panel text-foreground">
       <Header />
 
       <main>
-        {/* hero */}
-        <section className="mx-auto max-w-[1400px] px-4 pt-3 sm:px-7 sm:pt-6">
-          <div className="gl-panel flex min-h-[560px] flex-col justify-end px-6 pb-8 pt-24 sm:px-12 sm:pb-12 lg:min-h-[620px]">
-            <FlowField />
-            <div className="grid grid-cols-1 items-end gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:gap-14">
-              <div className="max-w-[720px]">
-                <p className="t-label">Verify</p>
-                <h1 className="t-display-xl mt-5">Check it yourself</h1>
-                <p className="mt-6 max-w-[48ch] text-[16px] leading-relaxed text-soft sm:text-[17px]">
-                  Two things anyone can check without asking us: a proof someone
-                  shared with you, and the contracts that hold the money. No
-                  wallet, no account.
-                </p>
-                <div className="mt-8 flex flex-wrap gap-2">
-                  <a href="#proof" className="btn btn-ink btn-lg">
-                    Verify a proof
-                  </a>
-                  <a href="#contracts" className="btn btn-ghost btn-lg">
-                    See the contracts
-                  </a>
-                </div>
-              </div>
+        {shared && (
+          <section className="mx-auto max-w-[680px] px-5 pb-16 pt-8 sm:pb-24 sm:pt-14">
+            <p className="t-label">Shared with you</p>
+            <h1 className="mt-3 text-balance text-[34px] font-light leading-[1.08] tracking-[-0.02em] sm:text-[46px]">
+              A Gloam proof, checked here
+            </h1>
+            <p className="mt-3 max-w-[52ch] text-[15px] leading-relaxed text-soft">
+              Your browser checks it against Gloam&apos;s vault on chain. Nothing is sent to Gloam, and you
+              need no wallet or account.
+            </p>
+            <ResultView result={result} />
+            {finished && <MakeYourOwn from="link" />}
+            <div className="mt-6 flex flex-wrap gap-x-8 gap-y-3">
+              <button
+                type="button"
+                onClick={checkAnother}
+                className="t-label inline-flex min-h-10 items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
+              >
+                Check a different proof <span aria-hidden>→</span>
+              </button>
+              <Link
+                href="/docs/proofs"
+                className="t-label inline-flex min-h-10 items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
+              >
+                How proofs work <span aria-hidden>→</span>
+              </Link>
+            </div>
+          </section>
+        )}
 
-              <div className="gl-glass w-full p-2 lg:max-w-[420px] lg:justify-self-end">
-                <div className="rounded-[12px] bg-panel p-4 sm:p-5">
-                  <p className="text-[13px] text-mute">What the code allows</p>
-                  <ul className="mt-2 divide-y divide-line">
-                    {[
-                      ["Admin withdraw", "Does not exist"],
-                      ["Rule changes", "3-day public notice"],
-                      ["Relay", "Submit or refuse only"],
-                      ["Source", "Public on GitHub"],
-                    ].map(([k, v]) => (
-                      <li key={k} className="flex min-h-[48px] items-center justify-between gap-4 text-[14px]">
-                        <span className="text-mute">{k}</span>
-                        <span className="inline-flex items-center gap-2 text-right text-foreground">
-                          {v}
-                          <span className="text-sealed">
-                            <CheckMark size={15} />
+        {/* hero */}
+        {!shared && (
+          <section className="mx-auto max-w-[1400px] px-4 pt-3 sm:px-7 sm:pt-6">
+            <div className="gl-panel flex min-h-[560px] flex-col justify-end px-6 pb-8 pt-24 sm:px-12 sm:pb-12 lg:min-h-[620px]">
+              <FlowField />
+              <div className="grid grid-cols-1 items-end gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:gap-14">
+                <div className="max-w-[720px]">
+                  <p className="t-label">Verify</p>
+                  <h1 className="t-display-xl mt-5">Check it yourself</h1>
+                  <p className="mt-6 max-w-[48ch] text-[16px] leading-relaxed text-soft sm:text-[17px]">
+                    Two things anyone can check without asking us: a proof someone
+                    shared with you, and the contracts that hold the money. No
+                    wallet, no account.
+                  </p>
+                  <div className="mt-8 flex flex-wrap gap-2">
+                    <a href="#proof" className="btn btn-ink btn-lg">
+                      Verify a proof
+                    </a>
+                    <a href="#contracts" className="btn btn-ghost btn-lg">
+                      See the contracts
+                    </a>
+                  </div>
+                </div>
+
+                <div className="gl-glass w-full p-2 lg:max-w-[420px] lg:justify-self-end">
+                  <div className="rounded-[12px] bg-panel p-4 sm:p-5">
+                    <p className="text-[13px] text-mute">What the code allows</p>
+                    <ul className="mt-2 divide-y divide-line">
+                      {[
+                        ["Admin withdraw", "Does not exist"],
+                        ["Rule changes", "3-day public notice"],
+                        ["Relay", "Submit or refuse only"],
+                        ["Source", "Public on GitHub"],
+                      ].map(([k, v]) => (
+                        <li key={k} className="flex min-h-[48px] items-center justify-between gap-4 text-[14px]">
+                          <span className="text-mute">{k}</span>
+                          <span className="inline-flex items-center gap-2 text-right text-foreground">
+                            {v}
+                            <span className="text-sealed">
+                              <CheckMark size={15} />
+                            </span>
                           </span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* verify a proof */}
-        <section id="proof" className="mx-auto max-w-[1240px] scroll-mt-20 px-6 py-20 sm:py-28">
-          <div className="grid grid-cols-1 gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
-            <div>
-              <h2 className="t-display-l max-w-[12ch]">Verify a proof</h2>
-              <p className="mt-5 max-w-[46ch] text-[16px] leading-relaxed text-mute">
-                Someone sent you a Gloam proof. Paste it here to check it: an
-                exact balance, a minimum they hold, a private payment, or the
-                total of a payroll run they paid. You see only what they chose
-                to prove, and nothing about who they are or what else they hold.
-              </p>
-              <ul className="mt-10 divide-y divide-line border-y border-line text-[15px]">
-                <li className="flex justify-between gap-6 py-4">
-                  <span>The proof</span>
-                  <span className="text-right text-mute">Checked in your browser</span>
-                </li>
-                <li className="flex justify-between gap-6 py-4">
-                  <span>The vault</span>
-                  <span className="text-right text-mute">Looked up on chain</span>
-                </li>
-                <li className="flex justify-between gap-6 py-4">
-                  <span>Sent to Gloam</span>
-                  <span className="text-right text-mute">Nothing</span>
-                </li>
-              </ul>
-              <div className="mt-8 flex flex-wrap gap-x-8 gap-y-3">
-                <AppLink
-                  href="/app/disclose"
-                  className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
-                >
-                  Make a proof of your own <span aria-hidden>→</span>
-                </AppLink>
-                <Link
-                  href="/docs/proofs"
-                  className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
-                >
-                  How proofs work <span aria-hidden>→</span>
-                </Link>
-              </div>
-            </div>
-
-            <div className="min-w-0">
-              <div className="gl-card p-5 sm:p-7">
-                <label htmlFor="disc" className="text-[13px] text-mute">
-                  Proof
-                </label>
-                <textarea
-                  id="disc"
-                  value={token}
-                  onChange={(e) => setTyped(e.target.value)}
-                  placeholder="gloamfunds1:…"
-                  rows={6}
-                  spellCheck={false}
-                  className="tnum mt-2 w-full resize-y break-all rounded-xl border border-line-strong bg-panel px-4 py-3.5 text-[14px] leading-relaxed text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-foreground focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--foreground)_12%,transparent)]"
-                />
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-[12.5px] text-faint">
-                    Starts with gloamfunds1:, gloampay1:, gloamroll1: or gloambal1:
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void onVerify()}
-                    disabled={!token.trim() || checking}
-                    className="btn btn-ink"
+        {!shared && (
+          <section id="proof" className="mx-auto max-w-[1240px] scroll-mt-20 px-6 py-20 sm:py-28">
+            <div className="grid grid-cols-1 gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
+              <div>
+                <h2 className="t-display-l max-w-[12ch]">Verify a proof</h2>
+                <p className="mt-5 max-w-[46ch] text-[16px] leading-relaxed text-mute">
+                  Someone sent you a Gloam proof. Paste it here to check it: an
+                  exact balance, a minimum they hold, a private payment, or the
+                  total of a payroll run they paid. You see only what they chose
+                  to prove, and nothing about who they are or what else they hold.
+                </p>
+                <ul className="mt-10 divide-y divide-line border-y border-line text-[15px]">
+                  <li className="flex justify-between gap-6 py-4">
+                    <span>The proof</span>
+                    <span className="text-right text-mute">Checked in your browser</span>
+                  </li>
+                  <li className="flex justify-between gap-6 py-4">
+                    <span>The vault</span>
+                    <span className="text-right text-mute">Looked up on chain</span>
+                  </li>
+                  <li className="flex justify-between gap-6 py-4">
+                    <span>Sent to Gloam</span>
+                    <span className="text-right text-mute">Nothing</span>
+                  </li>
+                </ul>
+                <div className="mt-8 flex flex-wrap gap-x-8 gap-y-3">
+                  <AppLink
+                    href="/app/disclose"
+                    className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
                   >
-                    {checking ? (result as { step: string }).step + "…" : "Verify"}
-                  </button>
+                    Make a proof of your own <span aria-hidden>→</span>
+                  </AppLink>
+                  <Link
+                    href="/docs/proofs"
+                    className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
+                  >
+                    How proofs work <span aria-hidden>→</span>
+                  </Link>
                 </div>
               </div>
 
-              {result.kind === "bad" && (
-                <div role="alert" className="mt-4 rounded-[18px] bg-danger-soft p-5 sm:p-6">
-                  <p className="text-[13px] font-medium text-danger">{result.title ?? "Not verified"}</p>
-                  <p className="mt-1.5 text-[15px] text-foreground">{result.reason}</p>
+              <div className="min-w-0">
+                <div className="gl-card p-5 sm:p-7">
+                  <label htmlFor="disc" className="text-[13px] text-mute">
+                    Proof
+                  </label>
+                  <textarea
+                    id="disc"
+                    value={token}
+                    onChange={(e) => setTyped(e.target.value)}
+                    placeholder="gloamfunds1:…"
+                    rows={6}
+                    spellCheck={false}
+                    className="tnum mt-2 w-full resize-y break-all rounded-xl border border-line-strong bg-panel px-4 py-3.5 text-[14px] leading-relaxed text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-foreground focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--foreground)_12%,transparent)]"
+                  />
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-[12.5px] text-faint">
+                      Starts with gloamfunds1:, gloampay1:, gloamroll1: or gloambal1:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void onVerify()}
+                      disabled={!token.trim() || checking}
+                      className="btn btn-ink"
+                    >
+                      {checking ? (result as { step: string }).step + "…" : "Verify"}
+                    </button>
+                  </div>
                 </div>
-              )}
 
-              {result.kind === "proof" && <ProofVerdict proof={result.p} result={result.r} checkedAt={result.at} />}
-
-              {result.kind === "legacy" && (
-                <div role="alert" className="mt-4 rounded-[18px] bg-warn-soft p-5 sm:p-6">
-                  <p className="text-[13px] font-medium text-warn">Can&apos;t confirm who holds this</p>
-                  <p className="tnum mt-1.5 text-[15px] text-foreground">
-                    {`It claims ${amountOf(result.d.amount, assetAddress(result.d.asset))} ${symbolOf(
-                      assetAddress(result.d.asset),
-                      Number(result.d.chainId)
-                    )} in Gloam's vault.`}
-                  </p>
-                  <p className="mt-1.5 text-[14px] leading-relaxed text-soft">{LEGACY_DISCLOSURE}</p>
-                </div>
-              )}
+                {result.kind !== "checking" && <ResultView result={result} />}
+                {finished && <MakeYourOwn from="page" />}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* the contracts */}
         <section id="contracts" className="mx-auto max-w-[1400px] scroll-mt-20 px-4 sm:px-7">

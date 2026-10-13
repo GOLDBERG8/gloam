@@ -1328,10 +1328,85 @@ export function MoveView() {
 
               {mode === "send" && (
                 <div className="mt-6 space-y-5">
-                  {/* Same mental model as public Send: To + Amount */}
+                  {/* Same mental model as public Send: To + Amount. A claim
+                      link is the way to pay someone who has never used Gloam,
+                      so it sits next to the address, not under the form. */}
                   <div>
-                    <label htmlFor="recv-tag" className="text-[13px] text-mute">
+                    <p id="pay-to" className="text-[13px] text-mute">
                       To
+                    </p>
+                    <div
+                      role="radiogroup"
+                      aria-labelledby="pay-to"
+                      className="mt-2 grid grid-cols-2 gap-2"
+                    >
+                      {(
+                        [
+                          ["direct", "Gloam address", "They already use Gloam"],
+                          ["bearer", "Claim link", "Anyone, even new to Gloam"],
+                        ] as const
+                      ).map(([style, label, hint]) => {
+                        const active = payStyle === style;
+                        return (
+                          <button
+                            key={style}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => {
+                              if (style === "bearer") setRecipientTag("");
+                              else setSendPassphrase("");
+                              setPayStyle(style);
+                            }}
+                            className={`flex min-h-[60px] min-w-0 items-start gap-3 rounded-[14px] border px-3.5 py-3 text-left transition-colors ${
+                              active
+                                ? "border-foreground bg-panel"
+                                : "border-line hover:border-line-strong hover:bg-surface"
+                            }`}
+                          >
+                            <span
+                              aria-hidden
+                              className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors ${
+                                active ? "border-foreground bg-foreground" : "border-line-strong"
+                              }`}
+                            >
+                              {active && <span className="h-2 w-2 rounded-full bg-panel" />}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[14.5px] leading-snug text-foreground">{label}</span>
+                              <span className="mt-0.5 block text-[12px] leading-snug text-mute">{hint}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {payStyle === "bearer" ? (
+                      <div className="mt-3">
+                        <p className="text-[12.5px] leading-relaxed text-mute">
+                          You get a link to send any way you like. They tap it and
+                          claim in Gloam. Anyone with the link can claim it, so add
+                          a phrase to lock it and share the phrase separately.
+                        </p>
+                        <label
+                          htmlFor="send-pass"
+                          className="mt-4 block text-[13px] text-mute"
+                        >
+                          Phrase (optional)
+                        </label>
+                        <input
+                          id="send-pass"
+                          type="text"
+                          autoComplete="off"
+                          value={sendPassphrase}
+                          onChange={(e) => setSendPassphrase(e.target.value)}
+                          placeholder="e.g. coffee-tuesday"
+                          className="gl-input mt-2"
+                        />
+                      </div>
+                    ) : (
+                    <>
+                    <label htmlFor="recv-tag" className="sr-only">
+                      Their Gloam address
                     </label>
                     <input
                       id="recv-tag"
@@ -1345,7 +1420,7 @@ export function MoveView() {
                         else if (v === "") setPayStyle("direct");
                       }}
                       placeholder="Their Gloam address (gloamr1…)"
-                      className="gl-input tnum mt-2"
+                      className="gl-input tnum mt-3"
                     />
                     <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
                       Like sending to an address, but private. They find their
@@ -1383,6 +1458,8 @@ export function MoveView() {
                           </button>
                         )}
                       </div>
+                    )}
+                    </>
                     )}
                   </div>
 
@@ -1431,47 +1508,6 @@ export function MoveView() {
                     locked={Boolean(sendPassphrase.trim())}
                   />
 
-                  {!recipientTag.trim() && (
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPayStyle((s) => (s === "bearer" ? "direct" : "bearer"))
-                        }
-                        aria-expanded={payStyle === "bearer"}
-                        className="-my-2 inline-flex min-h-10 items-center text-[13px] text-mute transition-colors hover:text-foreground"
-                      >
-                        {payStyle === "bearer"
-                          ? "Pay a Gloam address instead"
-                          : "No Gloam address? Pay with a claim link →"}
-                      </button>
-                      {payStyle === "bearer" && (
-                        <div className="mt-3 rounded-[16px] bg-surface p-[16px]">
-                          <p className="text-[13px] leading-relaxed text-mute">
-                            You get a link that holds the payment. Anyone with the
-                            link can claim it, so add a phrase to lock it and share
-                            the phrase separately.
-                          </p>
-                          <label
-                            htmlFor="send-pass"
-                            className="mt-4 block text-[13px] text-mute"
-                          >
-                            Phrase (optional)
-                          </label>
-                          <input
-                            id="send-pass"
-                            type="text"
-                            autoComplete="off"
-                            value={sendPassphrase}
-                            onChange={(e) => setSendPassphrase(e.target.value)}
-                            placeholder="e.g. coffee-tuesday"
-                            className="gl-input mt-2"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   {relayToggle}
 
                   {!connectedOk ? (
@@ -1503,6 +1539,8 @@ export function MoveView() {
                         </>
                       ) : treeLoading ? (
                         "Syncing your balance…"
+                      ) : payStyle === "bearer" ? (
+                        "Make the claim link"
                       ) : (
                         "Send privately"
                       )}
