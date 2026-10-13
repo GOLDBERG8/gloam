@@ -54,6 +54,7 @@ import {
   chainFix,
   chainMismatch,
   cleanName,
+  isFollowUp,
   isShare,
   trimReply,
   cleanReply,
@@ -361,7 +362,7 @@ async function saveBug(msg: TgMessage, from: TgUser, text: string, thread: strin
 /** History, then this message added to it. A store outage just means no history. */
 async function historyFor(chatId: number, topic: number, name: string, text: string) {
   const t = memoryText(text);
-  return threadThenRemember(chatId, topic, t ? { n: name, t } : null).catch(() => []);
+  return threadThenRemember(chatId, topic, t ? { n: name, t, a: Math.floor(Date.now() / 1000) } : null).catch(() => []);
 }
 
 /** A member's message other than the asker's own, the bot's, a channel's or another bot's. */
@@ -539,6 +540,8 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   const targetText = target ? scanCodes(messageText(target)).masked : "";
   // a payment, claim link or address shared for others (the app's own share text included) needs no reply
   const share = isShare(text);
+  // their next message right after the helper answered them
+  const followUp = isFollowUp(history, name, Math.floor(Date.now() / 1000));
   let asked = !share && looksLikeQuestion(text);
   // no question mark, but asking for help, reporting a problem or getting Gloam wrong: a quick check decides
   if (
@@ -546,9 +549,9 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
     !tagged &&
     !share &&
     !ownPicture &&
-    mayNeedHelp(text) &&
+    (mayNeedHelp(text) || (followUp && wordCount(text) >= 2)) &&
     (await hitRateLimit("tg:classify", "tg-classify", CLASSIFY_PER_MIN)).allowed &&
-    (await wantsHelper(text))
+    (await wantsHelper(text, followUp))
   ) {
     asked = true;
   }
@@ -646,7 +649,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   if (!sent) return missed("no_answer");
   // "not going to guess" with no hand-off (an admin asked, or admins are on it): still a question nobody answered
   if (!answer && (fallback === "unsure" || fallback === "admins_here")) await missed("no_answer");
-  await remember(chatId, topic, { n: c.persona, t: reply.slice(0, 400), b: 1 }).catch(() => {});
+  await remember(chatId, topic, { n: c.persona, t: reply.slice(0, 400), b: 1, a: Math.floor(Date.now() / 1000) }).catch(() => {});
   if (answer) await count("answered");
   // handed to a person: the hand-off fallback, or an answer that says an admin will follow up (bug thanks aside).
   // Once per person per conversation, and never when an admin asked or is already on it.

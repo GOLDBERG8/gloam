@@ -202,7 +202,7 @@ export function isVague(text: string, persona: string): boolean {
 const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
 const GREETING = /^(?:(?:hi|hey|hello|yo|gm|hiya|guys|all|everyone|team|folks|pls|please|ok|okay|okk|so|hmm|wait|but|then|also|alright|bro|boss)\b[\s,!.:-]*)+/i;
 const QUESTION_START =
-  /^(?:how|what|why|where|when|wen|who|which|whats|can|could|would|will|should|does|do|did|is|are|has|have|any|anyone|anybody|i can't(?! wait)|i cant(?! wait)|i cannot|i can not|not working|error|pls|please explain)(?![\p{L}\p{N}_])/iu;
+  /^(?:how|what|why|where|when|wen|who|which|whats|can|could|would|will|should|does|do|did|is|are|has|have|any|anyone|anybody|i can't(?! wait)|i cant(?! wait)|i cannot|i can not|not working|error|pls|please explain|brief me|explain|tell me|walk me|show me|guide me|help me|teach me|i need help)(?![\p{L}\p{N}_])/iu;
 /** "my ..." is a question only with a problem in it: "my balance is gone", not "my gloam address". */
 const MY_PROBLEM =
   /\b(?:not|no longer|isn't|isnt|wasn't|won't|wont|can't|cant|cannot|didn't|didnt|doesn't|doesnt|missing|gone|disappeared|vanished|showing|shows|stuck|zero|empty|lost|wrong|failed|fails|error|broken|pending)\b/i;
@@ -244,8 +244,11 @@ export function looksLikeQuestion(text: string): boolean {
     .trim();
   if (t.length < 8 || t.split(/\s+/).length < 2) return false;
   if (t.includes("?")) return true;
-  if (/^my\b/i.test(t)) return MY_PROBLEM.test(t);
-  return QUESTION_START.test(t);
+  // any sentence can carry the ask: "Okay. Brief me on what's to be done. How's it meant to go"
+  return t
+    .split(/(?<=[.!\n])\s+/)
+    .map((part) => part.trim().replace(GREETING, "").trim())
+    .some((part) => (/^my\b/i.test(part) ? MY_PROBLEM.test(part) : QUESTION_START.test(part)));
 }
 
 const BUG_WORDS =
@@ -765,7 +768,21 @@ export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
 // ---------------------------------------------------------------- memory
 
 /** One line of a thread's recent history, as kept in the store. */
-export type ChatLine = { n: string; t: string; b?: 1 };
+export type ChatLine = { n: string; t: string; b?: 1; /** when, in seconds (lines saved before this field have none) */ a?: number };
+
+/** How long after the helper answers someone their next message counts as a follow-up to it. */
+export const FOLLOW_UP_SEC = 15 * 60;
+
+/**
+ * The person is continuing a conversation with the helper: the last line in
+ * the topic is the helper's, recent, and the line before it was theirs.
+ */
+export function isFollowUp(history: ChatLine[], name: string, nowSec: number): boolean {
+  const last = history[history.length - 1];
+  const before = history[history.length - 2];
+  if (!last?.b || !before || before.b || before.n !== name) return false;
+  return typeof last.a === "number" && nowSec - last.a <= FOLLOW_UP_SEC;
+}
 
 /**
  * Text fit to keep in a private chat's memory with the team, or null for

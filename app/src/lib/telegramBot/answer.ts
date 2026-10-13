@@ -253,8 +253,9 @@ YES when the message asks for help (even without a question mark), describes a p
 NO for greetings, hype, jokes, thanks, chat between members that needs no help, someone sharing a payment code, claim link or their Gloam address for others to use, or anything not about Gloam or wallets.`;
 
 /** For a message not phrased as a question: should the helper answer it anyway? */
-export async function wantsHelper(text: string): Promise<boolean> {
-  const out = await askModel(CLASSIFIER_SYSTEM, `Message: ${text.slice(0, 600)}`, null, CLASSIFIER_MODEL, "check");
+export async function wantsHelper(text: string, followUp = false): Promise<boolean> {
+  const lead = followUp ? "This message comes right after Glim answered the same person, so it may be a follow-up to Glim.\n" : "";
+  const out = await askModel(CLASSIFIER_SYSTEM, `${lead}Message: ${text.slice(0, 600)}`, null, CLASSIFIER_MODEL, "check");
   return /^\s*yes\b/i.test(out ?? "");
 }
 

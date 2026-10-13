@@ -1758,6 +1758,35 @@ await test("talking about Glim is not tagging it, and long replies are cut to wh
   assert.ok(String(sends()[0]!.body.text).split(/\s+/).length <= 75);
 });
 
+await test("follow-ups: the next message after Glim answers someone is checked, and asks hide in any sentence", async () => {
+  assert.ok(looksLikeQuestion("Okay. Brief me on what's to be done.\n\nHow's an expected process meant to be"));
+  assert.ok(looksLikeQuestion("cool. explain the vault to me"));
+  assert.ok(looksLikeQuestion("thanks. walk me through payroll"));
+  assert.ok(!looksLikeQuestion("Okay. Sounds good"));
+  assert.ok(!looksLikeQuestion("My gloam address"));
+
+  reset();
+  const samy = user(98, "Samy");
+  modelReply = "Yep, the app is open on testnet at gloam.trade/app.";
+  await handleUpdate(upd(inTopic(TOPIC.help, "Yeah. We good for testing now?", samy)));
+  assert.equal(sends().length, 1);
+  // a follow-up with no question words goes to the check, which says yes
+  classifierReply = "YES";
+  modelReply = "Grab test funds on Portfolio, add a little privately, then pay a friend from Vault > Pay.";
+  await handleUpdate(upd(inTopic(TOPIC.help, "Okay sure. Lay it out for me step by step", samy)));
+  assert.equal(classifyCalls().length, 1);
+  assert.ok(String((classifyCalls()[0]!.body.messages as { content: string }[])[0]!.content).includes("follow-up to Glim"));
+  assert.equal(sends().length, 2);
+  // small talk after an answer: the check says no, so Glim stays quiet
+  classifierReply = "NO";
+  await handleUpdate(upd(inTopic(TOPIC.help, "ah nice one", samy)));
+  assert.equal(sends().length, 2);
+  // someone else talking after Glim's answer is not a follow-up to Glim
+  const before = classifyCalls().length;
+  await handleUpdate(upd(inTopic(TOPIC.help, "lol same here bro", user(99, "Uche"))));
+  assert.equal(classifyCalls().length, before);
+});
+
 await test("nothing was ever sent outside the group or the team's private chats", () => {
   assert.ok(everySend.length > 10);
   const teamChats = new Set([OWNER.id, 501, YOMI.id, ADMIN_BY_ID.id]);
