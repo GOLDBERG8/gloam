@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import { motion, useReducedMotion } from "framer-motion";
 import { useConfig, useConnect } from "wagmi";
 import { WALLETCONNECT_ID, WALLET_APPS, isTouchDevice } from "@/lib/walletConnect";
@@ -180,7 +181,7 @@ export function WalletConnectSheet({ open, onClose }: { open: boolean; onClose: 
           {stage.kind === "starting" && (
             <div className={phone ? "grid gap-2" : "mx-auto aspect-square w-full max-w-[240px]"}>
               {phone ? (
-                [0, 1, 2, 3].map((i) => <div key={i} className="h-[52px] animate-pulse rounded-2xl bg-surface" />)
+                [0, 1, 2, 3].map((i) => <div key={i} className="h-[56px] animate-pulse rounded-2xl bg-surface" />)
               ) : (
                 <div className="h-full w-full animate-pulse rounded-2xl bg-surface" />
               )}
@@ -207,18 +208,32 @@ export function WalletConnectSheet({ open, onClose }: { open: boolean; onClose: 
                     key={w.id}
                     href={href}
                     {...(web ? { target: "_blank", rel: "noreferrer" } : {})}
-                    className="flex h-[52px] items-center justify-between rounded-2xl border border-line px-4 text-[15px] text-foreground transition-colors hover:bg-surface"
+                    className="flex h-[56px] items-center gap-3 rounded-2xl border border-line pl-3 pr-4 text-[15px] text-foreground transition-colors hover:bg-surface"
                   >
-                    {w.name}
+                    <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] bg-white ring-1 ring-line">
+                      <Image
+                        src={w.logo}
+                        alt=""
+                        width={32}
+                        height={32}
+                        className={w.id === "metamask" ? "h-6 w-6 object-contain" : "h-8 w-8 object-cover"}
+                      />
+                    </span>
+                    <span className="min-w-0 flex-1">{w.name}</span>
                     <Chevron />
                   </a>
                 );
               })}
               <a
                 href={stage.uri}
-                className="flex h-[52px] items-center justify-between rounded-2xl px-4 text-[14px] text-mute transition-colors hover:bg-surface hover:text-foreground"
+                className="flex h-[56px] items-center gap-3 rounded-2xl pl-3 pr-4 text-[14px] text-mute transition-colors hover:bg-surface hover:text-foreground"
               >
-                Another wallet app
+                <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-surface text-mute">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 6v12M6 12h12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <span className="min-w-0 flex-1">Another wallet app</span>
                 <Chevron />
               </a>
             </div>

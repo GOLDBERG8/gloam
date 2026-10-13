@@ -115,9 +115,29 @@ export function lazyWalletConnect(): CreateConnectorFn | null {
  * the WalletConnect link. Universal links fall back to the app's store page
  * when it is not installed.
  */
-export const WALLET_APPS: { id: string; name: string; link: (uri: string) => string }[] = [
-  { id: "metamask", name: "MetaMask", link: (u) => `https://metamask.app.link/wc?uri=${encodeURIComponent(u)}` },
-  { id: "trust", name: "Trust Wallet", link: (u) => `https://link.trustwallet.com/wc?uri=${encodeURIComponent(u)}` },
-  { id: "coinbase", name: "Coinbase Wallet", link: (u) => `https://go.cb-w.com/wc?uri=${encodeURIComponent(u)}` },
-  { id: "okx", name: "OKX Wallet", link: (u) => `okex://main/wc?uri=${encodeURIComponent(u)}` },
+export const WALLET_APPS: { id: string; name: string; logo: string; link: (uri: string) => string }[] = [
+  {
+    id: "metamask",
+    name: "MetaMask",
+    logo: "/brand/logos/wallets/metamask.svg",
+    link: (u) => `https://metamask.app.link/wc?uri=${encodeURIComponent(u)}`,
+  },
+  {
+    id: "trust",
+    name: "Trust Wallet",
+    logo: "/brand/logos/wallets/trust.png",
+    link: (u) => `https://link.trustwallet.com/wc?uri=${encodeURIComponent(u)}`,
+  },
+  {
+    id: "coinbase",
+    name: "Coinbase Wallet",
+    logo: "/brand/logos/wallets/coinbase.svg",
+    link: (u) => `https://go.cb-w.com/wc?uri=${encodeURIComponent(u)}`,
+  },
+  {
+    id: "okx",
+    name: "OKX Wallet",
+    logo: "/brand/logos/wallets/okx.png",
+    link: (u) => `okex://main/wc?uri=${encodeURIComponent(u)}`,
+  },
 ];

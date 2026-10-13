@@ -64,7 +64,8 @@ export default function DocsPrivatePayPage() {
 
       <h2>Claim links you send</h2>
       <p>
-        No Gloam address? Leave To empty and you get a claim link instead.
+        No Gloam address? Pick <strong>Claim link</strong> under To and you
+        get a link that holds the payment instead.
         Every one you send is kept under <strong>Sent links</strong>, below
         the Send privately form, encrypted in that browser like your balance.
         Each shows whether its money has moved yet. Copy a code again, or take
