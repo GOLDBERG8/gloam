@@ -10,6 +10,9 @@
  */
 
 import { useEffect, useState } from "react";
+import { useNetwork } from "@/components/app/NetworkProvider";
+import { appClaimPath, claimLinkFor } from "@/lib/claimLink";
+import { isClaimLink } from "@/lib/funnel";
 
 export function PaymentTicketShare({
   code,
@@ -30,6 +33,12 @@ export function PaymentTicketShare({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
   const [shared, setShared] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const { networkKey } = useNetwork();
+  const isAddr = code.startsWith("gloamr1.");
+  // A tappable link: plain claim codes open the claim page, anything else opens the app's claim screen.
+  const origin = typeof window === "undefined" ? "https://www.gloam.trade" : window.location.origin;
+  const link = isAddr ? null : isClaimLink(code) ? claimLinkFor(code, networkKey, origin) : `${origin}${appClaimPath(code, networkKey)}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +47,7 @@ export function PaymentTicketShare({
     void (async () => {
       try {
         const QR = await import("qrcode");
-        const url = await QR.toDataURL(code, {
+        const url = await QR.toDataURL(link ?? code, {
           margin: 2,
           width: 240,
           errorCorrectionLevel: "M",
@@ -54,7 +63,19 @@ export function PaymentTicketShare({
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, link]);
+
+  async function copyLink() {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      onSaved?.();
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      /* parent may surface */
+    }
+  }
 
   async function copy() {
     try {
@@ -86,8 +107,8 @@ export function PaymentTicketShare({
         text: code.startsWith("gloamr1.")
           ? `My Gloam address. Paste it in Gloam under Pay to send me money privately.\n\n${code}`
           : locked
-          ? `Gloam private payment${amountLabel ? ` (${amountLabel})` : ""}. This is locked. Ask me for the passphrase separately.\n\n${code}`
-          : `Gloam private payment${amountLabel ? ` (${amountLabel})` : ""}. To claim it, open Gloam and go to Vault, Pay, Receive.\n\n${code}`,
+          ? `I sent you a private payment on Gloam${amountLabel ? ` (${amountLabel})` : ""}. It's locked: I'll send you the phrase separately. Tap to claim it:\n\n${link ?? code}`
+          : `I sent you a private payment on Gloam${amountLabel ? ` (${amountLabel})` : ""}. Tap to claim it:\n\n${link ?? code}`,
       });
       onSaved?.();
       setShared(true);
@@ -145,8 +166,8 @@ export function PaymentTicketShare({
               </>
             ) : (
               <>
-                Send it any way you like: a message, AirDrop or this QR code. They
-                open Pay, then Receive.
+                Send the link any way you like: a message, AirDrop or this QR code.
+                They tap it and claim in Gloam.
                 {locked
                   ? " It is locked, so only the right phrase opens it."
                   : " Anyone with this link can claim it, so treat it like cash."}
@@ -161,11 +182,21 @@ export function PaymentTicketShare({
           )}
 
           <div className="mt-3 flex flex-wrap gap-2">
+            {link && (
+              <button
+                type="button"
+                onClick={() => void copyLink()}
+                className="btn btn-ink btn-sm"
+                aria-live="polite"
+              >
+                {linkCopied ? "Copied" : "Copy link"}
+              </button>
+            )}
             {!isAddress && (
               <button
                 type="button"
                 onClick={() => void copy()}
-                className="btn btn-ink btn-sm"
+                className="btn btn-ghost btn-sm"
                 aria-live="polite"
               >
                 {copied ? "Copied" : "Copy code"}

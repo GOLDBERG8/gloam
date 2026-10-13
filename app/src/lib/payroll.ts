@@ -25,6 +25,7 @@
  * every payee was a claim link and the spent notes are still on this device.
  */
 import type { Address, Hex, PublicClient } from "viem";
+import { claimLinkFor } from "./claimLink";
 import { fieldToHex, noteCommitmentPoseidon, noteNullifierPoseidon, randomSecretField } from "@gloamtrade/sdk";
 import { buildTransferWitness } from "@/lib/proverTransfer";
 import { fieldToBytes32, proveTransferInBrowser } from "@/lib/proveClient";
@@ -351,7 +352,7 @@ export function newBatch(args: {
 
 export function claimLink(origin: string, networkKey: string, code: string): string {
   // The code rides in the URL fragment, which browsers never send to a server.
-  return `${origin}/app/vault?tab=move&net=${encodeURIComponent(networkKey)}#claim=${encodeURIComponent(code)}`;
+  return claimLinkFor(code, networkKey, origin);
 }
 
 function csvCell(v: string): string {

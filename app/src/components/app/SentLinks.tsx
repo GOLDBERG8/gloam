@@ -9,6 +9,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { claimLinkFor } from "@/lib/claimLink";
+import { isClaimLink } from "@/lib/funnel";
+import { allNetworks } from "@/lib/networks";
 import type { Hex } from "viem";
 import { decodeNotePackage } from "@/lib/notePackage";
 import { formatAssetAmount } from "@/lib/shield";
@@ -157,7 +160,10 @@ export function SentLinks({
 
   async function copy(rec: SentLink) {
     try {
-      await navigator.clipboard.writeText(rec.code);
+      // a tappable link for plain claim codes; anything else as the code itself
+      const net = allNetworks().find((n) => n.chainId === rec.chainId)?.key;
+      const text = net && isClaimLink(rec.code) ? claimLinkFor(rec.code, net, window.location.origin) : rec.code;
+      await navigator.clipboard.writeText(text);
       setCopied(rec.id);
       window.setTimeout(() => setCopied((c) => (c === rec.id ? null : c)), 2000);
     } catch {
@@ -299,7 +305,7 @@ export function SentLinks({
                         aria-live="polite"
                         className="btn btn-ghost btn-sm"
                       >
-                        {copied === rec.id ? "Copied" : "Copy code"}
+                        {copied === rec.id ? "Copied" : isClaimLink(rec.code) ? "Copy link" : "Copy code"}
                       </button>
                       {canTakeBack(rec, status) && phraseFor !== rec.id && (
                         <button

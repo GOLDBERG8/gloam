@@ -157,7 +157,7 @@ export function MoveView() {
   const [sendPassphrase, setSendPassphrase] = useState("");
   const [importText, setImportText] = useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
-  const [importOk, setImportOk] = useState<{ text: string; note?: string } | null>(null);
+  const [importOk, setImportOk] = useState<{ text: string; note?: string; fresh?: boolean } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successTitle, setSuccessTitle] = useState("Done");
   const [busy, setBusy] = useState(false);
@@ -230,6 +230,11 @@ export function MoveView() {
         countLinkOpened(code);
         setMode("receive");
         setImportText(code);
+        // opened from a claim link: go straight to the claim, not the address above it
+        window.setTimeout(() => {
+          const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          document.getElementById("claim-payment")?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+        }, 400);
       }
     }, 0);
     return () => window.clearTimeout(t);
@@ -982,8 +987,8 @@ export function MoveView() {
             ? `Claimed ${r.label} into your private balance. Send it or cash out when you are ready.`
             : `Claimed ${r.label}. It shows up here once your balance refreshes.`,
         note: r.note,
+        fresh: !r.already,
       });
-      setMode("cashout");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
     }
@@ -1220,6 +1225,36 @@ export function MoveView() {
                     label="Their note"
                     className="mt-1 text-soft"
                   />
+                )}
+                {importOk.fresh && (
+                  <>
+                    <span className="mt-2 block text-soft">
+                      Every new person in the vault makes every payment in it harder to trace, yours included.
+                    </span>
+                    <span className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImportOk(null);
+                          setPayStyle("bearer");
+                          setMode("send");
+                        }}
+                        className="btn btn-ink btn-sm"
+                      >
+                        Send one back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImportOk(null);
+                          setMode("cashout");
+                        }}
+                        className="btn btn-ghost btn-sm"
+                      >
+                        Cash out
+                      </button>
+                    </span>
+                  </>
                 )}
               </span>
             </div>
@@ -1790,7 +1825,7 @@ export function MoveView() {
                 )}
               </section>
 
-              <section className="border-t border-line pt-6">
+              <section id="claim-payment" className="scroll-mt-24 border-t border-line pt-6">
                 <h3 className="text-[15px] font-medium text-foreground">
                   Claim a payment
                 </h3>

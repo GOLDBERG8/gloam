@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 const KEY = "gloam:announce-dismissed:payroll-v1";
 
 // Keep the launch note on marketing + docs; stay out of the working app.
-const HIDDEN_ON = ["/app", "/admin", "/verify", "/pitch"];
+const HIDDEN_ON = ["/app", "/admin", "/verify", "/pitch", "/claim"];
 
 /** Slim site-wide launch note. Dismissible per browser. */
 export function AnnouncementBanner() {
