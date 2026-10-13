@@ -25,6 +25,7 @@ const LOCAL_BUCKETS = new Set([
   "req",
   "verify",
   "collect",
+  "funnel",
   "markets",
   "activity",
   "vault-leaves",

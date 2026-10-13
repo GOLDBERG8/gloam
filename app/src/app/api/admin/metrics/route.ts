@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/adminAuth";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import { readTractionSummary } from "@/lib/tractionStore";
+import { readFunnel } from "@/lib/funnelStore";
 import {
   isTestnetOpen,
   testnetOpensAtMs,
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
   }
 
   const force = new URL(req.url).searchParams.get("fresh") === "1";
-  const [onchain, product] = await Promise.all([
+  const [onchain, product, claimLinks] = await Promise.all([
     fetchOnchainMetrics({ force }).catch((e) => {
       console.error("gloam_admin_metrics", e instanceof Error ? e.message : "unknown");
       return { error: "Could not read the chains. The details are in the server logs." };
@@ -35,6 +36,7 @@ export async function GET(req: Request) {
       daily: [],
       recent: [],
     })),
+    readFunnel(14).catch(() => []),
   ]);
 
   return NextResponse.json({
@@ -48,5 +50,6 @@ export async function GET(req: Request) {
     },
     onchain,
     product,
+    claimLinks,
   });
 }

@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="October 12, 2026">
+    <LegalLayout title="Privacy Policy" updated="October 13, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -69,6 +69,19 @@ export default function PrivacyPage() {
         &ldquo;Accept all&rdquo; in the cookie banner. We keep the
         latest 5,000 events, daily totals for 120 days, and running totals. We
         may also post the events to a private team chat.
+      </p>
+      <p>
+        <strong>Claim-link counts.</strong>{" "}To see whether payment links
+        reach people, the app adds 1 to one of four daily totals: a claim link
+        was made (once its payment lands), a claim link was opened in Gloam, a
+        claim link was claimed, and someone who claimed a link made their own
+        first payment. The request carries only which of the four it is. It has
+        no cookie or ID, and nothing about the link, the amount, the people
+        involved or your wallet, and our server keeps no IP address or browser
+        details with it. Your browser remembers on its own which links it
+        already counted, so the same one is not counted twice. Because these
+        totals cannot say who did what, they run whether or not you accept the
+        cookie banner. We keep the daily totals for about 13 months.
       </p>
       <p>
         <strong>Vercel Web Analytics.</strong>{" "}Our hosting provider, Vercel,

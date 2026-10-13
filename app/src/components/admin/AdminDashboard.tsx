@@ -15,6 +15,7 @@ import { shortAddress } from "@/lib/chain";
 import { getNetwork, isNetworkKey } from "@/lib/networks";
 import type { DayRow, NetworkMetrics, OnchainMetrics } from "@/lib/onchainMetrics";
 import type { DailyCounters, StoredEvent } from "@/lib/tractionStore";
+import type { FunnelDay } from "@/lib/funnelStore";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 
 type MetricsPayload = {
@@ -35,6 +36,8 @@ type MetricsPayload = {
     daily?: DailyCounters[];
     recent: StoredEvent[];
   };
+  /** Claim-link totals per UTC day, oldest first (lib/funnel). */
+  claimLinks?: FunnelDay[];
   error?: string;
 };
 
@@ -247,6 +250,26 @@ export function AdminDashboard() {
     const max = Math.max(1, ...steps.map((s) => s.v));
     return steps.map((s) => ({ ...s, pct: (s.v / max) * 100 }));
   }, [counters, oc]);
+
+  const claim = useMemo(() => {
+    const rows = data?.claimLinks ?? [];
+    const t = { link_created: 0, link_opened: 0, link_claimed: 0, claimer_sent: 0 };
+    for (const r of rows) {
+      t.link_created += r.link_created;
+      t.link_opened += r.link_opened;
+      t.link_claimed += r.link_claimed;
+      t.claimer_sent += r.claimer_sent;
+    }
+    const rate = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}% of ${b === t.link_created ? "links made" : "claims"}` : "");
+    const steps = [
+      { k: "Claim links made", v: t.link_created, sub: "the payment landed" },
+      { k: "Opened in Gloam", v: t.link_opened, sub: rate(t.link_opened, t.link_created) },
+      { k: "Claimed", v: t.link_claimed, sub: rate(t.link_claimed, t.link_created) },
+      { k: "Claimers who then paid someone", v: t.claimer_sent, sub: rate(t.claimer_sent, t.link_claimed) },
+    ];
+    const max = Math.max(1, ...steps.map((s) => s.v));
+    return { steps: steps.map((s) => ({ ...s, pct: (s.v / max) * 100 })), rows: [...rows].reverse() };
+  }, [data?.claimLinks]);
 
   const days = useMemo(() => {
     const eventsByDay = new Map((product?.daily ?? []).map((d) => [d.day, d.counters]));
@@ -567,6 +590,24 @@ export function AdminDashboard() {
                 networks once.
               </p>
             </Panel>
+
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <Panel title="Claim links, last 14 days">
+                <BarChart rows={claim.steps} />
+                <p className="mt-5 text-[13px] leading-relaxed text-mute">
+                  Totals only, counted without cookies or ids. Opened counts each link once per
+                  browser; a claimer&apos;s first own payment counts once per browser.
+                </p>
+              </Panel>
+              <Panel title="Claim links by day">
+                <DataTable
+                  headers={["Day", "Made", "Opened", "Claimed", "Claimer paid"]}
+                  rows={claim.rows.map((d) => [fmtDay(d.day), n(d.link_created), n(d.link_opened), n(d.link_claimed), n(d.claimer_sent)])}
+                  empty="No claim links yet"
+                  minWidth={420}
+                />
+              </Panel>
+            </div>
 
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               <Panel title="Funnel">

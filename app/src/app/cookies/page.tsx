@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "Cookie Policy" };
 
 export default function CookiesPage() {
   return (
-    <LegalLayout title="Cookie Policy" updated="October 12, 2026">
+    <LegalLayout title="Cookie Policy" updated="October 13, 2026">
       <p>
         This Cookie Policy explains what Gloam keeps on your device and which
         usage counts it collects on gloam.trade. Gloam runs on testnets only,
@@ -16,7 +16,8 @@ export default function CookiesPage() {
         The short version: we set no advertising or tracking cookies. The only
         cookies we set are sign-in cookies, and only when you sign in. Usage
         counts are anonymous, use no cookies, and run only if you choose
-        &ldquo;Accept all&rdquo;.
+        &ldquo;Accept all&rdquo;, except four claim-link totals that hold
+        nothing about who you are (described below).
       </p>
       <h2>Your preferences</h2>
       <CookiePreferences />
@@ -46,7 +47,18 @@ export default function CookiesPage() {
         except an encrypted recovery backup if you turn recovery on.
       </p>
       <p>
-        Nothing is counted with &ldquo;Essential only&rdquo;, or before you
+        <strong>Claim-link totals.</strong>{" "}With &ldquo;Essential
+        only&rdquo;, or before you choose, the only thing counted is four daily
+        totals that show whether payment links reach people: a claim link was
+        made, opened, or claimed, and someone who claimed one made their own
+        first payment. Each count is just &ldquo;add 1 to today&rdquo;: no
+        cookie, no ID, no IP address kept, and nothing about the link, the
+        amount, the people involved or your wallet. Your browser keeps a short
+        local note of the links it already counted (in local storage), so the
+        same one is not counted twice.
+      </p>
+      <p>
+        Nothing else is counted with &ldquo;Essential only&rdquo;, or before you
         choose.
       </p>
       <h2>What &ldquo;Accept all&rdquo; adds</h2>

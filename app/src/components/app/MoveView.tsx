@@ -87,6 +87,7 @@ import { PaymentTicketShare } from "./PaymentTicketShare";
 import { SentLinks } from "./SentLinks";
 import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
 import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
+import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
 
@@ -226,6 +227,7 @@ export function MoveView() {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
       if (isNetworkKey(net) && net !== networkKey) setNetworkKey(net);
       if (code) {
+        countLinkOpened(code);
         setMode("receive");
         setImportText(code);
       }
@@ -310,6 +312,8 @@ export function MoveView() {
   const pendingLink = useRef<SentLink | null>(null);
   /** The saved Sent links record, dropped again if their heads-up posts. */
   const savedLinkId = useRef<string | null>(null);
+  /** The payment in flight is a claim link (counted once it lands, lib/funnel). */
+  const pendingClaimLink = useRef(false);
   /** After direct pay: post encrypted ticket on-chain (GloamPayMemo) */
   const pendingMemo = useRef<{
     paymentCommitment: Hex;
@@ -357,10 +361,15 @@ export function MoveView() {
         // step). Retires the first-payment nudge on this device.
         markPrivatePaid(network.chainId);
         setPaidPrivately(true);
+        // claim-link counts: a link made, or a claimer's first own payment (lib/funnel)
+        if (pendingClaimLink.current) countLinkCreated();
+        pendingClaimLink.current = false;
+        countSendAfterClaim();
         // The payment landed: keep its code under Sent links, encrypted in this
         // browser, so a lost code is not lost money (removed again if a heads-up posts).
         const link = pendingLink.current;
         pendingLink.current = null;
+        pendingClaimLink.current = false;
         if (link) {
           savedLinkId.current = link.id;
           void saveSentLink(link).catch(() => undefined);
@@ -480,6 +489,7 @@ export function MoveView() {
     pendingShare.current = null;
     pendingMemo.current = null;
     pendingLink.current = null;
+    pendingClaimLink.current = false;
     spentNoteId.current = null;
     payTrack.current = null;
     setShareBlob(landed?.blob ?? null);
@@ -671,6 +681,7 @@ export function MoveView() {
     pendingAction.current = "send";
     spentNoteId.current = selected.id;
     pendingLink.current = null;
+    pendingClaimLink.current = false;
     savedLinkId.current = null;
 
     try {
@@ -761,6 +772,7 @@ export function MoveView() {
       } catch {
         /* the row shows Couldn't check */
       }
+      pendingClaimLink.current = payStyle === "bearer";
       pendingLink.current = makeSentLink({
         code: share,
         chainId: network.chainId,
@@ -837,6 +849,7 @@ export function MoveView() {
       pendingShare.current = null;
       pendingMemo.current = null;
       pendingLink.current = null;
+      pendingClaimLink.current = false;
       payTrack.current = null;
     }
   }
@@ -958,6 +971,7 @@ export function MoveView() {
     setImportOk(null);
     try {
       const r = await claimCode(importText, importPassphrase);
+      if (!r.already) countLinkClaimed(importText);
       setSelectedId(r.noteId);
       setImportText("");
       setImportPassphrase("");

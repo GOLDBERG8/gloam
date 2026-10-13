@@ -14,6 +14,8 @@
  */
 import { summarizeQuestions } from "./answer";
 import { TOPIC, cleanName, topicName, type ChatLine } from "./rules";
+import { readFunnel, sumFunnel } from "@/lib/funnelStore";
+import type { FunnelEvent } from "@/lib/funnel";
 import { listBugReports, readLast24h, recentThreads, type Answered, type BugReport, type Escalation, type Unanswered } from "./store";
 import { getChatMemberCount } from "./telegram";
 
@@ -56,7 +58,14 @@ export type ReportData = {
   questions: number;
   /** The model's lines on what people asked, or null. */
   summary: string | null;
+  /** Claim-link totals for the last 7 days (lib/funnel), or null when they could not be read. */
+  claimLinks?: Record<FunnelEvent, number> | null;
 };
+
+/** "12 made, 9 opened, 7 claimed, 2 claimers then paid someone" */
+function claimLine(c: Record<FunnelEvent, number>): string {
+  return `${num(c.link_created)} made, ${num(c.link_opened)} opened, ${num(c.link_claimed)} claimed, ${num(c.claimer_sent)} claimers then paid someone`;
+}
 
 function parts(ms: number): Record<string, string> {
   const fmt = new Intl.DateTimeFormat("en-GB", {
@@ -127,6 +136,11 @@ export function formatReport(d: ReportData): string {
   }
   lines.push("");
 
+  if (d.claimLinks && Object.values(d.claimLinks).some((v) => v > 0)) {
+    lines.push("Claim links, last 7 days");
+    lines.push(`${claimLine(d.claimLinks)}.`, "");
+  }
+
   lines.push("Bug reports");
   if (d.bugs.length === 0) {
     lines.push("No bug reports.");
@@ -161,10 +175,11 @@ type Activity = {
 
 /** Reads the counters, the member count and the bug list. No model calls. */
 async function readActivity(groupId: number, persona: string, now: number): Promise<Activity> {
-  const [stats, members, bugs] = await Promise.all([
+  const [stats, members, bugs, funnel] = await Promise.all([
     readLast24h(now).catch(() => null),
     getChatMemberCount(groupId),
     listBugReports(50).catch(() => [] as BugReport[]),
+    readFunnel(7, now).catch(() => null),
   ]);
   const counts = stats?.counts ?? {};
   const topics: Record<number, number> = {};
@@ -190,6 +205,7 @@ async function readActivity(groupId: number, persona: string, now: number): Prom
       escalations: stats?.escalations ?? [],
       bugs: bugs.filter((b) => b.createdAt > now - DAY_MS),
       questions: questions.length,
+      claimLinks: funnel ? sumFunnel(funnel) : null,
     },
     questions,
     latestBugs: bugs,
@@ -284,6 +300,10 @@ export function formatTeamContext(d: TeamContextData): string {
   const missed = d.scamsMissed + d.secretsMissed;
   if (missed > 0) lines.push(`- ${plural(missed, "more message")} flagged but not deleted (the bot may lack the Delete messages right).`);
   lines.push(`- Questions seen: ${num(d.questions)}.`);
+  if (d.claimLinks) {
+    const any = Object.values(d.claimLinks).some((v) => v > 0);
+    lines.push(`- Claim links, last 7 days: ${any ? `${claimLine(d.claimLinks)}.` : "none counted yet (counting started 14 Oct 2026)."}`);
+  }
 
   lines.push("", "<group_data>");
   lines.push("", `HANDED TO AN ADMIN (last 24 hours, newest first): ${num(d.escalations.length)}`);
