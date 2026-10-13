@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Address } from "viem";
 import {
   useConnect,
@@ -23,9 +23,11 @@ import {
   tempoStableSymbol,
 } from "@/lib/feeSponsor";
 import { isTempoWallet, preloadTempoWallet } from "@/lib/tempoWallet";
+import { WALLETCONNECT_ID, prefersWalletConnect } from "@/lib/walletConnect";
 import { useNetwork } from "./NetworkProvider";
 import { TURNKEY_ENABLED } from "./TurnkeyEmbeddedProvider";
 import { ClientOnly } from "./ClientOnly";
+import { WalletConnectSheet } from "./WalletConnectSheet";
 
 // Passkey sign-in ships only when Turnkey is switched on.
 const TurnkeyHeaderSignIn = dynamic(() =>
@@ -59,9 +61,12 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   const disconnect = demo ? exitDemo : wagmiDisconnect;
   const { network } = useNetwork();
   const { switchChain, isPending: switching } = useSwitchChain();
-  const [env, setEnv] = useState<{ mounted: boolean; auto: WalletMenuVariant }>(
-    { mounted: false, auto: "inline" }
+  // `wc`: no wallet in this browser, so "use a wallet" opens WalletConnect
+  const [env, setEnv] = useState<{ mounted: boolean; auto: WalletMenuVariant; wc: boolean }>(
+    { mounted: false, auto: "inline", wc: false }
   );
+  const [wcOpen, setWcOpen] = useState(false);
+  const closeWc = useCallback(() => setWcOpen(false), []);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -69,7 +74,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   const mounted = env.mounted;
 
   useEffect(
-    () => setEnv({ mounted: true, auto: detectVariant(root.current) }),
+    () => setEnv({ mounted: true, auto: detectVariant(root.current), wc: prefersWalletConnect() }),
     []
   );
 
@@ -93,8 +98,17 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
 
   // Injected wallet (MetaMask, etc.) is the fallback, not a passkey connector.
   const walletConnector =
-    connectors.find((c) => c.id !== "gloam-turnkey" && !isTempoWallet(c)) ??
-    connectors[0];
+    connectors.find(
+      (c) => c.id !== "gloam-turnkey" && c.id !== WALLETCONNECT_ID && !isTempoWallet(c)
+    ) ?? connectors[0];
+  const wc = env.wc;
+  const canUseWallet = wc || Boolean(walletConnector);
+  // A browser wallet connects in place; with none here, a wallet app does.
+  function openWallet() {
+    if (wc) setWcOpen(true);
+    else if (walletConnector) connect({ connector: walletConnector });
+  }
+  const sheet = wc ? <WalletConnectSheet open={wcOpen} onClose={closeWc} /> : null;
   // Passkey sign-in (Tempo Wallet) is offered on Tempo, where it lives.
   const passkeyConnector =
     network.key === "tempo" ? connectors.find((c) => isTempoWallet(c)) : undefined;
@@ -196,8 +210,8 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
           </button>
           <button
             type="button"
-            onClick={() => walletConnector && connect({ connector: walletConnector })}
-            disabled={!walletConnector || connecting}
+            onClick={openWallet}
+            disabled={!canUseWallet || connecting}
             className={`text-[13px] text-mute transition-colors hover:text-foreground disabled:opacity-60 ${
               compact ? "h-9 px-1" : "h-9 w-full rounded-full hover:bg-surface"
             }`}
@@ -206,7 +220,9 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               ? "Connecting…"
               : compact
                 ? "Use a wallet"
-                : "Use a browser wallet"}
+                : wc
+                  ? "Use a wallet app"
+                  : "Use a browser wallet"}
           </button>
           {v === "inline" && TEMPO_SPONSORED && (
             <p className="mt-1 text-center text-[12px] leading-snug text-mute">
@@ -218,6 +234,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               {connectErrorText(error)}
             </p>
           )}
+          {sheet}
         </div>
       );
     }
@@ -237,14 +254,15 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
           </ClientOnly>
           <button
             type="button"
-            onClick={() => walletConnector && connect({ connector: walletConnector })}
-            disabled={!walletConnector || connecting}
+            onClick={openWallet}
+            disabled={!canUseWallet || connecting}
             className={`text-[13px] text-mute transition-colors hover:text-foreground disabled:opacity-60 ${
               compact ? "h-9 px-1" : "h-9 w-full rounded-full hover:bg-surface"
             }`}
           >
             {connecting ? "Connecting…" : "Use a wallet"}
           </button>
+          {sheet}
         </div>
       );
     }
@@ -253,8 +271,8 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
       <div ref={root} className={compact ? "inline-flex" : undefined}>
         <button
           type="button"
-          onClick={() => walletConnector && connect({ connector: walletConnector })}
-          disabled={!walletConnector || connecting}
+          onClick={openWallet}
+          disabled={!canUseWallet || connecting}
           className={primary}
         >
           {!compact && <WalletGlyph />}
@@ -265,6 +283,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
             {error.message.slice(0, 80)}
           </p>
         )}
+        {sheet}
       </div>
     );
   }
@@ -285,12 +304,12 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
             setBusy(true);
             try {
               await disconnectAsync().catch(() => {});
-              if (walletConnector) connect({ connector: walletConnector });
+              openWallet();
             } finally {
               setBusy(false);
             }
           }}
-          disabled={!walletConnector || busy || isPending}
+          disabled={!canUseWallet || busy || isPending}
           className={primary}
         >
           {!compact && <WalletGlyph />}
@@ -302,9 +321,10 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
         </button>
         {!compact && (
           <p className="mt-1 text-[12px] leading-snug text-mute">
-            Passkey accounts are on Tempo. {network.label} needs a browser wallet.
+            Passkey accounts are on Tempo. {network.label} needs {wc ? "a wallet app" : "a browser wallet"}.
           </p>
         )}
+        {sheet}
       </div>
     );
   }

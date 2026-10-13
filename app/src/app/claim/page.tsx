@@ -9,6 +9,7 @@ import { countLinkOpened, isClaimLink } from "@/lib/funnel";
 import { getNetwork, isNetworkKey, type NetworkKey } from "@/lib/networks";
 import { decodeNotePackage, isEncryptedPackage } from "@/lib/notePackage";
 import { inWalletBrowser } from "@/lib/passkey";
+import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
 import { formatAssetLabel } from "@/lib/shield";
 
 /**
@@ -154,12 +155,14 @@ export default function ClaimPage() {
                     ? "No wallet needed: sign in with a passkey on the next screen."
                     : walletBrowser
                       ? "Connect your wallet on the next screen, then tap Claim."
-                      : "You'll need a wallet app such as MetaMask or Rabby to claim on Robinhood Chain."}
+                      : WALLETCONNECT_ENABLED
+                        ? "Connect a wallet app such as MetaMask on the next screen, then tap Claim."
+                        : "You'll need a wallet app such as MetaMask or Rabby to claim on Robinhood Chain."}
                 </p>
               </div>
             </div>
 
-            {view.net !== "tempo" && !walletBrowser && (
+            {view.net !== "tempo" && !walletBrowser && !WALLETCONNECT_ENABLED && (
               <div className="mt-3 rounded-[20px] bg-panel p-5 text-[14px] leading-relaxed text-soft shadow-card">
                 <p className="text-foreground">On a phone?</p>
                 <p className="mt-1">Open this link inside your wallet app&apos;s browser, then tap Claim it.</p>

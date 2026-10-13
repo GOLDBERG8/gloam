@@ -301,6 +301,11 @@ export default function PrivacyPage() {
           The Tempo and Robinhood Chain testnet RPC nodes and explorers, and
           Tempo&apos;s fee sponsor when you use Tempo Wallet.
         </li>
+        <li>
+          WalletConnect (Reown), only when you choose Use a wallet app: its
+          relay passes encrypted messages between the page and your wallet app
+          and sees your IP address. It does not start otherwise.
+        </li>
       </ul>
       <p>
         The wallet you connect is run by its maker under its own terms. We may

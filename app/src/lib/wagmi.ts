@@ -7,6 +7,9 @@ import { tempoTestnet } from "./networks";
 import { turnkeyConnector } from "./turnkeyConnector";
 import { tempoFeeAware } from "./feeSponsor";
 import { tempoWalletConnector } from "./tempoWallet";
+import { lazyWalletConnect } from "./walletConnect";
+
+const walletConnectFn = lazyWalletConnect();
 
 /**
  * Product is **testnet-only** until stocks/swaps/privacy work end-to-end.
@@ -18,6 +21,8 @@ import { tempoWalletConnector } from "./tempoWallet";
  *   (OUSD) first when the account has none and no PathUSD (lib/feeSponsor.ts).
  * - Turnkey passkey: Robinhood Chain only, behind NEXT_PUBLIC_TURNKEY_ENABLED.
  * - Tempo Wallet: passkey sign-in on Tempo, fees sponsored (lib/tempoWallet.ts).
+ * - WalletConnect: a wallet app on a phone (or scanned from desktop) when the
+ *   browser has no wallet, behind NEXT_PUBLIC_WC_PROJECT_ID (lib/walletConnect.ts).
  */
 export const wagmiConfig = createConfig({
   chains: [robinhoodTestnet, tempoTestnet],
@@ -25,6 +30,7 @@ export const wagmiConfig = createConfig({
     tempoFeeAware(injected({ shimDisconnect: true })),
     turnkeyConnector(),
     tempoWalletConnector(),
+    ...(walletConnectFn ? [tempoFeeAware(walletConnectFn)] : []),
   ],
   transports: {
     [robinhoodTestnet.id]: http("https://rpc.testnet.chain.robinhood.com"),
