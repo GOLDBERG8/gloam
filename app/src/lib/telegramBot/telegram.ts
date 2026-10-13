@@ -85,8 +85,12 @@ export type TgChatMemberUpdated = {
 export type TgUpdate = {
   update_id: number;
   message?: TgMessage;
+  edited_message?: TgMessage;
   chat_member?: TgChatMemberUpdated;
 };
+
+/** The update kinds the webhook asks Telegram for. */
+export const ALLOWED_UPDATES = ["message", "edited_message", "chat_member"];
 
 export type SendOptions = {
   /** Topic to post in. Leave out for General and private chats. */
@@ -198,6 +202,18 @@ export async function downloadFile(path: string, maxBytes: number): Promise<Uint
   } catch {
     return null;
   }
+}
+
+/**
+ * Re-registers the webhook at the URL Telegram already has, with the same
+ * secret, asking for ALLOWED_UPDATES. Nothing pending is dropped.
+ */
+export async function refreshWebhook(secret: string): Promise<{ ok: boolean; url: string | null }> {
+  const info = await call<{ url?: string }>("getWebhookInfo", {});
+  const url = info.ok ? info.result?.url ?? null : null;
+  if (!url) return { ok: false, url: null };
+  const r = await call<boolean>("setWebhook", { url, secret_token: secret, allowed_updates: ALLOWED_UPDATES });
+  return { ok: r.ok, url };
 }
 
 /** How many people are in a chat right now, or null. */

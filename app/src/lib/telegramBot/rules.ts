@@ -863,3 +863,25 @@ export function chainFix(name: string, m: ChainMismatch): string {
       : "RPC https://rpc.testnet.chain.robinhood.com, chain ID 46630, currency ETH.")
   );
 }
+
+// ---------------------------------------------------------------- links to group messages
+
+/** Message ids from links to the group's messages: t.me/gloamhq/209, t.me/gloamhq/5/350, t.me/c/123/5/350. At most 3. */
+export function groupMessageIds(text: string, username = "gloamhq"): number[] {
+  const re = new RegExp(String.raw`t\.me\/(?:${escapeRe(username)}|c\/\d+)\/(?:\d+\/)?(\d+)(?![\d/])`, "gi");
+  const out: number[] = [];
+  for (const m of text.matchAll(re)) {
+    const id = Number(m[1]);
+    if (Number.isSafeInteger(id) && id > 0 && !out.includes(id)) out.push(id);
+    if (out.length === 3) break;
+  }
+  return out;
+}
+
+/** "go answer it", "please reply to this", "answer this one": a team member asking the helper to answer a linked message. */
+export function wantsGroupAnswer(text: string): boolean {
+  return (
+    /\b(?:go|pls|please|can you|could you|kindly|now)\s+(?:and\s+)?(?:answer|reply|respond)\b/i.test(text) ||
+    /^\s*(?:\/answer\b|(?:answer|reply|respond)(?:\s+to)?(?:\s+(?:it|this|that|him|her|them|this one|that one))?\s*[.!:]?\s*(?:$|https?:|t\.me))/im.test(text)
+  );
+}

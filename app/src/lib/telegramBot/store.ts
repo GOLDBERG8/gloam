@@ -248,6 +248,32 @@ export async function logAnswered(a: Answered): Promise<void> {
   ]);
 }
 
+/** A group message by id, for a team member who links it in a private chat, and for edits. */
+export type StoredMessage = { n: string; t: string; topic: number; at: number; uid: number };
+const MSG_TTL_SEC = 3 * 24 * 60 * 60;
+const msgKey = (id: number) => `${PREFIX}msg:${id}`;
+const repliedKey = (id: number) => `${PREFIX}replied:${id}`;
+
+export async function rememberMessage(id: number, m: StoredMessage): Promise<void> {
+  await kv([["SET", msgKey(id), JSON.stringify(m), "EX", MSG_TTL_SEC]]);
+}
+
+export async function storedMessages(ids: number[]): Promise<(StoredMessage | null)[]> {
+  if (ids.length === 0) return [];
+  const res = await kv(ids.map((id) => ["GET", msgKey(id)]));
+  return res.map((r) => jsonOf<StoredMessage>(r));
+}
+
+/** The helper answered this group message (so an edit or a team request does not answer it twice). */
+export async function markReplied(id: number): Promise<void> {
+  await kv([["SET", repliedKey(id), "1", "EX", MSG_TTL_SEC]]);
+}
+
+export async function wasReplied(id: number): Promise<boolean> {
+  const [r] = await kv([["GET", repliedKey(id)]]);
+  return r !== null && r !== undefined;
+}
+
 /** Keeps a question's text (already checked for secrets) for the report's summary. */
 export async function logQuestion(text: string, now = Date.now()): Promise<void> {
   const key = questionsKey(watDay(now));

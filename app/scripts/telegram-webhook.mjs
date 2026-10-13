@@ -37,7 +37,7 @@ await call("setWebhook", {
   secret_token: secret,
   // "message" carries chat messages and join notices; "chat_member" catches joins
   // Telegram does not announce in large groups (needs the bot to be an admin)
-  allowed_updates: ["message", "chat_member"],
+  allowed_updates: ["message", "edited_message", "chat_member"],
   drop_pending_updates: true,
 });
 console.log(`Webhook set to ${url}`);

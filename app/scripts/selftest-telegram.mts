@@ -54,8 +54,10 @@ const {
   chainMismatch,
   cleanName,
   cleanReply,
+  groupMessageIds,
   isShare,
   trimReply,
+  wantsGroupAnswer,
   explicitReply,
   handsToAdmin,
   hasBearerCode,
@@ -170,6 +172,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (method === "sendMessage") return reply({ ok: true, result: { message_id: nextId++ } });
     if (method === "deleteMessage") return reply({ ok: true, result: true });
     if (method === "getChatMemberCount") return reply({ ok: true, result: 123 });
+    if (method === "getWebhookInfo") return reply({ ok: true, result: { url: "https://www.gloam.trade/api/telegram" } });
+    if (method === "setWebhook") return reply({ ok: true, result: true });
     return reply({ ok: false });
   }
   if (url.host === "redis.test") {
@@ -1803,6 +1807,67 @@ await test("answers are logged for the team, so Glim can say what it did answer"
   assert.ok(ctx.includes("QUESTIONS GLIM ANSWERED"));
   assert.ok(/Samy in Help: .*good for testing.* -> you: .*Yep/.test(ctx), ctx.slice(ctx.indexOf("QUESTIONS GLIM ANSWERED"), ctx.indexOf("QUESTIONS GLIM ANSWERED") + 300));
   assert.ok(ctx.includes("Never apologise for a miss"));
+});
+
+await test("edits and links: a question added in an edit is answered once, and the team can say 'answer this'", async () => {
+  assert.deepEqual(groupMessageIds("this is the question, go answer it\n\nhttps://t.me/gloamhq/1/209"), [209]);
+  assert.deepEqual(groupMessageIds("t.me/gloamhq/350 and https://t.me/c/4464028206/5/351"), [350, 351]);
+  assert.ok(wantsGroupAnswer("this is the question, go answer it"));
+  assert.ok(wantsGroupAnswer("answer this https://t.me/gloamhq/209"));
+  assert.ok(wantsGroupAnswer("/answer t.me/gloamhq/209"));
+  assert.ok(!wantsGroupAnswer("why didn't you answer this? t.me/gloamhq/209"));
+
+  reset();
+  const joy = user(102, "Joy Hasan");
+  const first = inTopic(TOPIC.general, "@quinkardeeah @dukedotsol", joy);
+  await handleUpdate(upd(first));
+  assert.equal(sends().length, 0, "just tags, nothing to answer");
+  modelReply = "No Discord for now, we live here on Telegram. News lands in Announcements and on X @gloamtrade.";
+  const edited = { ...first, text: "@quinkardeeah @dukedotsol wen Discord" };
+  await handleUpdate({ update_id: nextId++, edited_message: edited });
+  assert.equal(sends().length, 1, "the edit added a question");
+  assert.equal(sends()[0]!.body.chat_id, GROUP);
+  await handleUpdate({ update_id: nextId++, edited_message: { ...edited, text: "@quinkardeeah @dukedotsol wen Discord??" } });
+  assert.equal(sends().length, 1, "never answered twice");
+
+  // a message Glim never answered, then the owner asks it to
+  reset();
+  const ask = inTopic(TOPIC.help, "@quinkardeeah discord link pls", user(103, "Ola"));
+  // an admin tag and no question form: Glim leaves it (classifier off here)
+  classifierReply = "NO";
+  await handleUpdate(upd(ask));
+  const groupBefore = sends().filter((x) => x.body.chat_id === GROUP).length;
+  assert.equal(groupBefore, 0, "Glim left it alone");
+  modelReply = "No Discord, Ola. The community lives here on Telegram.";
+  await handleUpdate(upd(dm(OWNER, `this is the question, go answer it\n\nhttps://t.me/gloamhq/4/${ask.message_id}`)));
+  const posted = sends().filter((x) => x.body.chat_id === GROUP);
+  assert.equal(posted.length, groupBefore + 1);
+  const post = posted[posted.length - 1]!;
+  assert.equal(post.body.text, modelReply);
+  assert.equal(post.body.message_thread_id, TOPIC.help);
+  assert.ok(JSON.stringify(post.body).includes(String(ask.message_id)), "a reply to that message");
+  assert.ok(String(sends()[sends().length - 1]!.body.text).startsWith("Posted in Help, replying to Ola:"));
+  await handleUpdate(upd(dm(OWNER, `answer this t.me/gloamhq/${ask.message_id}`)));
+  assert.ok(String(sends()[sends().length - 1]!.body.text).startsWith("I already answered that one"));
+  // a link without asking to answer: the message comes into the chat as context
+  reset();
+  modelReply = "That's Ola asking about Discord in Help; I answered it.";
+  await handleUpdate(upd(dm(OWNER, `what was this about? t.me/gloamhq/${ask.message_id}`)));
+  const ctx = systemOf(0).join("\n");
+  assert.ok(ctx.includes("LINKED MESSAGES") && ctx.includes("discord link pls") && ctx.includes("you answered it"));
+  // a link Glim has no record of
+  await handleUpdate(upd(dm(OWNER, "go answer it t.me/gloamhq/999999")));
+  assert.ok(String(sends()[sends().length - 1]!.body.text).startsWith("I don't have that message on record"));
+
+  // the owner turns on edits
+  reset();
+  process.env.TELEGRAM_WEBHOOK_SECRET = "test_secret";
+  await handleUpdate(upd(dm(OWNER, "/webhook")));
+  delete process.env.TELEGRAM_WEBHOOK_SECRET;
+  const set = calls.find((x) => x.method === "setWebhook")!;
+  assert.deepEqual(set.body.allowed_updates, ["message", "edited_message", "chat_member"]);
+  assert.equal(set.body.secret_token, "test_secret");
+  assert.ok(String(sends()[0]!.body.text).startsWith("Done."));
 });
 
 await test("nothing was ever sent outside the group or the team's private chats", () => {
