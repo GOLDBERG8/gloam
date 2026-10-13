@@ -162,6 +162,8 @@ const ESCALATIONS = `${PREFIX}escalations`;
 const ESCALATIONS_MAX = 100;
 const UNANSWERED = `${PREFIX}unanswered`;
 const UNANSWERED_MAX = 50;
+const ANSWERED = `${PREFIX}answered`;
+const ANSWERED_MAX = 80;
 const OWNER_CHATS = `${PREFIX}owner:chats`;
 
 const hourOf = (now: number) => Math.floor(now / HOUR_MS);
@@ -235,6 +237,17 @@ export async function logUnanswered(u: Unanswered): Promise<void> {
   ]);
 }
 
+/** A question the helper answered in the group, with the start of its reply, for the team's private chats. */
+export type Answered = Escalation & { reply: string };
+
+export async function logAnswered(a: Answered): Promise<void> {
+  await kv([
+    ["LPUSH", ANSWERED, JSON.stringify(a)],
+    ["LTRIM", ANSWERED, 0, ANSWERED_MAX - 1],
+    ["EXPIRE", ANSWERED, STATS_TTL_SEC],
+  ]);
+}
+
 /** Keeps a question's text (already checked for secrets) for the report's summary. */
 export async function logQuestion(text: string, now = Date.now()): Promise<void> {
   const key = questionsKey(watDay(now));
@@ -254,6 +267,8 @@ export type Last24h = {
   escalations: Escalation[];
   /** Questions it did not answer, newest first. */
   unanswered: Unanswered[];
+  /** Questions it answered, newest first. */
+  answered: Answered[];
   /** Question texts, newest first. */
   questions: string[];
 };
@@ -273,6 +288,7 @@ export async function readLast24h(now = Date.now()): Promise<Last24h> {
     ["LRANGE", questionsKey(watDay(now)), 0, -1],
     ["LRANGE", questionsKey(watDay(now) - 1), 0, -1],
     ["LRANGE", UNANSWERED, 0, -1],
+    ["LRANGE", ANSWERED, 0, -1],
   );
   const res = await kv(cmds);
 
@@ -296,7 +312,10 @@ export async function readLast24h(now = Date.now()): Promise<Last24h> {
   const unanswered = (Array.isArray(tail[3]) ? tail[3] : [])
     .map((r) => jsonOf<Unanswered>(r))
     .filter((u): u is Unanswered => Boolean(u && u.at > since && u.text));
-  return { counts, active: people.active.size, joins: people.joins.size, leaves: people.leaves.size, escalations, unanswered, questions };
+  const answered = (Array.isArray(tail[4]) ? tail[4] : [])
+    .map((r) => jsonOf<Answered>(r))
+    .filter((a): a is Answered => Boolean(a && a.at > since && a.text));
+  return { counts, active: people.active.size, joins: people.joins.size, leaves: people.leaves.size, escalations, unanswered, answered, questions };
 }
 
 /** Remembers the owner's private chat (its id is theirs) for scheduled reports. */

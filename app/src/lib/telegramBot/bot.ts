@@ -102,6 +102,7 @@ import {
   lockedCodeNear,
   logEscalation,
   logQuestion,
+  logAnswered,
   logUnanswered,
   markHandOff,
   markSeen,
@@ -650,7 +651,20 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig): Promise<void> {
   // "not going to guess" with no hand-off (an admin asked, or admins are on it): still a question nobody answered
   if (!answer && (fallback === "unsure" || fallback === "admins_here")) await missed("no_answer");
   await remember(chatId, topic, { n: c.persona, t: reply.slice(0, 400), b: 1, a: Math.floor(Date.now() / 1000) }).catch(() => {});
-  if (answer) await count("answered");
+  if (answer) {
+    await count("answered");
+    const asked = memoryText(target ? targetText || text : text);
+    if (asked) {
+      await logAnswered({
+        at: Date.now(),
+        name: askerName,
+        topic: topicName(topic),
+        text: asked.slice(0, 200),
+        reply: reply.slice(0, 200),
+        link: messageLink(target ?? msg),
+      }).catch(() => {});
+    }
+  }
   // handed to a person: the hand-off fallback, or an answer that says an admin will follow up (bug thanks aside).
   // Once per person per conversation, and never when an admin asked or is already on it.
   const handsOff = !saved && (answer ? handsToAdmin(answer) : fallback === "handoff");

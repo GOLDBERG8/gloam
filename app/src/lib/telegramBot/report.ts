@@ -14,7 +14,7 @@
  */
 import { summarizeQuestions } from "./answer";
 import { TOPIC, cleanName, topicName, type ChatLine } from "./rules";
-import { listBugReports, readLast24h, recentThreads, type BugReport, type Escalation, type Unanswered } from "./store";
+import { listBugReports, readLast24h, recentThreads, type Answered, type BugReport, type Escalation, type Unanswered } from "./store";
 import { getChatMemberCount } from "./telegram";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -25,6 +25,7 @@ const MAX_REPORT = 4000;
 /** The team context: how many of each list it carries, and how long it may get. */
 const CONTEXT_QUESTIONS = 30;
 const CONTEXT_UNANSWERED = 10;
+const CONTEXT_ANSWERED = 20;
 const CONTEXT_BUGS = 5;
 const MAX_CONTEXT = 16_000;
 /** Topics whose recent messages the helper keeps (it never reads Announcements). */
@@ -153,6 +154,7 @@ type Activity = {
   /** The latest bug reports, of any age, newest first. */
   latestBugs: BugReport[];
   unanswered: Unanswered[];
+  answeredLog: Answered[];
   /** False when the counters could not be read at all (the store is down). */
   read: boolean;
 };
@@ -192,6 +194,7 @@ async function readActivity(groupId: number, persona: string, now: number): Prom
     questions,
     latestBugs: bugs,
     unanswered: stats?.unanswered ?? [],
+    answeredLog: stats?.answered ?? [],
     read: stats !== null,
   };
 }
@@ -217,6 +220,8 @@ export type TeamContextData = Omit<ReportData, "summary"> & {
   questionTexts: string[];
   latestBugs: BugReport[];
   unanswered: Unanswered[];
+  /** What it answered in the last 24 hours, newest first. */
+  answeredLog: Answered[];
   /** Recent messages per topic, oldest first. */
   threads: { topic: string; lines: ChatLine[] }[];
 };
@@ -288,6 +293,13 @@ export function formatTeamContext(d: TeamContextData): string {
   }
   if (d.escalations.length > MAX_ESCALATIONS) lines.push(`- and ${num(d.escalations.length - MAX_ESCALATIONS)} more`);
 
+  lines.push("", `QUESTIONS ${d.persona.toUpperCase()} ANSWERED (last 24 hours, newest first): ${num(d.answeredLog.length)}`);
+  if (d.answeredLog.length === 0) lines.push("- None recorded.");
+  for (const a of d.answeredLog.slice(0, CONTEXT_ANSWERED)) {
+    lines.push(`- ${watTime(a.at)} ${cleanName(a.name)} in ${a.topic}: ${quoted(a.text, 140)} -> you: ${quoted(a.reply, 140)}${a.link ? ` ${a.link}` : ""}`);
+  }
+  if (d.answeredLog.length > CONTEXT_ANSWERED) lines.push(`- and ${num(d.answeredLog.length - CONTEXT_ANSWERED)} more`);
+
   lines.push("", `QUESTIONS ${d.persona.toUpperCase()} DID NOT ANSWER (last 24 hours, newest first): ${num(d.unanswered.length)}`);
   if (d.unanswered.length === 0) lines.push("- None.");
   for (const u of d.unanswered.slice(0, CONTEXT_UNANSWERED)) {
@@ -333,6 +345,7 @@ export async function teamContext(groupId: number, persona: string, who: string,
     questionTexts: a.questions,
     latestBugs: a.latestBugs,
     unanswered: a.unanswered,
+    answeredLog: a.answeredLog,
     threads: CONTEXT_TOPICS.map((t) => ({ topic: topicName(t), lines: threads.get(t) ?? [] })),
   });
 }

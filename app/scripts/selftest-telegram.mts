@@ -1498,6 +1498,7 @@ await test("team chat: the context carries the report's numbers and the store's 
     questionTexts: [],
     latestBugs: [],
     unanswered: [],
+    answeredLog: [],
     threads: [],
   });
   assert.ok(down.includes("could not be read just now, so you have no numbers"));
@@ -1785,6 +1786,23 @@ await test("follow-ups: the next message after Glim answers someone is checked, 
   const before = classifyCalls().length;
   await handleUpdate(upd(inTopic(TOPIC.help, "lol same here bro", user(99, "Uche"))));
   assert.equal(classifyCalls().length, before);
+});
+
+await test("answers are logged for the team, so Glim can say what it did answer", async () => {
+  reset();
+  const samy = user(100, "Samy");
+  modelReply = "Yep, the app is open on testnet at gloam.trade/app.";
+  await handleUpdate(upd(inTopic(TOPIC.help, "Yeah. We good for testing now?", samy)));
+  const log = (await readLast24h()).answered;
+  assert.ok(log.some((a) => a.name === "Samy" && a.text.includes("good for testing") && a.reply.startsWith("Yep")), JSON.stringify(log.slice(0, 2)));
+
+  reset();
+  modelReply = "You did answer Samy at 02:38.";
+  await handleUpdate(upd(dm(OWNER, "why didn't you answer samy on testing?")));
+  const ctx = systemOf(0).join("\n");
+  assert.ok(ctx.includes("QUESTIONS GLIM ANSWERED"));
+  assert.ok(/Samy in Help: .*good for testing.* -> you: .*Yep/.test(ctx), ctx.slice(ctx.indexOf("QUESTIONS GLIM ANSWERED"), ctx.indexOf("QUESTIONS GLIM ANSWERED") + 300));
+  assert.ok(ctx.includes("Never apologise for a miss"));
 });
 
 await test("nothing was ever sent outside the group or the team's private chats", () => {
