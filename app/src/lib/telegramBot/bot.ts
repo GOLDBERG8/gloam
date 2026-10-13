@@ -249,8 +249,9 @@ function ownerHelp(c: BotConfig): string {
 function adminHelp(name: string): string {
   return (
     `Hi ${name}. Just talk to me here, no command needed. Ask what people asked today, whether there are bugs, ` +
-    `how to answer a member, or for a draft announcement. Screenshots work too. I remember the last few messages for a few hours. ` +
-    `I can only chat from here: I won't post in the group or do anything else.\n/help - this note`
+    `how to answer a member, or for a draft announcement. Screenshots work too. I remember the last few messages for a few hours.\n\n` +
+    `To have me answer a member in the group, send the link to their message with "answer this" (or /answer and the link). ` +
+    `I post the answer there as a reply and tell you here what I said. Anything else I only draft for you to post.\n/help - this note`
   );
 }
 
