@@ -150,6 +150,19 @@ export function ShieldView() {
             functionName: "shieldVerifier",
             chainId: network.chainId,
           },
+          {
+            address: network.pool!,
+            abi: shieldPoolAbi,
+            functionName: "depositLimitsOn",
+            chainId: network.chainId,
+          },
+          {
+            address: network.pool!,
+            abi: shieldPoolAbi,
+            functionName: "depositLimit",
+            args: [assetAddress],
+            chainId: network.chainId,
+          },
         ]
       : [],
     query: { enabled: deployed && !demo, refetchInterval: 12_000 },
@@ -183,6 +196,15 @@ export function ShieldView() {
     poolData?.[6]?.status === "success"
       ? (poolData[6].result as string)
       : null;
+  // Beta deposit limits. Pools from before them fail this read: no limits.
+  const limitsOn = poolData?.[7]?.status === "success" && poolData[7].result === true;
+  const limit =
+    limitsOn && poolData?.[8]?.status === "success"
+      ? (poolData[8].result as readonly [bigint, bigint])
+      : null;
+  const limitPer = limit ? limit[0] : null;
+  const limitRoom =
+    limit && poolSelected !== null ? (limit[1] > poolSelected ? limit[1] - poolSelected : BigInt(0)) : null;
   // C1: when the pool enforces bound shields, plain shield() reverts and we must
   // prove commitment == Poseidon(secret, amount, asset) via shieldBound().
   // A demo takes that path without asking the chain (both live pools enforce it).
@@ -385,6 +407,28 @@ export function ShieldView() {
     return safeParseEther(amount || "0");
   }
 
+  function limitText(v: bigint): string {
+    const n = Number(formatUnits(v, decimals));
+    return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${symbol}`;
+  }
+
+  /** Why the vault's beta limits refuse this amount, or null. */
+  function limitProblem(value: bigint): string | null {
+    if (!limitsOn) return null;
+    if (!limit || limit[1] === BigInt(0)) {
+      return `${symbol} deposits are closed right now. Private payments and cash out still work.`;
+    }
+    if (limitPer !== null && value > limitPer) {
+      return `During the beta, one deposit can be up to ${limitText(limitPer)}.`;
+    }
+    if (limitRoom !== null && value > limitRoom) {
+      return limitRoom === BigInt(0)
+        ? `The vault is at its beta limit for ${symbol}. Try again later.`
+        : `The vault has room for ${limitText(limitRoom)} more during the beta.`;
+    }
+    return null;
+  }
+
   function validate(): string | null {
     if (!deployed) return "Pool not configured.";
     if (!isConnected || !onProduct) return "Connect and switch to testnet.";
@@ -394,6 +438,8 @@ export function ShieldView() {
     if (walletBalance !== undefined && value > walletBalance) {
       return `Not enough ${symbol}.`;
     }
+    const overLimit = limitProblem(value);
+    if (overLimit) return overLimit;
     if (!selectedToken && ethBal) {
       if (
         value > ethBal.value - 50_000_000_000_000n &&
@@ -796,6 +842,12 @@ export function ShieldView() {
               <dt className="text-mute">Network</dt>
               <dd className="text-foreground">{network.label}</dd>
             </div>
+            {limitsOn && limitPer !== null && limitPer > BigInt(0) && (
+              <div className="flex h-11 items-center justify-between gap-3">
+                <dt className="text-mute">Beta limit</dt>
+                <dd className="tnum text-foreground">{limitText(limitPer)} per deposit</dd>
+              </div>
+            )}
           </dl>
 
           <div className="mt-5">
@@ -829,7 +881,10 @@ export function ShieldView() {
               role="alert"
               className="mt-4 break-words rounded-xl bg-danger-soft px-4 py-3 text-[13.5px] leading-relaxed text-danger"
             >
-              {formError || writeError?.message.slice(0, 180)}
+              {formError ||
+                (writeError?.message.includes("OverDepositLimit")
+                  ? "This deposit is over the vault's beta limit. Try a smaller amount."
+                  : writeError?.message.slice(0, 180))}
             </p>
           )}
           {hash && !isSuccess && (

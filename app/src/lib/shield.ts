@@ -88,6 +88,26 @@ export const shieldPoolAbi = [
     inputs: [{ name: "asset", type: "address" }],
     outputs: [{ type: "uint256" }],
   },
+  // Beta deposit limits (ShieldPoolCore). Pools deployed before them lack these
+  // reads, so a failed read means no limits.
+  {
+    type: "function",
+    name: "depositLimitsOn",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "depositLimit",
+    stateMutability: "view",
+    inputs: [{ name: "asset", type: "address" }],
+    outputs: [
+      { name: "perDeposit", type: "uint128" },
+      { name: "total", type: "uint128" },
+    ],
+  },
+  { type: "error", name: "OverDepositLimit", inputs: [] },
   {
     type: "function",
     name: "owner",
