@@ -1,0 +1,14 @@
+{
+  "name": "@gloam/ceremony",
+  "private": true,
+  "type": "module",
+  "description": "Gloam's multi-party Groth16 phase-2 trusted setup: contribute, verify, finalize.",
+  "scripts": {
+    "contribute": "node contribute.mjs",
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "snarkjs": "0.7.5",
+    "circomlib": "2.0.5"
+  }
+}

@@ -1,0 +1,8 @@
+[
+  { "name": "shield", "source": "../circuits/shield/shield.circom", "app": "shield", "verifier": "ShieldVerifier" },
+  { "name": "unshield", "source": "../circuits/unshield/unshield.circom", "app": "unshield", "verifier": "UnshieldVerifier" },
+  { "name": "transfer", "source": "../circuits/transfer/transfer.circom", "app": "transfer", "verifier": "TransferVerifier" },
+  { "name": "solvency", "source": "../circuits/solvency/solvency.circom", "app": "funds", "verifier": null },
+  { "name": "receipt", "source": "../circuits/receipt/receipt.circom", "app": "receipt", "verifier": null },
+  { "name": "payroll_total", "source": "../circuits/payroll_total/payroll_total.circom", "app": "payroll_total", "verifier": null }
+]

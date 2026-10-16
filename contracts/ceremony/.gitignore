@@ -1,0 +1,7 @@
+node_modules/
+build/
+rounds/
+*.ptau
+*.zkey
+*.r1cs
+*.wasm
