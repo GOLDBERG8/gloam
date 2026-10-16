@@ -67,7 +67,8 @@ Resolution, which is also the differentiator (the "compliant privacy" frame that
 won for Encifher and Mercantill):
 
 - **Selective disclosure (live on testnet).** The older `gloamdisc1` disclosure
-  proves one balance and names no party. The newer proof of funds, proof of
+  names no party, and anyone can make one for any deposit from public chain
+  data, so it is no longer made and never verifies. The newer proof of funds, proof of
   payment and payroll total proofs (`gloamfunds1`, `gloampay1`, `gloamroll1`)
   carry a label naming who they are for and an expiry, bound into the proof and
   verified off-chain at gloam.trade/verify. Next: extend the target set to an

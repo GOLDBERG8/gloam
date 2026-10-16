@@ -18,14 +18,15 @@ have since been superseded.
 | M-4 | Medium | **FIXED and live** since the 2026-09-29 redeploy: one-way shield verifier, two-step owner, `emergencyWithdraw` removed, every rule change behind a 3-day public timelock. Residual: the owner is a single wallet |
 | M-3 | Medium | **Partially fixed**: SDK clamp bug fixed + on-chain oracle ratio-tolerance added; full user-set slippage UI is future |
 | L-1 | Low | **FIXED on Tempo, relay-only on Robinhood Chain**: the Tempo memo board is deployed from the fixed source (no poster). The Robinhood Chain board `0x689e…5DCE` is the first deploy and still indexes the poster, so the sender stays off it only when the Gloam relay posts the memo |
-| M-1 | Medium | **Partly fixed**: note secrets (and payroll runs and schedules) are encrypted at rest in `noteVault`, under a non-extractable AES-GCM device key or a passkey PRF wrap. The receive key's at-rest encryption is being fixed in a separate change |
+| M-1 | Medium | **Fixed**: note secrets, payroll runs and schedules, and the receive key are encrypted at rest in `noteVault`, under a non-extractable AES-GCM device key or a passkey PRF wrap. Receive keys stored as plain JSON by earlier versions are sealed on first read |
 | M-2 | Medium | **Open (mainnet gate)**: single-contributor dev-ceremony zkeys, disclosed in docs |
 
 **Honest headline:** every critical/high is fixed and verified (H-P1, C1), or
 switched off and verified (H1). M-4 is fixed on-chain apart from the single-wallet
-owner. M-3 and M-1 are partly closed, M-2 is an open mainnet-gate item. Do not say
-"all findings fixed"; say "all critical/high fixed or switched off and verified;
-M-1 and M-3 partial; M-2 and the multi-party ceremony tracked for mainnet."
+owner. M-1 is fixed, M-3 is partly closed, M-2 is an open mainnet-gate item. Do
+not say "all findings fixed"; say "all critical/high fixed or switched off and
+verified; M-1 fixed; M-3 partial; M-2 and the multi-party ceremony tracked for
+mainnet."
 
 **2026-10-11:** two more internal passes (Kensho + a ZK review). See
 "2026-10-11 audits" at the bottom. One of them (ZK-1) shows that the 128-bit
@@ -83,7 +84,9 @@ The owner ran the recovery + hardening. Read back and confirmed:
 - **M-1 notes at rest**: `app/src/lib/noteVault.ts` keeps notes in memory and
   persists them AES-GCM encrypted, under a non-extractable device key in
   IndexedDB or a data key wrapped by a passkey PRF (`passkeyWrap.ts`). Payroll
-  runs and schedules are sealed under the same key.
+  runs and schedules are sealed under the same key, and so is the receive key
+  (`receiveTag.ts`): plain JSON keys from earlier versions are sealed on first
+  read, and turning a passkey on or off reseals them with the notes.
 
 ## Landed at the hardened redeploys (2026-09-16, carried into 2026-09-29)
 
@@ -110,8 +113,6 @@ At the time of the first pass these were code-ready but not live, because pool
   owner-funded `assetOut` reserve. A protocol design decision, left for the owner.
   `secret != 0` is now in `sealedSwap.circom` source; it needs a recompile and
   ceremony before re-enabling.
-- **M-1 remainder**: encrypt the receive key at rest (in progress, separate
-  change).
 - **M-2**: multi-party trusted-setup ceremony; repin production hashes.
 - **M-4 residual**: single-wallet owner. The timelock is live; moving the owner
   to a multisig is a mainnet ops decision.

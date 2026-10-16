@@ -368,8 +368,11 @@ export default function WhitepaperPage() {
         (<code>gloamfunds1</code>, <code>gloampay1</code>,{" "}
         <code>gloamroll1</code>) carries a label naming who it is for and an
         expiry, both bound into the proof. The older{" "}
-        <code>gloamdisc1</code> balance disclosure reuses the shield circuit
-        and carries no recipient label or expiry.
+        <code>gloamdisc1</code> balance disclosure reused the shield circuit
+        and carried no recipient label or expiry. Every deposit publishes a
+        valid proof of that statement on chain, so anyone could make one for
+        any deposit. It is no longer made, and checkers never pass one; an
+        exact balance is now a <code>gloambal1</code> proof.
       </p>
 
       <h2 id="whats-new">7. What is new in Gloam</h2>
@@ -585,10 +588,8 @@ export default function WhitepaperPage() {
           orders, so it needs its own design rather than the payment one.
         </li>
         <li>
-          <strong>Near term:</strong> closing the window in which a payer can
-          reclaim a direct payment; a designated-verifier mode for proofs;
-          encrypting the receive key at rest; anonymity set growth;
-          operational monitoring.
+          <strong>Near term:</strong> a designated-verifier mode for proofs;
+          anonymity set growth; operational monitoring.
         </li>
         <li>
           <strong>Mid term:</strong> issuer-scoped disclosure for regulated
