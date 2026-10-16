@@ -105,6 +105,37 @@ export function encodeNotePackage(pack: NotePackage): string {
   return PREFIX_PLAIN + b64urlEncode(utf8(json));
 }
 
+/**
+ * How a phrase is matched: capitals, extra spaces and curly quotes do not count.
+ * Phone keyboards capitalise the first letter and curl apostrophes, so the right
+ * phrase typed on a phone used to fail with "Wrong passphrase".
+ */
+export function canonicalPhrase(passphrase: string): string {
+  return tidyPhrase(passphrase).toLowerCase();
+}
+
+function tidyPhrase(passphrase: string): string {
+  return passphrase
+    .normalize("NFKC")
+    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Phrases to try on a locked code: the matched form first (codes made since
+ * 16 Oct 2026), then the phrase as typed and its near misses for older codes,
+ * which were locked with the exact phrase.
+ */
+function phraseCandidates(passphrase: string): string[] {
+  const tidy = tidyPhrase(passphrase);
+  const flipped = tidy
+    ? (tidy[0] === tidy[0].toUpperCase() ? tidy[0].toLowerCase() : tidy[0].toUpperCase()) + tidy.slice(1)
+    : tidy;
+  return [...new Set([canonicalPhrase(passphrase), passphrase.trim(), tidy, flipped])].filter(Boolean);
+}
+
 async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
   const base = await crypto.subtle.importKey(
     "raw",
@@ -135,7 +166,7 @@ export async function encodeNotePackageEncrypted(
   if (!passphrase.trim()) throw new Error("Passphrase required");
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(passphrase.trim(), salt);
+  const key = await deriveKey(canonicalPhrase(passphrase), salt);
   const { note: rawNote, ...rest } = pack;
   const note = cleanPaymentNote(rawNote);
   const plain = buf(utf8(JSON.stringify(note ? { ...rest, note } : rest)));
@@ -220,15 +251,20 @@ export async function decodeNotePackage(
     const salt = raw.slice(0, 16);
     const iv = raw.slice(16, 28);
     const cipher = raw.slice(28);
-    const key = await deriveKey(passphrase.trim(), salt);
+    let plain: Uint8Array | null = null;
+    for (const phrase of phraseCandidates(passphrase)) {
+      try {
+        const key = await deriveKey(phrase, salt);
+        plain = new Uint8Array(
+          await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf(iv) }, key, buf(cipher))
+        );
+        break;
+      } catch {
+        /* try the next form */
+      }
+    }
+    if (!plain) throw new Error("Wrong passphrase or corrupt payment.");
     try {
-      const plain = new Uint8Array(
-        await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: buf(iv) },
-          key,
-          buf(cipher)
-        )
-      );
       const pack = expandCompact(JSON.parse(utf8Decode(plain)) as Record<string, unknown>);
       if (!pack?.secret || !pack.amountWei) throw new Error("Invalid payment.");
       return pack;

@@ -1397,6 +1397,9 @@ export function MoveView() {
                           id="send-pass"
                           type="text"
                           autoComplete="off"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
                           value={sendPassphrase}
                           onChange={(e) => setSendPassphrase(e.target.value)}
                           placeholder="e.g. coffee-tuesday"
@@ -1906,6 +1909,9 @@ export function MoveView() {
                       id="recv-pass"
                       type="text"
                       autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
                       value={importPassphrase}
                       onChange={(e) => setImportPassphrase(e.target.value)}
                       placeholder="The phrase the sender gave you"

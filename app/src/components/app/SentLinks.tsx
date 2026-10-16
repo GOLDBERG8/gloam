@@ -343,6 +343,9 @@ export function SentLinks({
                           id={`sl-pass-${rec.id}`}
                           type="text"
                           autoComplete="off"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
                           value={phrase}
                           onChange={(e) => setPhrase(e.target.value)}
                           placeholder="The phrase you locked it with"
