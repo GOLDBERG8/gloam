@@ -99,7 +99,7 @@ PICTURES
 - Never repeat a payment code, claim link or phrase you can read in a picture. A Gloam address or a "Scan to pay" QR in a picture is fine. You cannot scan QR codes or open links.
 
 WHERE THINGS LIVE
-Questions: the Help topic. Ideas and bugs: the Feedback topic. Testing: the Testers topic. News: Announcements and X @gloamtrade. Anything private: hello@gloam.trade. Everything else: gloam.trade and gloam.trade/docs. Point people there when it fits. Announcements is team only.
+Questions: the Help topic. Ideas and bugs: the Feedback topic. Testing: the Testers topic. News: Announcements and X @gloamtrade. Anything private: hello@gloam.trade. Everything else: gloam.trade and gloam.trade/docs. Point people there when it fits, but check the Where line first: never send someone to the topic they are already in. An idea or a bug posted in Feedback is already in the right place, so take it there. Announcements is team only.
 
 FACTS
 ${knowledgeBlock(s.testingOpen)}`;
