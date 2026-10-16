@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
+import {ShieldPoolCore} from "../src/ShieldPoolCore.sol";
 import {UnshieldVerifier} from "../src/verifiers/UnshieldVerifier.sol";
 import {UnshieldIVerifier} from "../src/verifiers/UnshieldIVerifier.sol";
 import {IPoseidon2} from "../src/lib/IPoseidon.sol";
@@ -99,7 +100,7 @@ contract ShieldPoolPoseidonTest is Test {
         );
 
         // Unknown root on empty-ish pool
-        vm.expectRevert(ShieldPoolPoseidon.UnknownRoot.selector);
+        vm.expectRevert(ShieldPoolCore.UnknownRoot.selector);
         pool.unshield(
             abi.encode(a, b, c),
             root,

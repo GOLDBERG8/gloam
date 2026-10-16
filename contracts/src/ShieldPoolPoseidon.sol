@@ -1,59 +1,29 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IShieldPool} from "./interfaces/IShieldPool.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
-import {IPoseidon2} from "./lib/IPoseidon.sol";
 import {IncrementalMerkleTreePoseidon as IMT} from "./lib/IncrementalMerkleTreePoseidon.sol";
 import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 import {OracleRates} from "./lib/OracleRates.sol";
-import {ChangeTimelock} from "./lib/ChangeTimelock.sol";
-
-interface IERC20 {
-    function transferFrom(address from, address to, uint256 amount) external returns (bool);
-    function transfer(address to, uint256 amount) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
-    function decimals() external view returns (uint8);
-}
+import {ShieldPoolCore, IERC20} from "./ShieldPoolCore.sol";
 
 /**
  * @title ShieldPoolPoseidon
- * @notice Phase-2 pool: Poseidon Merkle tree + unshield public inputs layout v2.
+ * @notice Phase-2 pool: the payment vault (ShieldPoolCore) plus sealed swaps.
  * @dev Pairs with UnshieldVerifier (Poseidon circuit). Not the live keccak pool.
+ *      The testnet pools run this. Sealed swaps are switched off on them
+ *      (sealedSwapVerifier = 0, audit H1 and ZK-1); a mainnet pool that only
+ *      pays is ShieldPoolPayments.
  *
- * Leaves/roots stored as uint256 field elements, exposed as bytes32 for IShieldPool.
- *
- * Owner powers (no-middlemen hardening):
- *  - The owner has NO function that moves user funds. There is no emergencyWithdraw;
- *    notes leave the pool only through proof-gated unshield(). sweepStrayNative()
- *    can only take native currency above deposited[address(0)], i.e. ETH sent
- *    straight to receive() that backs no note.
- *  - Every setter that affects proof validity, pricing, or asset flows
- *    (setVerifier, setSealedSwapVerifier, setShieldVerifier, setSwapRate,
- *    setPriceFeed, setOracleConfig, setOracleRatePair) is instant only during
- *    setup mode. After endSetup() they must go through ChangeTimelock:
- *    queueChange -> CHANGE_DELAY (3 days) public notice -> executeChange.
+ * Owner powers: see ShieldPoolCore. The swap setters (setSealedSwapVerifier,
+ * setSwapRate, setPriceFeed, setOracleConfig, setOracleRatePair) follow the same
+ * rule: instant only during setup, timelocked after endSetup().
  */
-contract ShieldPoolPoseidon is IShieldPool, ChangeTimelock {
+contract ShieldPoolPoseidon is ShieldPoolCore {
     using IMT for IMT.Tree;
 
-    IVerifier public verifier;
     /// @notice Optional sealed-swap verifier (9 public inputs). Separate from dual unshield/transfer.
     IVerifier public sealedSwapVerifier;
-    /// @notice Optional shield (deposit) verifier: binds the inserted commitment to the
-    ///         public (commitment, amount, asset). While address(0), shield() trusts the
-    ///         client — which lets a depositor embed a larger amount than they send (C1).
-    ///         Once set, plain shield() is blocked and shieldBound() (proof required) is the
-    ///         only deposit path, closing the value-binding gap.
-    IVerifier public shieldVerifier;
-    IPoseidon2 public immutable poseidon2;
-    IMT.Tree private tree;
-
-    mapping(bytes32 => bool) public spent;
-    mapping(address => uint256) public override deposited;
-
-    /// @notice Reject a commitment that has already been inserted (double-shield footgun).
-    mapping(bytes32 => bool) public commitmentSeen;
 
     /// @notice Owner-approved sealed-swap rate per (assetIn, assetOut) direction.
     /// @dev The circuit only proves amountOut*rateOut == amountSwap*rateIn; it does NOT
@@ -75,20 +45,6 @@ contract ShieldPoolPoseidon is IShieldPool, ChangeTimelock {
     mapping(address => IAggregatorV3) public priceFeed;
     mapping(address => mapping(address => bool)) public oracleRatePair;
 
-    address public owner;
-    /// @notice M-4: two-step ownership. Set by transferOwnership, claimed by the
-    ///         incoming owner via acceptOwnership. Guards against handing the pool
-    ///         to a wrong/dead address in one irreversible step.
-    address public pendingOwner;
-
-    /// @notice Reentrancy latch. The value-moving paths follow checks-effects-
-    ///         interactions, so this is defense-in-depth (audit INFO-3): it removes
-    ///         reliance on CEI + STATICCALL-only view calls holding under future edits.
-    uint256 private _entered;
-
-    uint256 public constant PROOF_LAYOUT_VERSION = 2;
-    string public constant HASH_SCHEME = "poseidon";
-
     event SealedSwapped(
         bytes32 indexed nullifier,
         address indexed assetIn,
@@ -105,87 +61,22 @@ contract ShieldPoolPoseidon is IShieldPool, ChangeTimelock {
         bool enabled
     );
 
-    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-    event ShieldVerifierSet(address indexed verifier);
-    event VerifierSet(address indexed verifier);
     event SealedSwapVerifierSet(address indexed verifier);
-    event StrayNativeSwept(address indexed to, uint256 amount);
     event PriceFeedSet(address indexed asset, address indexed feed);
     event OraclePairSet(address indexed assetIn, address indexed assetOut, bool enabled);
     event OracleConfigSet(address sequencer, uint64 grace, uint64 maxStaleness, uint64 toleranceBps);
 
-    error NotOwner();
-    error NotPendingOwner();
-    error ShieldVerifierAlreadySet();
-    error ZeroCommitment();
-    error AlreadySpent();
-    error UnknownRoot();
-    error VerifierNotSet();
-    error InvalidProof();
-    error ZeroAddress();
-    error TransferFailed();
-    error InvalidAmount();
-    error InvalidMsgValue();
-    error InsufficientPoolBalance();
-    error FeeOnTransferNotSupported();
     error SameAsset();
     error RateNotAllowed();
-    error DuplicateCommitment();
-    error ShieldProofRequired();
-    error Reentrancy();
-    error NotAContract();
-    error NothingToSweep();
-
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
-
-    modifier nonReentrant() {
-        if (_entered == 1) revert Reentrancy();
-        _entered = 1;
-        _;
-        _entered = 0;
-    }
 
     /**
      * @param poseidon2_ Circomlib Poseidon (2 inputs)
      * @param verifier_ UnshieldIVerifier or address(0) until set
      */
-    constructor(address poseidon2_, address verifier_) {
-        if (poseidon2_ == address(0)) revert ZeroAddress();
-        owner = msg.sender;
-        poseidon2 = IPoseidon2(poseidon2_);
-        if (verifier_ != address(0)) {
-            verifier = IVerifier(verifier_);
-        }
-        tree.initialize(IPoseidon2(poseidon2_));
-    }
-
-    receive() external payable {}
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Rule-changing setters. Direct calls work only in setup mode (onlySetup);
-    // after endSetup() the same calls must be queued via queueChange() and run
-    // via executeChange() after CHANGE_DELAY. Both paths share the internal
-    // _setX() bodies, so validation and events are identical.
-    // ─────────────────────────────────────────────────────────────────────────
-
-    function setVerifier(address verifier_) external onlyOwner onlySetup {
-        _setVerifier(verifier_);
-    }
+    constructor(address poseidon2_, address verifier_) ShieldPoolCore(poseidon2_, verifier_) {}
 
     function setSealedSwapVerifier(address verifier_) external onlyOwner onlySetup {
         _setSealedSwapVerifier(verifier_);
-    }
-
-    /// @notice Enable value-bound deposits. Once set, plain shield() is blocked and
-    ///         callers must use shieldBound() with a proof binding commitment↔amount↔asset.
-    /// @dev M-4: one-way. Once bound-shield enforcement is on it can never be
-    ///      cleared or repointed (e.g. reset to 0 to reopen the unbound C1 path).
-    function setShieldVerifier(address verifier_) external onlyOwner onlySetup {
-        _setShieldVerifier(verifier_);
     }
 
     /**
@@ -229,21 +120,9 @@ contract ShieldPoolPoseidon is IShieldPool, ChangeTimelock {
         _setOracleRatePair(assetIn, assetOut, enabled_);
     }
 
-    function _setVerifier(address verifier_) internal {
-        verifier = IVerifier(verifier_);
-        emit VerifierSet(verifier_);
-    }
-
     function _setSealedSwapVerifier(address verifier_) internal {
         sealedSwapVerifier = IVerifier(verifier_);
         emit SealedSwapVerifierSet(verifier_);
-    }
-
-    function _setShieldVerifier(address verifier_) internal {
-        if (address(shieldVerifier) != address(0)) revert ShieldVerifierAlreadySet();
-        if (verifier_ == address(0)) revert ZeroAddress();
-        shieldVerifier = IVerifier(verifier_);
-        emit ShieldVerifierSet(verifier_);
     }
 
     function _setSwapRate(
@@ -293,32 +172,20 @@ contract ShieldPoolPoseidon is IShieldPool, ChangeTimelock {
         emit OraclePairSet(assetIn, assetOut, enabled_);
     }
 
-    // ── ChangeTimelock hooks ────────────────────────────────────────────────
+    // ── ChangeTimelock hooks: the swap setters, then the core's ─────────────
 
-    function _checkOwner() internal view override {
-        if (msg.sender != owner) revert NotOwner();
-    }
-
-    /// @dev Whitelist of timelockable setters and their static-arg word counts.
     function _changeArgWords(bytes4 selector) internal pure override returns (uint256) {
-        if (selector == ShieldPoolPoseidon.setVerifier.selector) return 1;
         if (selector == ShieldPoolPoseidon.setSealedSwapVerifier.selector) return 1;
-        if (selector == ShieldPoolPoseidon.setShieldVerifier.selector) return 1;
         if (selector == ShieldPoolPoseidon.setSwapRate.selector) return 5;
         if (selector == ShieldPoolPoseidon.setPriceFeed.selector) return 2;
         if (selector == ShieldPoolPoseidon.setOracleConfig.selector) return 4;
         if (selector == ShieldPoolPoseidon.setOracleRatePair.selector) return 3;
-        return 0;
+        return super._changeArgWords(selector);
     }
 
-    /// @dev Internal dispatch for a matured queued change. No external calls.
     function _applyChange(bytes4 selector, bytes calldata args) internal override {
-        if (selector == ShieldPoolPoseidon.setVerifier.selector) {
-            _setVerifier(abi.decode(args, (address)));
-        } else if (selector == ShieldPoolPoseidon.setSealedSwapVerifier.selector) {
+        if (selector == ShieldPoolPoseidon.setSealedSwapVerifier.selector) {
             _setSealedSwapVerifier(abi.decode(args, (address)));
-        } else if (selector == ShieldPoolPoseidon.setShieldVerifier.selector) {
-            _setShieldVerifier(abi.decode(args, (address)));
         } else if (selector == ShieldPoolPoseidon.setSwapRate.selector) {
             (address a, address b, uint128 ri, uint128 ro, bool en) = abi.decode(
                 args,
@@ -338,149 +205,14 @@ contract ShieldPoolPoseidon is IShieldPool, ChangeTimelock {
             (address a, address b, bool en) = abi.decode(args, (address, address, bool));
             _setOracleRatePair(a, b, en);
         } else {
-            revert UnknownChange();
+            super._applyChange(selector, args);
         }
-    }
-
-    /// @notice M-4: begin a two-step ownership handoff. The new owner must call
-    ///         acceptOwnership() to take control.
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert ZeroAddress();
-        pendingOwner = newOwner;
-        emit OwnershipTransferStarted(owner, newOwner);
-    }
-
-    /// @notice M-4: claim ownership after transferOwnership named you.
-    function acceptOwnership() external {
-        if (msg.sender != pendingOwner) revert NotPendingOwner();
-        address previous = owner;
-        owner = pendingOwner;
-        pendingOwner = address(0);
-        emit OwnershipTransferred(previous, owner);
-    }
-
-    /// @notice Recover native currency that was sent directly (via receive()) and is
-    ///         not backing any shielded note. Audit INFO-1: such ETH is otherwise
-    ///         permanently stuck, since unshield only pays proof-bound notes. Only
-    ///         the surplus over deposited[address(0)] is sweepable, so shielded
-    ///         native balances are never touched. This is the owner's only
-    ///         value-moving function and it cannot reach note-backing funds.
-    function sweepStrayNative(address to) external onlyOwner nonReentrant {
-        if (to == address(0)) revert ZeroAddress();
-        uint256 backed = deposited[address(0)];
-        uint256 bal = address(this).balance;
-        if (bal <= backed) revert NothingToSweep();
-        uint256 surplus = bal - backed;
-        (bool ok, ) = to.call{value: surplus}("");
-        if (!ok) revert TransferFailed();
-        emit StrayNativeSwept(to, surplus);
     }
 
     /// @notice Token decimals for value math; native currency is treated as 18-dec.
     function _assetDecimals(address asset) internal view returns (uint8) {
         if (asset == address(0)) return 18;
         return IERC20(asset).decimals();
-    }
-
-    function nextIndex() external view returns (uint256) {
-        return tree.nextIndex;
-    }
-
-    function currentRoot() external view returns (bytes32) {
-        return bytes32(tree.currentRoot);
-    }
-
-    function isKnownRoot(bytes32 root) external view returns (bool) {
-        return tree.isKnownRoot(uint256(root));
-    }
-
-    function isSpent(bytes32 nullifier) external view returns (bool) {
-        return spent[nullifier];
-    }
-
-    /**
-     * @notice Trust-the-client deposit. Blocked once a shieldVerifier is configured.
-     * @dev While shieldVerifier == address(0) this preserves legacy/testnet behavior,
-     *      but the commitment is NOT bound to `amount` (C1). Prefer shieldBound().
-     */
-    function shield(
-        address asset,
-        uint256 amount,
-        bytes32 commitment
-    ) external payable override nonReentrant {
-        if (address(shieldVerifier) != address(0)) revert ShieldProofRequired();
-        _shield(asset, amount, commitment);
-    }
-
-    /**
-     * @notice Value-bound deposit. Requires a proof that `commitment` opens to the
-     *         PUBLIC (amount, asset) — so the note's value cannot exceed the funds sent.
-     * @param proof Groth16 proof for public inputs [commitment, amount, asset].
-     */
-    function shieldBound(
-        address asset,
-        uint256 amount,
-        bytes32 commitment,
-        bytes calldata proof
-    ) external payable nonReentrant {
-        if (address(shieldVerifier) == address(0)) revert VerifierNotSet();
-        uint256[] memory inputs = new uint256[](3);
-        inputs[0] = uint256(commitment);
-        inputs[1] = amount;
-        inputs[2] = uint256(uint160(asset));
-        if (!shieldVerifier.verify(proof, inputs)) revert InvalidProof();
-        _shield(asset, amount, commitment);
-    }
-
-    function _shield(
-        address asset,
-        uint256 amount,
-        bytes32 commitment
-    ) internal {
-        if (commitment == bytes32(0)) revert ZeroCommitment();
-        if (amount == 0) revert InvalidAmount();
-        if (commitmentSeen[commitment]) revert DuplicateCommitment();
-        commitmentSeen[commitment] = true;
-
-        if (asset == address(0)) {
-            if (msg.value != amount) revert InvalidMsgValue();
-        } else {
-            if (msg.value != 0) revert InvalidMsgValue();
-            // Audit INFO-2: reject a codeless `asset` explicitly. Otherwise the
-            // low-level transferFrom in _pullERC20 would return success (empty data)
-            // against an EOA/undeployed address and mint phantom `deposited` credit.
-            // (The balanceOf delta below also catches it today, but only incidentally.)
-            if (asset.code.length == 0) revert NotAContract();
-            uint256 before = IERC20(asset).balanceOf(address(this));
-            _pullERC20(msg.sender, amount, asset);
-            uint256 received = IERC20(asset).balanceOf(address(this)) - before;
-            if (received != amount) revert FeeOnTransferNotSupported();
-        }
-
-        deposited[asset] += amount;
-        uint256 leafIndex = tree.insert(uint256(commitment));
-
-        emit Shielded(commitment, asset, amount, leafIndex, msg.sender);
-    }
-
-    function transfer(
-        bytes calldata proof,
-        bytes32 root,
-        bytes32 nullifier,
-        bytes32[2] calldata newCommitments
-    ) external override nonReentrant {
-        _requireTransferProof(proof, root, nullifier, newCommitments);
-        if (spent[nullifier]) revert AlreadySpent();
-        spent[nullifier] = true;
-
-        for (uint256 i = 0; i < 2; i++) {
-            if (newCommitments[i] == bytes32(0)) revert ZeroCommitment();
-            if (commitmentSeen[newCommitments[i]]) revert DuplicateCommitment();
-            commitmentSeen[newCommitments[i]] = true;
-            tree.insert(uint256(newCommitments[i]));
-        }
-
-        emit Transferred(nullifier, newCommitments);
     }
 
     /**
@@ -566,62 +298,6 @@ contract ShieldPoolPoseidon is IShieldPool, ChangeTimelock {
         );
     }
 
-    function unshield(
-        bytes calldata proof,
-        bytes32 root,
-        bytes32 nullifier,
-        address asset,
-        address to,
-        uint256 amount
-    ) external override nonReentrant {
-        if (to == address(0)) revert ZeroAddress();
-        if (amount == 0) revert InvalidAmount();
-        _requireUnshieldProof(proof, root, nullifier, asset, to, amount);
-        if (spent[nullifier]) revert AlreadySpent();
-        spent[nullifier] = true;
-
-        if (deposited[asset] < amount) revert InsufficientPoolBalance();
-        deposited[asset] -= amount;
-        _pushAsset(asset, to, amount);
-
-        emit Unshielded(nullifier, asset, to, amount);
-    }
-
-    function _requireTransferProof(
-        bytes calldata proof,
-        bytes32 root,
-        bytes32 nullifier,
-        bytes32[2] calldata newCommitments
-    ) internal view {
-        if (address(verifier) == address(0)) revert VerifierNotSet();
-        if (!tree.isKnownRoot(uint256(root))) revert UnknownRoot();
-        uint256[] memory inputs = new uint256[](4);
-        inputs[0] = uint256(root);
-        inputs[1] = uint256(nullifier);
-        inputs[2] = uint256(newCommitments[0]);
-        inputs[3] = uint256(newCommitments[1]);
-        if (!verifier.verify(proof, inputs)) revert InvalidProof();
-    }
-
-    function _requireUnshieldProof(
-        bytes calldata proof,
-        bytes32 root,
-        bytes32 nullifier,
-        address asset,
-        address to,
-        uint256 amount
-    ) internal view {
-        if (address(verifier) == address(0)) revert VerifierNotSet();
-        if (!tree.isKnownRoot(uint256(root))) revert UnknownRoot();
-        uint256[] memory inputs = new uint256[](5);
-        inputs[0] = uint256(root);
-        inputs[1] = uint256(nullifier);
-        inputs[2] = uint256(uint160(asset));
-        inputs[3] = amount;
-        inputs[4] = uint256(uint160(to));
-        if (!verifier.verify(proof, inputs)) revert InvalidProof();
-    }
-
     function _requireSealedSwapProof(
         bytes calldata proof,
         bytes32 root,
@@ -647,33 +323,5 @@ contract ShieldPoolPoseidon is IShieldPool, ChangeTimelock {
         inputs[7] = rateIn;
         inputs[8] = rateOut;
         if (!sealedSwapVerifier.verify(proof, inputs)) revert InvalidProof();
-    }
-
-    function _pullERC20(address from, uint256 amount, address asset) internal {
-        (bool success, bytes memory data) = asset.call(
-            abi.encodeWithSelector(
-                IERC20.transferFrom.selector,
-                from,
-                address(this),
-                amount
-            )
-        );
-        if (!success || (data.length != 0 && !abi.decode(data, (bool)))) {
-            revert TransferFailed();
-        }
-    }
-
-    function _pushAsset(address asset, address to, uint256 amount) internal {
-        if (asset == address(0)) {
-            (bool ok, ) = to.call{value: amount}("");
-            if (!ok) revert TransferFailed();
-        } else {
-            (bool success, bytes memory data) = asset.call(
-                abi.encodeWithSelector(IERC20.transfer.selector, to, amount)
-            );
-            if (!success || (data.length != 0 && !abi.decode(data, (bool)))) {
-                revert TransferFailed();
-            }
-        }
     }
 }

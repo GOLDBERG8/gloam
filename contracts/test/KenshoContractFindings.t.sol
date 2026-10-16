@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
+import {ShieldPoolCore} from "../src/ShieldPoolCore.sol";
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {IPoseidon2} from "../src/lib/IPoseidon.sol";
 import {MockERC20} from "./MockERC20.sol";
@@ -106,7 +107,7 @@ contract KenshoContractFindingsTest is Test {
 
         // The honest LP can no longer redeem their own 100 tokenOut note: insolvent.
         vm.prank(lp);
-        vm.expectRevert(ShieldPoolPoseidon.InsufficientPoolBalance.selector);
+        vm.expectRevert(ShieldPoolCore.InsufficientPoolBalance.selector);
         pool.unshield(hex"00", root, bytes32(uint256(0xE0003)), address(tokenOut), lp, 100);
 
         // And the 100 tokenIn the attacker swapped in is stranded: deposited[tokenIn]
@@ -130,21 +131,21 @@ contract KenshoContractFindingsTest is Test {
         // plain shield now blocked
         vm.deal(attacker, 10 ether);
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.ShieldProofRequired.selector);
+        vm.expectRevert(ShieldPoolCore.ShieldProofRequired.selector);
         pool.shield{value: 1}(address(0), 1, bytes32(uint256(0x1)));
 
         // owner CANNOT unset it (one-way)
-        vm.expectRevert(ShieldPoolPoseidon.ShieldVerifierAlreadySet.selector);
+        vm.expectRevert(ShieldPoolCore.ShieldVerifierAlreadySet.selector);
         pool.setShieldVerifier(address(0));
 
         // owner CANNOT repoint it to an always-true verifier either
         MockVerifier other = new MockVerifier();
-        vm.expectRevert(ShieldPoolPoseidon.ShieldVerifierAlreadySet.selector);
+        vm.expectRevert(ShieldPoolCore.ShieldVerifierAlreadySet.selector);
         pool.setShieldVerifier(address(other));
 
         // unbound path stays closed
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.ShieldProofRequired.selector);
+        vm.expectRevert(ShieldPoolCore.ShieldProofRequired.selector);
         pool.shield{value: 1}(address(0), 1, bytes32(uint256(0x1)));
     }
 
@@ -161,7 +162,7 @@ contract KenshoContractFindingsTest is Test {
 
         // a stranger cannot accept
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.NotPendingOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotPendingOwner.selector);
         pool.acceptOwnership();
 
         // the pending owner accepts
@@ -171,7 +172,7 @@ contract KenshoContractFindingsTest is Test {
         assertEq(pool.pendingOwner(), address(0));
 
         // old owner has lost control
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.transferOwnership(address(this));
     }
 

@@ -98,7 +98,9 @@ Merkle     = Poseidon(left, right)  // depth 20
 | Dual verifier | `src/verifiers/DualProofVerifier.sol` |
 | Shield verifier | `src/verifiers/Shield*.sol` |
 | Sealed swap verifier (not wired) | `src/verifiers/SealedSwap*.sol` |
-| Pool | `src/ShieldPoolPoseidon.sol` |
+| Pool core (deposits, transfers, withdrawals, deposit limits) | `src/ShieldPoolCore.sol` |
+| Testnet pool (core + sealed swap) | `src/ShieldPoolPoseidon.sol` |
+| Mainnet pool (core only) | `src/ShieldPoolPayments.sol` |
 | Timelock | `src/lib/ChangeTimelock.sol` |
 | App artifacts | `app/public/circuits/*.wasm` + `*_final.zkey` |
 

@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
+import {ShieldPoolCore} from "../src/ShieldPoolCore.sol";
 import {ChangeTimelock} from "../src/lib/ChangeTimelock.sol";
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {MockERC20} from "./MockERC20.sol";
@@ -115,7 +116,7 @@ contract NoMiddlemenTest is Test {
 
     function test_endSetup_only_owner() public {
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.endSetup();
         assertTrue(pool.setupMode());
     }
@@ -147,16 +148,16 @@ contract NoMiddlemenTest is Test {
 
     function test_non_owner_setters_still_NotOwner() public {
         vm.startPrank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.setVerifier(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.setSwapRate(address(0), assetB, 1, 1, true);
         vm.stopPrank();
     }
 
     function test_queue_reverts_during_setup() public {
         vm.expectRevert(ChangeTimelock.SetupActive.selector);
-        pool.queueChange(abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(1))));
+        pool.queueChange(abi.encodeCall(ShieldPoolCore.setVerifier, (address(1))));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ contract NoMiddlemenTest is Test {
     function test_queue_execute_verifier_change() public {
         pool.endSetup();
         TLMockVerifier v2 = new TLMockVerifier(true);
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(v2)));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(v2)));
         bytes32 id = keccak256(call_);
         uint256 expectEta = block.timestamp + 3 days;
 
@@ -260,7 +261,7 @@ contract NoMiddlemenTest is Test {
 
         vm.warp(eta);
         // Setter validation still runs at execution: pair needs both feeds first.
-        vm.expectRevert(ShieldPoolPoseidon.ZeroAddress.selector);
+        vm.expectRevert(ShieldPoolCore.ZeroAddress.selector);
         pool.executeChange(pair);
 
         pool.executeChange(f1);
@@ -279,21 +280,21 @@ contract NoMiddlemenTest is Test {
     function test_timelocked_shield_verifier_stays_one_way() public {
         pool.endSetup();
         TLMockVerifier sv = new TLMockVerifier(true);
-        bytes memory first = abi.encodeCall(ShieldPoolPoseidon.setShieldVerifier, (address(sv)));
-        bytes memory second = abi.encodeCall(ShieldPoolPoseidon.setShieldVerifier, (address(0xBAD)));
+        bytes memory first = abi.encodeCall(ShieldPoolCore.setShieldVerifier, (address(sv)));
+        bytes memory second = abi.encodeCall(ShieldPoolCore.setShieldVerifier, (address(0xBAD)));
         pool.queueChange(first);
         (, uint256 eta) = pool.queueChange(second);
         vm.warp(eta);
         pool.executeChange(first);
         assertEq(address(pool.shieldVerifier()), address(sv));
-        vm.expectRevert(ShieldPoolPoseidon.ShieldVerifierAlreadySet.selector);
+        vm.expectRevert(ShieldPoolCore.ShieldVerifierAlreadySet.selector);
         pool.executeChange(second);
         assertEq(address(pool.shieldVerifier()), address(sv));
     }
 
     function test_execute_before_eta_reverts() public {
         pool.endSetup();
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(0xB0B)));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
 
         vm.expectRevert(ChangeTimelock.ChangeNotReady.selector);
@@ -307,7 +308,7 @@ contract NoMiddlemenTest is Test {
 
     function test_execute_after_grace_reverts() public {
         pool.endSetup();
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(0xB0B)));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
 
         vm.warp(eta + 14 days + 1);
@@ -327,7 +328,7 @@ contract NoMiddlemenTest is Test {
 
     function test_execute_at_last_grace_second_works() public {
         pool.endSetup();
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(0xB0B)));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
         vm.warp(eta + 14 days);
         pool.executeChange(call_);
@@ -336,7 +337,7 @@ contract NoMiddlemenTest is Test {
 
     function test_cancel_works() public {
         pool.endSetup();
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(0xB0B)));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (bytes32 id, uint256 eta) = pool.queueChange(call_);
 
         vm.expectEmit(true, false, false, true, address(pool));
@@ -356,20 +357,20 @@ contract NoMiddlemenTest is Test {
 
     function test_non_owner_cannot_queue_execute_cancel() public {
         pool.endSetup();
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (attacker));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (attacker));
 
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.queueChange(call_);
 
         // owner queues; attacker can neither execute nor cancel it
         (, uint256 eta) = pool.queueChange(call_);
         vm.warp(eta);
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.executeChange(call_);
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.cancelChange(call_);
         assertEq(address(pool.verifier()), address(rejectV));
     }
@@ -396,7 +397,7 @@ contract NoMiddlemenTest is Test {
 
     function test_cannot_requeue_live_change() public {
         pool.endSetup();
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(0xB0B)));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
         vm.warp(eta - 1 hours);
         vm.expectRevert(ChangeTimelock.ChangeAlreadyQueued.selector);
@@ -407,8 +408,8 @@ contract NoMiddlemenTest is Test {
     function test_queue_rejects_non_setter_calls() public {
         pool.endSetup();
         bytes[] memory bad = new bytes[](10);
-        bad[0] = abi.encodeCall(ShieldPoolPoseidon.transferOwnership, (attacker));
-        bad[1] = abi.encodeCall(ShieldPoolPoseidon.sweepStrayNative, (attacker));
+        bad[0] = abi.encodeCall(ShieldPoolCore.transferOwnership, (attacker));
+        bad[1] = abi.encodeCall(ShieldPoolCore.sweepStrayNative, (attacker));
         bad[2] = abi.encodeCall(ChangeTimelock.endSetup, ());
         bad[3] = abi.encodeCall(ChangeTimelock.executeChange, (hex"12345678"));
         bad[4] = abi.encodeCall(ChangeTimelock.queueChange, (hex"12345678"));
@@ -421,7 +422,7 @@ contract NoMiddlemenTest is Test {
         );
         bad[7] = hex"";
         bad[8] = hex"aabbcc";
-        bad[9] = abi.encodeCall(ShieldPoolPoseidon.acceptOwnership, ());
+        bad[9] = abi.encodeCall(ShieldPoolCore.acceptOwnership, ());
         for (uint256 i = 0; i < bad.length; i++) {
             vm.expectRevert(ChangeTimelock.UnknownChange.selector);
             pool.queueChange(bad[i]);
@@ -430,16 +431,16 @@ contract NoMiddlemenTest is Test {
 
     function test_queue_rejects_non_canonical_length() public {
         pool.endSetup();
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(0xB0B)));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         vm.expectRevert(ChangeTimelock.BadChangeLength.selector);
         pool.queueChange(bytes.concat(call_, hex"00"));
         vm.expectRevert(ChangeTimelock.BadChangeLength.selector);
-        pool.queueChange(abi.encodePacked(ShieldPoolPoseidon.setVerifier.selector, uint128(1)));
+        pool.queueChange(abi.encodePacked(ShieldPoolCore.setVerifier.selector, uint128(1)));
     }
 
     function test_new_owner_inherits_queue_old_owner_loses_it() public {
         pool.endSetup();
-        bytes memory call_ = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (address(0xB0B)));
+        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
         address newOwner = address(0xBEEF);
         pool.transferOwnership(newOwner);
@@ -447,7 +448,7 @@ contract NoMiddlemenTest is Test {
         pool.acceptOwnership();
 
         vm.warp(eta);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.executeChange(call_);
         vm.prank(newOwner);
         pool.executeChange(call_);
@@ -490,7 +491,7 @@ contract NoMiddlemenTest is Test {
         address v = address(new TLMockVerifier(true));
 
         // sweep: nothing unbacked to take
-        vm.expectRevert(ShieldPoolPoseidon.NothingToSweep.selector);
+        vm.expectRevert(ShieldPoolCore.NothingToSweep.selector);
         pool.sweepStrayNative(owner);
 
         // direct setters are dead
@@ -500,9 +501,9 @@ contract NoMiddlemenTest is Test {
         // Queue every timelockable change, including an always-true verifier: in
         // the same block none of them can take effect.
         bytes[] memory calls = new bytes[](7);
-        calls[0] = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (v));
+        calls[0] = abi.encodeCall(ShieldPoolCore.setVerifier, (v));
         calls[1] = abi.encodeCall(ShieldPoolPoseidon.setSealedSwapVerifier, (v));
-        calls[2] = abi.encodeCall(ShieldPoolPoseidon.setShieldVerifier, (v));
+        calls[2] = abi.encodeCall(ShieldPoolCore.setShieldVerifier, (v));
         calls[3] = abi.encodeCall(ShieldPoolPoseidon.setSwapRate, (address(0), assetB, 1, 1e30, true));
         calls[4] = abi.encodeCall(ShieldPoolPoseidon.setPriceFeed, (address(0), address(0xF1)));
         calls[5] = abi.encodeCall(
@@ -518,7 +519,7 @@ contract NoMiddlemenTest is Test {
 
         // the malicious verifier is not live, so a fake-proof unshield still fails
         bytes32 root = pool.currentRoot();
-        vm.expectRevert(ShieldPoolPoseidon.InvalidProof.selector);
+        vm.expectRevert(ShieldPoolCore.InvalidProof.selector);
         pool.unshield(hex"00", root, bytes32(uint256(0xDEAD)), address(0), owner, 5 ether);
 
         // ownership handoff moves no funds
@@ -549,16 +550,16 @@ contract NoMiddlemenTest is Test {
         _seedDeposits();
         pool.endSetup();
         bytes4[12] memory sels = [
-            ShieldPoolPoseidon.setVerifier.selector,
+            ShieldPoolCore.setVerifier.selector,
             ShieldPoolPoseidon.setSealedSwapVerifier.selector,
-            ShieldPoolPoseidon.setShieldVerifier.selector,
+            ShieldPoolCore.setShieldVerifier.selector,
             ShieldPoolPoseidon.setPriceFeed.selector,
-            ShieldPoolPoseidon.sweepStrayNative.selector,
-            ShieldPoolPoseidon.transferOwnership.selector,
+            ShieldPoolCore.sweepStrayNative.selector,
+            ShieldPoolCore.transferOwnership.selector,
             ChangeTimelock.endSetup.selector,
             bytes4(keccak256("emergencyWithdraw(address,address,uint256)")),
-            ShieldPoolPoseidon.shield.selector,
-            ShieldPoolPoseidon.acceptOwnership.selector,
+            ShieldPoolCore.shield.selector,
+            ShieldPoolCore.acceptOwnership.selector,
             ChangeTimelock.cancelChange.selector,
             ChangeTimelock.executeChange.selector
         ];
@@ -566,7 +567,7 @@ contract NoMiddlemenTest is Test {
         bytes memory data;
         if (sel == ChangeTimelock.executeChange.selector || sel == ChangeTimelock.cancelChange.selector) {
             // queue a real change then try to force it early
-            bytes memory inner = abi.encodeCall(ShieldPoolPoseidon.setVerifier, (a));
+            bytes memory inner = abi.encodeCall(ShieldPoolCore.setVerifier, (a));
             pool.queueChange(inner);
             data = abi.encodeWithSelector(sel, inner);
         } else {

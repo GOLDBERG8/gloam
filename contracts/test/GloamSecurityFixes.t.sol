@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
+import {ShieldPoolCore} from "../src/ShieldPoolCore.sol";
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {IPoseidon2} from "../src/lib/IPoseidon.sol";
 
@@ -120,7 +121,7 @@ contract GloamSecurityFixesTest is Test {
 
     function test_C3_setSwapRate_only_owner() public {
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.setSwapRate(address(0), address(0xEEE), 1, 1, true);
     }
 
@@ -131,7 +132,7 @@ contract GloamSecurityFixesTest is Test {
         vm.prank(victim);
         pool.shield{value: 1 ether}(address(0), 1 ether, bytes32(uint256(0xC0FFEE)));
         vm.prank(victim);
-        vm.expectRevert(ShieldPoolPoseidon.DuplicateCommitment.selector);
+        vm.expectRevert(ShieldPoolCore.DuplicateCommitment.selector);
         pool.shield{value: 1 ether}(address(0), 1 ether, bytes32(uint256(0xC0FFEE)));
     }
 
@@ -143,7 +144,7 @@ contract GloamSecurityFixesTest is Test {
         MockVerifier shieldV = new MockVerifier();
         pool.setShieldVerifier(address(shieldV));
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.ShieldProofRequired.selector);
+        vm.expectRevert(ShieldPoolCore.ShieldProofRequired.selector);
         pool.shield{value: 1}(address(0), 1, bytes32(uint256(0x1)));
     }
 
@@ -152,7 +153,7 @@ contract GloamSecurityFixesTest is Test {
         shieldV.setOk(false);
         pool.setShieldVerifier(address(shieldV));
         vm.prank(attacker);
-        vm.expectRevert(ShieldPoolPoseidon.InvalidProof.selector);
+        vm.expectRevert(ShieldPoolCore.InvalidProof.selector);
         pool.shieldBound{value: 1 ether}(address(0), 1 ether, bytes32(uint256(0x2)), hex"00");
     }
 
@@ -167,7 +168,7 @@ contract GloamSecurityFixesTest is Test {
 
     function test_C1fix_shieldBound_reverts_without_verifier() public {
         vm.prank(victim);
-        vm.expectRevert(ShieldPoolPoseidon.VerifierNotSet.selector);
+        vm.expectRevert(ShieldPoolCore.VerifierNotSet.selector);
         pool.shieldBound{value: 1 ether}(address(0), 1 ether, bytes32(uint256(0x4)), hex"00");
     }
 

@@ -14,8 +14,15 @@ Testnet Poseidon pool is live with **dev ceremony** keys. Mainnet is blocked unt
 ## 2. Deploy
 
 - [ ] Deploy production UnshieldIVerifier + TransferIVerifier + DualProofVerifier
-- [ ] Deploy ShieldPoolPoseidon (or hardened successor) with production verifier
-- [ ] Transfer ownership / renounce as designed; document emergency path
+- [ ] Deploy `ShieldPoolPayments` (payments only, no sealed swap) with production
+      verifiers: `script/DeployTempoMainnet.s.sol`. It refuses to run without
+      `PRODUCTION_KEYS=1`, and the pool estimates ~23.2M gas on Tempo (30M cap)
+- [ ] Beta deposit limits on: each listed stablecoin gets a per-deposit and a
+      total limit; an unlisted asset cannot be deposited
+- [ ] Emergency path: `lowerDepositLimit(asset, 0, 0)` closes deposits at once
+      (no timelock); withdrawals and private transfers keep working. Raising a
+      limit or listing an asset takes the 3-day timelock
+- [ ] Transfer ownership to a multisig (`NEW_OWNER`, then `acceptOwnership()`)
 - [ ] Record addresses in `deployments/mainnet.json` (or chain-specific)
 - [ ] Point app env at production pool + deploy block
 

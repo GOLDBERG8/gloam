@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test, console} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
+import {ShieldPoolCore} from "../src/ShieldPoolCore.sol";
 import {UnshieldVerifier} from "../src/verifiers/UnshieldVerifier.sol";
 import {UnshieldIVerifier} from "../src/verifiers/UnshieldIVerifier.sol";
 import {TransferVerifier} from "../src/verifiers/TransferVerifier.sol";
@@ -32,7 +33,7 @@ contract KenshoOct11Test is Test {
     uint256 constant NULLIFIER = 1945704986784996205275124157419427994886512646982192210318468338970744312245;
     uint256 constant AMOUNT = 1000000000000000;
     address constant TO = address(uint160(1288467190840644149448244075784839353812473341992));
-    uint256 constant KNOWN_ROOTS_SLOT = 47; // tree (slot 5) + 42 words: nextIndex, currentRoot, 20 filled, 20 zeros
+    uint256 constant KNOWN_ROOTS_SLOT = 46; // tree (slot 4) + 42 words: nextIndex, currentRoot, 20 filled, 20 zeros
 
     function setUp() public {
         address poseidon2 = _deployPoseidon2();
@@ -85,7 +86,7 @@ contract KenshoOct11Test is Test {
         try pool.unshield(_proof(), bytes32(ROOT), bytes32(NULLIFIER), address(0), TO, AMOUNT) {
             fail();
         } catch (bytes memory err) {
-            assertEq(bytes4(err), ShieldPoolPoseidon.AlreadySpent.selector);
+            assertEq(bytes4(err), ShieldPoolCore.AlreadySpent.selector);
         }
         uint256 dupGas = g1 - gasleft();
 

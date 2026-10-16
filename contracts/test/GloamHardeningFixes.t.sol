@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
+import {ShieldPoolCore} from "../src/ShieldPoolCore.sol";
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 
 /// Always-true verifier: stands in for "attacker holds a valid Groth16 proof".
@@ -80,7 +81,7 @@ contract GloamHardeningFixesTest is Test {
     function test_codeless_asset_shield_reverts() public {
         address codeless = address(0xC0DE1E55);
         vm.prank(user);
-        vm.expectRevert(ShieldPoolPoseidon.NotAContract.selector);
+        vm.expectRevert(ShieldPoolCore.NotAContract.selector);
         pool.shield(codeless, 1e18, bytes32(uint256(1)));
     }
 
@@ -126,13 +127,13 @@ contract GloamHardeningFixesTest is Test {
     function test_sweep_reverts_when_no_surplus() public {
         vm.prank(user);
         pool.shield{value: 1 ether}(address(0), 1 ether, bytes32(uint256(0xBEEF)));
-        vm.expectRevert(ShieldPoolPoseidon.NothingToSweep.selector);
+        vm.expectRevert(ShieldPoolCore.NothingToSweep.selector);
         pool.sweepStrayNative(address(0x5151));
     }
 
     function test_sweep_only_owner() public {
         vm.prank(user);
-        vm.expectRevert(ShieldPoolPoseidon.NotOwner.selector);
+        vm.expectRevert(ShieldPoolCore.NotOwner.selector);
         pool.sweepStrayNative(user);
     }
 
