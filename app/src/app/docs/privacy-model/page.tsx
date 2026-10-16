@@ -322,13 +322,14 @@ export default function DocsPrivacyPage() {
           single contributor. Mainnet needs a multi-party trusted setup.
         </li>
         <li>
-          <strong>Internal audits only.</strong> Two rounds, with fixes
+          <strong>Internal audits only.</strong> Several rounds, with fixes
           deployed. An external audit comes before mainnet.
         </li>
         <li>
-          <strong>A payer can take back a direct payment until it moves.</strong>{" "}
-          The payer creates the payment, so until the payee moves it, the payer
-          knows its key too and could reclaim it. A fix is in progress.
+          <strong>A payer can take back a payment until it is claimed.</strong>{" "}
+          The payer creates the payment, so they know its key too. Claiming moves
+          it into a new note only the payee knows, and after that the payer can no
+          longer touch it.
         </li>
         <li>
           <strong>Small anonymity set.</strong> Few people use the testnet
@@ -346,7 +347,8 @@ export default function DocsPrivacyPage() {
       </ul>
       <p>
         See <Link href="/docs/production">the production gate</Link> for the full
-        list. More detail: <Link href="/docs/encryption">How shield works</Link>{" "}
+        list, and the <Link href="/docs/threat-model">threat model</Link> for who can
+        do what. More detail: <Link href="/docs/encryption">How shield works</Link>{" "}
         and the <Link href="/whitepaper">whitepaper</Link>.
       </p>
     </DocsLayout>

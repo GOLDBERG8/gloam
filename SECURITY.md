@@ -23,9 +23,10 @@ If a scanner still flags a **public** tx hash or zkey, mark as false positive. I
 
 ## Vault notes
 
-- Notes (secrets) live in browser `localStorage`.
-- Settings → backup: plain JSON or passphrase-locked (`gloambak1.…`).
+- Notes (secrets) and receive keys live in the browser, encrypted at rest under a non-extractable device key, or under a passkey if the user turns that on.
+- Settings → backup: plain JSON or passphrase-locked (`gloambak1.…`). Recovery keeps an end-to-end encrypted copy that only the user's wallet signature or passkey can open.
 - Anyone with an unlocked backup can spend those notes.
+- Who can do what, and the assumptions behind it: [gloam.trade/docs/threat-model](https://gloam.trade/docs/threat-model).
 
 ## Reporting a vulnerability
 

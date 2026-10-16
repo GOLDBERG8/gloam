@@ -193,6 +193,11 @@ const PAGE_META: Record<string, PageMeta> = {
     keywords: ["shield", "deposit", "withdraw", "cash out", "private balance", "vault", "how it works"],
     headings: ["The short version", "Visual path", "What the public still sees", "What we do not claim"],
   },
+  "/docs/threat-model": {
+    description: "Who Gloam defends against, what each can and cannot do, our assumptions and known gaps.",
+    keywords: ["threat model", "security", "attacker", "relay", "owner", "timelock", "trusted setup", "ceremony", "issuer", "freeze", "rpc", "bug bounty", "report", "vulnerability", "researcher"],
+    headings: ["What we protect", "Who can do what", "The details that matter", "What we assume", "Known gaps", "Out of scope", "How to report"],
+  },
   "/docs/privacy-model": {
     description: "Exactly what an explorer can and cannot see when you use Gloam.",
     keywords: ["privacy", "explorer", "public", "hidden", "anonymity", "operator", "threat", "what is public", "passkey", "sanctions", "screening", "ofac", "compliance", "new", "novel", "viewing key", "context"],
