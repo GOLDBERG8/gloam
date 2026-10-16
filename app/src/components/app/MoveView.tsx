@@ -173,7 +173,12 @@ export function MoveView() {
   const [sendPassphrase, setSendPassphrase] = useState("");
   const [importText, setImportText] = useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
-  const [importOk, setImportOk] = useState<{ text: string; note?: string; fresh?: boolean; warn?: boolean } | null>(null);
+  const [importOk, setImportOk] = useState<{
+    text: string;
+    note?: string;
+    fresh?: boolean;
+    tone?: "warn" | "danger";
+  } | null>(null);
   /** The claimed payment being secured right now (lib/claimSweep). */
   const [securingId, setSecuringId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -974,23 +979,28 @@ export function MoveView() {
           fresh: Boolean(claim),
         });
       } else if (r.status === "already_spent") {
-        setError(
-          `The person who sent ${label} moved it before it was secured, so it is not in your balance. Ask them to send it again.`
-        );
+        setImportOk({
+          text: `The person who sent ${label} moved it before it was secured, so it is not in your balance. Ask them to send it again.`,
+          note: claim?.note,
+          tone: "danger",
+        });
       } else if (r.status === "not_settled") {
         setImportOk({
           text: `${did}, but the payment has not reached the vault yet, so it cannot be secured. Secure it once it lands. ${stillOpen}`,
           note: claim?.note,
-          warn: true,
+          tone: "warn",
         });
       } else if (r.status === "unconfirmed") {
         setImportOk({
           text: `${did}. Securing it was sent and has not confirmed yet. It counts in your balance once it lands.`,
           note: claim?.note,
-          warn: true,
+          tone: "warn",
         });
       } else if (r.status === "bad_note") {
-        setError(`The amount in this payment does not match what it holds in the vault, so it cannot be secured.`);
+        setImportOk({
+          text: "The amount in this payment does not match what it holds in the vault, so it cannot be secured.",
+          tone: "danger",
+        });
       } else {
         const why = /reject|denied|cancel/i.test(r.reason ?? "")
           ? "the wallet prompt was closed"
@@ -998,7 +1008,7 @@ export function MoveView() {
         setImportOk({
           text: `${did}, but it is not secured yet: ${why}. ${stillOpen}`,
           note: claim?.note,
-          warn: true,
+          tone: "warn",
         });
       }
     } catch (e) {
@@ -1006,7 +1016,7 @@ export function MoveView() {
       if (report) setImportOk({
         text: `${did}, but it is not secured yet: ${msg}. ${stillOpen}`,
         note: claim?.note,
-        warn: true,
+        tone: "warn",
       });
     }
     refreshNotes();
@@ -1118,6 +1128,7 @@ export function MoveView() {
       ...(demo ? { secured: true } : {}),
     };
     if (!known) saveLocalNote(local);
+    else if (demo) updateLocalNote(known.id, { secured: true });
     setSelectedId(local.id);
     refreshNotes();
     void refreshTree();
@@ -1391,9 +1402,9 @@ export function MoveView() {
                   : `Secure ${unsecured.length} payments you claimed`}
               </p>
               <p className="mt-1 text-foreground">
-                Whoever paid you made its key, so they can still take it back
-                until you secure it. Securing moves it into a balance only you
-                hold.
+                {unsecured.length === 1
+                  ? "Whoever paid you made its key, so they can still take it back until you secure it. Securing moves it into a balance only you hold."
+                  : "Whoever paid you made their keys, so they can still take them back until you secure them. Securing moves them into a balance only you hold."}
                 {relayOn
                   ? " It goes through the Gloam relay, so your wallet stays out of it."
                   : " With the relay off, your wallet signs it and shows as the sender."}
@@ -1425,12 +1436,26 @@ export function MoveView() {
           {importOk && (
             <div
               className={`mt-5 flex items-start gap-3 rounded-xl px-4 py-3 text-[13.5px] leading-relaxed text-foreground ${
-                importOk.warn ? "bg-warn-soft" : "bg-sealed-soft"
+                importOk.tone === "danger"
+                  ? "bg-danger-soft"
+                  : importOk.tone === "warn"
+                    ? "bg-warn-soft"
+                    : "bg-sealed-soft"
               }`}
+              role={importOk.tone === "danger" ? "alert" : undefined}
               aria-live="polite"
             >
-              <span className={`mt-0.5 ${importOk.warn ? "text-warn" : "text-sealed"}`} aria-hidden>
-                {importOk.warn ? <LockIcon size={14} /> : <CheckIcon />}
+              <span
+                className={`mt-0.5 ${
+                  importOk.tone === "danger"
+                    ? "text-danger"
+                    : importOk.tone === "warn"
+                      ? "text-warn"
+                      : "text-sealed"
+                }`}
+                aria-hidden
+              >
+                {importOk.tone ? <LockIcon size={14} /> : <CheckIcon />}
               </span>
               <span className="min-w-0">
                 <span className="block">{importOk.text}</span>
