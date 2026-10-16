@@ -15,8 +15,11 @@ Testnet Poseidon pool is live with **dev ceremony** keys. Mainnet is blocked unt
 
 - [ ] Deploy production UnshieldIVerifier + TransferIVerifier + DualProofVerifier
 - [ ] Deploy `ShieldPoolPayments` (payments only, no sealed swap) with production
-      verifiers: `script/DeployTempoMainnet.s.sol`. It refuses to run without
-      `PRODUCTION_KEYS=1`, and the pool estimates ~23.2M gas on Tempo (30M cap)
+      verifiers on each chain: `script/DeployTempoMainnet.s.sol` (4217) and
+      `script/DeployRobinhoodMainnet.s.sol` (4663), both running the shared
+      `script/MainnetDeploy.sol`. They refuse to run without `PRODUCTION_KEYS=1`.
+      The pool estimates ~23.2M gas on Tempo (30M cap); Robinhood Chain has no
+      special cap. USDG on Robinhood Chain is `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168`
 - [ ] Beta deposit limits on: each listed stablecoin gets a per-deposit and a
       total limit; an unlisted asset cannot be deposited
 - [ ] Emergency path: `lowerDepositLimit(asset, 0, 0)` closes deposits at once
