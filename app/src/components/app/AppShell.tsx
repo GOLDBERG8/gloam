@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Logo } from "@/components/Logo";
-import { ThemeSegmented, ThemeToggle } from "@/components/ThemeToggle";
 import { WalletMenu } from "./WalletMenu";
 import { WelcomeModal } from "./WelcomeModal";
 import { PasskeyGate } from "./PasskeyGate";
@@ -191,7 +190,6 @@ export function AppShell({
       >
         <div className="flex items-center justify-between px-2 pb-5 pt-2">
           <Logo size={24} />
-          <ThemeToggle />
         </div>
         <NetworkSelector />
         <nav className="mt-4 flex flex-col gap-0.5" aria-label="Product">
@@ -264,10 +262,6 @@ export function AppShell({
                 onClick={() => setOpen(false)}
               />
             </nav>
-            <div className="mt-6 flex items-center justify-between border-t border-line pt-5">
-              <span className="text-[14px] text-mute">Appearance</span>
-              <ThemeSegmented />
-            </div>
             <Link
               href="/"
               onClick={() => setOpen(false)}
