@@ -87,10 +87,10 @@ export function buildNotePackage(args: {
   };
 }
 
-/** Compact share string (no passphrase). */
-export function encodeNotePackage(pack: NotePackage): string {
+/** The package as short-keyed JSON, the form both plain and locked codes carry. */
+function compactJson(pack: NotePackage): string {
   const note = cleanPaymentNote(pack.note);
-  const json = JSON.stringify({
+  return JSON.stringify({
     v: pack.v,
     t: pack.type,
     s: pack.scheme,
@@ -102,7 +102,11 @@ export function encodeNotePackage(pack: NotePackage): string {
     // Only when there is one, so a package without a note is byte-for-byte the old format.
     ...(note ? { n: note } : {}),
   });
-  return PREFIX_PLAIN + b64urlEncode(utf8(json));
+}
+
+/** Compact share string (no passphrase). */
+export function encodeNotePackage(pack: NotePackage): string {
+  return PREFIX_PLAIN + b64urlEncode(utf8(compactJson(pack)));
 }
 
 /**
@@ -167,9 +171,9 @@ export async function encodeNotePackageEncrypted(
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(canonicalPhrase(passphrase), salt);
-  const { note: rawNote, ...rest } = pack;
-  const note = cleanPaymentNote(rawNote);
-  const plain = buf(utf8(JSON.stringify(note ? { ...rest, note } : rest)));
+  // The same short-keyed JSON as a plain code, so a locked link is barely longer
+  // than an open one. Readers have always accepted both key styles.
+  const plain = buf(utf8(compactJson(pack)));
   const cipher = new Uint8Array(
     await crypto.subtle.encrypt({ name: "AES-GCM", iv: buf(iv) }, key, plain)
   );
