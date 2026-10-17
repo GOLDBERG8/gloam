@@ -22,6 +22,8 @@ Changed 2026-10-17 at 13:20 UTC, before any contribution: contributors were read
 
 **Final beacon, announced 2026-10-17 at 19:25 UTC**, after round 011 (the last contribution) was accepted: drand mainnet round **6561266**, published 2026-10-17 at 20:30 UTC. Contributions are closed. **Withdrawn on 2026-10-17 at 19:36 UTC, before round 6561266 was published:** one more contributor asked to take part, so contributions reopened for round 012. Round 6561266 was never used. A new beacon round will be announced here after the last contribution is accepted, at least one hour before it is published.
 
+**Final beacon, announced 2026-10-17 at 20:23 UTC**, after round 013 (the last contribution) was accepted: drand mainnet round **6561386**, published 2026-10-17 at 21:30 UTC (https://api.drand.sh/public/6561386). Contributions are closed. Its randomness is applied to round 013 with 2^10 iterations.
+
 ## Rounds
 
 - **Round 000** (2026-10-16): initial keys from the public ptau, no contribution.
@@ -109,3 +111,10 @@ Changed 2026-10-17 at 13:20 UTC, before any contribution: contributors were read
   - solvency: `ae6fb6a3f3166b67c63af018744d72c2a88f3acfc927b294096687a14fa00a0723d8c763b29595554e14698e4adcc0db54628b08bdf51bf42b2dc58bc0fe4d52`
   - receipt: `d17b2d27fe7579ac117d39896beb7e6597ba5196ed359b07b4f77bbe720f573f11e9f75fa7d2762943052b37f1cbfce3b23af942a4717b8cf44ee44bdfd55f25`
   - payroll_total: `e2ece0fbaf8a7de3e06d6cab19f7621ca502b2be3816d70e61a926ed105fd6c48ea765e539b7a06a2c8aa3cc0bb8be62296db63355eb2b1617c817442a78f79b`
+- **Round 013** (2026-10-17): Viktor
+  - shield: `dc113f3cbefe8a78c7f81dee1b8bd215878519a044c66f60570b098eccbea3e8c30b637afafc0d573fe8d2b92e5855b607630eafe6b112c20aa72ce35bb54a4f`
+  - unshield: `8e06794211bbeeb6e97d5704fe92eaeae2d947b42f5a949e6a6a76b56fa7606ff2327d55a382d4875fef35600e8306eb35851ed169e2c2a6d2a9495560f18691`
+  - transfer: `2083fd40976b301470c3b495bd102aee067ffe587706fe7fa1b48856ae8fb016f9b00a23a55c815c9305fcb2f4d163a4dfeadc0c0595608f4df75d2b6ab257b8`
+  - solvency: `16741aa0ee9d4c0d68af07d38c6e3cac07f391bb3039e9053be8b41dded84789f5cdfc1e886b265ce9cca0a8273ade7f83accc82a082b34eba39106bb54e1aa3`
+  - receipt: `f9fd91038dbb6aaf54d9998128ef020eb992657a8f9c1388b4ef9da60339d9778a8441a6589c9a596a97659dfd3f4bf0312ab911d6ada87fec5b4106e83c0fc0`
+  - payroll_total: `d5f112956c6448eccea7077a33554e61e2d21851fa45110c65da6ab38b3665a32cc93c90397a6da72dc9d14e325d27e738008d3a87c54f0e551b432531ecbbea`
