@@ -12,9 +12,11 @@ Compiler: circom compiler 2.1.9. snarkjs 0.7.5.
 | receipt | 5510 | `37eb1b691c537b39da60175f8a3958288349ec4c5de9f600d6aad5664ca34dba` |
 | payroll_total | 37278 | `c54001fdac238039060c6790356cb8d2620ce657477f3450e23585d10b2eaa5a` |
 
-## Beacon (announced 2026-10-16, before any contribution)
+## Beacon
 
-Contributions open Monday 19 October and close Friday 23 October 2026. The final beacon is drand mainnet round **6578246**, published Friday 23 October 2026 at 18:00 UTC, chain `8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce`. Its randomness is applied to the last accepted round with 2^10 iterations.
+Announced 2026-10-16: drand mainnet round 6578246 (Friday 23 October 2026, 18:00 UTC).
+
+Changed 2026-10-17 at 13:20 UTC, before any contribution: contributors were ready early, so contributions run from 17 October and round 6578246 is withdrawn. The final beacon will be a drand mainnet round (chain `8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce`), announced here after the last contribution is accepted and at least one hour before that round is published, so nobody can know its value when it is chosen. Its randomness is applied to the last accepted round with 2^10 iterations.
 
 ## Rounds
 
