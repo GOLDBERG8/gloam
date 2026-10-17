@@ -18,6 +18,8 @@ Announced 2026-10-16: drand mainnet round 6578246 (Friday 23 October 2026, 18:00
 
 Changed 2026-10-17 at 13:20 UTC, before any contribution: contributors were ready early, so contributions run from 17 October and round 6578246 is withdrawn. The final beacon will be a drand mainnet round (chain `8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce`), announced here after the last contribution is accepted and at least one hour before that round is published, so nobody can know its value when it is chosen. Its randomness is applied to the last accepted round with 2^10 iterations.
 
+**Final beacon, announced 2026-10-17 at 18:15 UTC.** Contributions are closed after round 007. The final beacon is drand mainnet round **6561146**, which drand publishes on 2026-10-17 at 19:30 UTC (chain `8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce`, https://api.drand.sh/public/6561146). Its randomness is applied to round 007 with 2^10 iterations.
+
 ## Rounds
 
 - **Round 000** (2026-10-16): initial keys from the public ptau, no contribution.
