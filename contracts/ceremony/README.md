@@ -43,32 +43,7 @@ Sealed swap is not included. It stays off until its accounting is redesigned.
 
 ## Contributing
 
-You need Node.js 18 or newer and about 200 MB of disk. It takes a few minutes.
-
-```bash
-git clone https://github.com/cryptoduke01/gloam.git
-cd gloam/contracts/ceremony
-npm install
-```
-
-Download the round folder you were sent (for example `round-004`) into
-`contracts/ceremony/`, then run:
-
-```bash
-node contribute.mjs round-004 --name "Your name or handle"
-```
-
-It asks you to type some random text, then works through the six circuits. Your
-randomness is made fresh on your computer, mixed with what you typed, used once
-in memory, and never saved or printed.
-
-When it finishes:
-
-1. **Post your contribution hashes publicly**, on X or as a gist. The script
-   prints a ready-made message.
-2. **Send the new round folder** (`round-005` in this example) back to the
-   coordinator.
-3. Delete everything else. Nothing on your computer needs to be kept.
+Everything a contributor needs, step by step, is in [CONTRIBUTE.md](CONTRIBUTE.md). It takes about 10 minutes, needs Node.js 18 or newer, and needs no wallet or funds. It is written so you can hand it to an AI agent too.
 
 ## Checking a round yourself
 
