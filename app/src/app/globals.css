@@ -125,6 +125,14 @@
   --chart-down: #b4362a;
 }
 
+/* Native dropdown lists take their colours from the option itself on Windows,
+   Android and Linux; without this, dark mode shows light text on a light list. */
+select option,
+select optgroup {
+  background-color: var(--panel);
+  color: var(--foreground);
+}
+
 html[data-theme="dark"],
 .theme-dark {
   color-scheme: dark;

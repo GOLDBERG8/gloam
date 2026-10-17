@@ -84,12 +84,15 @@ export function WalletConnectSheet({ open, onClose }: { open: boolean; onClose: 
           if (!live) return;
           pending.current = false;
           const name = e instanceof Error ? e.name : "";
+          const message = e instanceof Error ? e.message : "";
           setStage({
             kind: "failed",
             text:
               name === "UserRejectedRequestError"
                 ? "The wallet did not approve it. Try again when you're ready."
-                : "Couldn't reach your wallet app. Try again.",
+                : /chains?/i.test(message) && /not supported|unsupported/i.test(message)
+                  ? "This wallet app can't use Gloam's networks yet. Try MetaMask, which lets you add them."
+                  : "Couldn't reach your wallet app. Try again.",
           });
         });
     }, 0);
@@ -162,7 +165,7 @@ export function WalletConnectSheet({ open, onClose }: { open: boolean; onClose: 
             <p className="mt-1.5 text-[13.5px] leading-relaxed text-mute">
               {phone
                 ? "Pick your wallet, approve the connection there, then come back to this tab."
-                : "Open a wallet app such as MetaMask or Trust Wallet on your phone and scan this code."}
+                : "Open a wallet app such as MetaMask on your phone and scan this code."}
             </p>
           </div>
           <button
