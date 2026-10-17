@@ -67,10 +67,10 @@ node coordinator.mjs finalize --beacon <hex> --label "drand round <n>"
 
 - `accept` refuses a round that does not come from our round 000 and phase 1, or
   that skips a round, and logs the contributor in `TRANSCRIPT.md`.
-- `finalize` applies the beacon, checks the final keys, regenerates the Solidity
-  verifiers in `src/verifiers/`, copies the browser files into
-  `app/public/circuits/`, and prints the fingerprints for
-  `app/src/lib/circuitArtifacts.ts`. Then set `PROVING_CEREMONY` to `"production"`,
-  run the tests, and deploy with `PRODUCTION_KEYS=1`.
+- `finalize` applies the beacon, checks the final keys, and writes the final keys,
+  verifying keys, browser files and Solidity verifiers to `build/final`, then prints
+  their fingerprints. It leaves the app and `src/` alone, because testnet keeps its
+  own keys. The final keys move into the app and contracts with the mainnet deploy,
+  which runs with `PRODUCTION_KEYS=1`.
 
 Round folders and keys are published as release files; they are not committed.

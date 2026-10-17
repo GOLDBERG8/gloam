@@ -13,9 +13,10 @@
  *
  *   node coordinator.mjs finalize --beacon <hex> --label "<where the beacon is from>"
  *       Apply a public random beacon announced in advance (a drand round) to
- *       the last accepted round, check the result, then export the verifying
- *       keys and Solidity verifiers and copy the browser files into the app.
- *       Prints the SHA-256 fingerprints for app/src/lib/circuitArtifacts.ts.
+ *       the last accepted round, check the result, then export the final keys,
+ *       verifying keys, browser files and Solidity verifiers into build/final.
+ *       Nothing in the app or src/ is touched: testnet keeps its own keys, and
+ *       the final keys go in with the mainnet deploy.
  */
 import * as snarkjs from "snarkjs";
 import { execFileSync } from "child_process";
@@ -27,8 +28,6 @@ import {
 } from "./lib.mjs";
 
 const TRANSCRIPT = join(HERE, "TRANSCRIPT.md");
-const APP_CIRCUITS = resolve(HERE, "../../app/public/circuits");
-const VERIFIERS = resolve(HERE, "../src/verifiers");
 const CIRCOM = existsSync(join(homedir(), ".cargo/bin/circom")) ? join(homedir(), ".cargo/bin/circom") : "circom";
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -143,7 +142,8 @@ async function finalize() {
   if (last < 1) throw new Error("No contributions accepted yet.");
   const from = roundDir(last);
   const out = join(BUILD, "final");
-  mkdirSync(out, { recursive: true });
+  const verifiers = join(out, "verifiers");
+  mkdirSync(verifiers, { recursive: true });
   const template = readFileSync(join(HERE, "node_modules/snarkjs/templates/verifier_groth16.sol.ejs"), "utf8");
   const prints = [];
   const finals = {};
@@ -160,12 +160,10 @@ async function finalize() {
     writeFileSync(join(out, `${c.app}_vkey.json`), JSON.stringify(vkey, null, 1) + "\n");
     if (c.verifier) {
       const sol = await snarkjs.zKey.exportSolidityVerifier(final, { groth16: template });
-      writeFileSync(join(VERIFIERS, `${c.verifier}.sol`), sol.replace(/contract Groth16Verifier/, `contract ${c.verifier}`));
+      writeFileSync(join(verifiers, `${c.verifier}.sol`), sol.replace(/contract Groth16Verifier/, `contract ${c.verifier}`));
     }
     const wasm = join(BUILD, c.name, `${c.name}_js`, `${c.name}.wasm`);
-    copyFileSync(wasm, join(APP_CIRCUITS, `${c.app}.wasm`));
-    copyFileSync(final, join(APP_CIRCUITS, `${c.app}_final.zkey`));
-    copyFileSync(join(out, `${c.app}_vkey.json`), join(APP_CIRCUITS, `${c.app}_vkey.json`));
+    copyFileSync(wasm, join(out, `${c.app}.wasm`));
     prints.push([`${c.app}.wasm`, await sha256File(wasm)], [`${c.app}_final.zkey`, await sha256File(final)]);
   }
 
@@ -184,8 +182,8 @@ async function finalize() {
       "",
     ].join("\n"),
   );
-  console.log("\nFinal keys are in build/final and copied into the app. Solidity verifiers regenerated.");
-  console.log("Update app/src/lib/circuitArtifacts.ts with these fingerprints, then set PROVING_CEREMONY to production:\n");
+  console.log("\nFinal keys, verifying keys, browser files and Solidity verifiers are in build/final.");
+  console.log("The app and src/ are untouched. Fingerprints for the mainnet switch:\n");
   for (const [f, s] of prints) console.log(`${f}  ${s}`);
 }
 
