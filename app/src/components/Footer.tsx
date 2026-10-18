@@ -26,6 +26,7 @@ const groups: {
       { href: "/docs", label: "Docs" },
       { href: "/docs/agents", label: "Agents" },
       { href: "/partners", label: "Partners" },
+      { href: "/token", label: "$GLOAM token" },
       { href: "/whitepaper", label: "Whitepaper" },
       { href: "/verify#contracts", label: "Verify contracts" },
     ],

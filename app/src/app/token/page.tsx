@@ -1,0 +1,308 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { Header } from "@/components/Header";
+import { Footer } from "@/components/Footer";
+import { FlowField } from "@/components/ui/FlowField";
+import { SealedField } from "@/components/ui/SealedField";
+import { robinhood } from "@/lib/chain";
+import { CopyAddress, TokenFilm } from "./TokenClient";
+
+const GLOAM_TOKEN = "0xDcD885F5c60b3aD49F6D58718696417314e8724d";
+const ORYNTH_URL = "https://www.orynth.dev/projects/gloam";
+const EXPLORER_URL = `${robinhood.blockExplorers.default.url}/token/${GLOAM_TOKEN}`;
+
+export const metadata: Metadata = {
+  title: "$GLOAM",
+  description:
+    "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, a share of Gloam's fees buys it back, and from mainnet you can hold it privately.",
+  alternates: { canonical: "/token" },
+  openGraph: {
+    title: "$GLOAM, the Gloam token",
+    description: "Governance, buybacks from Gloam's fees, private holding and first access. Live on Robinhood Chain.",
+    images: ["/media/gloam-token-poster.jpg"],
+  },
+};
+
+/* ---------- the facts ---------- */
+
+const FACTS = [
+  { value: "500,000", body: "Fixed supply. The contract has no way to mint more." },
+  { value: "Locked", body: "The launch liquidity is locked for good." },
+  { value: "No presale", body: "Every token started in the pool. No team allocation." },
+  { value: "Robinhood Chain", body: "Live on mainnet today, launched on Orynth." },
+];
+
+/* ---------- what it does ---------- */
+
+const USES = [
+  {
+    n: "01",
+    title: "Governance",
+    body: "Holders vote on what Gloam does next: new assets, new chains, deposit limits and fees. The first votes run in the open. Private voting, where you prove your balance without showing your wallet, comes after.",
+    when: "First vote at mainnet",
+  },
+  {
+    n: "02",
+    title: "Buybacks",
+    body: "Gloam earns from private payments, payroll runs and API calls. Once fees switch on at mainnet, a share of them buys $GLOAM from the market.",
+    when: "Starts when fees go live",
+  },
+  {
+    n: "03",
+    title: "Private holding",
+    body: "The Robinhood Chain mainnet pool lists $GLOAM next to USDG. Shield it and your balance leaves the public record, and you can still prove it to someone when you need to.",
+    when: "At mainnet",
+  },
+  {
+    n: "04",
+    title: "First access",
+    body: "Holders get new Gloam features first, from agent tools to payroll upgrades.",
+    when: "After mainnet",
+  },
+];
+
+/* ---------- roadmap ---------- */
+
+type Phase = { tag: string; title: string; done?: boolean; items: string[] };
+
+const PHASES: Phase[] = [
+  {
+    tag: "Done",
+    title: "Rails first",
+    done: true,
+    items: [
+      "$GLOAM live on Robinhood Chain, with a fixed supply and locked liquidity",
+      "Private payments live on Tempo and Robinhood Chain testnet",
+      "Trusted setup closed with 13 contributors",
+      "$GLOAM listed in the mainnet pool, ready for deploy",
+    ],
+  },
+  {
+    tag: "Next",
+    title: "Mainnet",
+    items: [
+      "Gloam goes live on Tempo and Robinhood Chain mainnet",
+      "Shield $GLOAM in the Robinhood Chain pool: 25,000 per deposit, 250,000 in total during beta",
+      "Fees switch on, and a share starts buying back $GLOAM",
+      "The first holder vote, held in the open",
+    ],
+  },
+  {
+    tag: "Then",
+    title: "After mainnet",
+    items: ["Private voting with a proof of your balance", "Holders get new features first"],
+  },
+  {
+    tag: "Later",
+    title: "Run the network",
+    items: ["Relayers stake $GLOAM to help run Gloam"],
+  },
+];
+
+function Check() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M5 12.5l4.2 4.2L19 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export default function TokenPage() {
+  return (
+    <div className="relative min-h-screen bg-panel text-foreground">
+      <Header />
+
+      <main>
+        {/* hero */}
+        <section className="mx-auto max-w-[1400px] px-4 pt-3 sm:px-7 sm:pt-6">
+          <div className="gl-panel flex min-h-[560px] flex-col justify-end px-5 pb-8 pt-24 sm:px-12 sm:pb-12 lg:min-h-[640px]">
+            <FlowField />
+            <div className="grid grid-cols-1 items-end gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:gap-14">
+              <div className="max-w-[560px]">
+                <p className="t-label">The Gloam token</p>
+                <h1 className="t-display-xl mt-5">$GLOAM</h1>
+                <p className="mt-6 max-w-[42ch] text-[16px] leading-relaxed text-soft sm:text-[17px]">
+                  Private money is coming onchain, and $GLOAM holders get a say in
+                  where it goes. Live on Robinhood Chain.
+                </p>
+                <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
+                  <a href={ORYNTH_URL} target="_blank" rel="noopener noreferrer" className="btn btn-ink btn-lg">
+                    Get $GLOAM on Orynth
+                  </a>
+                  <Link
+                    href="#roadmap"
+                    className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
+                  >
+                    See the roadmap <span aria-hidden>→</span>
+                  </Link>
+                </div>
+              </div>
+
+              <div className="gl-glass min-w-0 p-2">
+                <TokenFilm />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* facts */}
+        <section className="mx-auto max-w-[1240px] px-6 py-20 sm:py-28">
+          <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
+            <div>
+              <h2 className="t-display-l max-w-[12ch]">Built to last</h2>
+              <p className="mt-5 max-w-[36ch] text-[15px] leading-relaxed text-mute">
+                $GLOAM has been live for a while. We let it sit quietly and put
+                every hour into the rails first. Now the token goes to work.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">
+              {FACTS.map((f) => (
+                <div key={f.value} className="border-t border-foreground pt-5">
+                  <p className="tnum text-[26px] leading-tight tracking-[-0.02em]">{f.value}</p>
+                  <p className="mt-3 text-[14px] leading-relaxed text-mute">{f.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* what it does */}
+        <section className="mx-auto max-w-[1400px] px-4 sm:px-7">
+          <div className="gl-panel bg-surface px-5 py-14 sm:px-12 sm:py-20">
+            <SealedField tone="soft" />
+            <div className="relative mx-auto max-w-[1120px]">
+              <p className="t-label">What it does</p>
+              <h2 className="t-display-l mt-4 max-w-[18ch]">Four jobs for one token</h2>
+
+              <div className="mt-12 overflow-hidden rounded-[18px] border border-line bg-panel">
+                {USES.map((u) => (
+                  <div
+                    key={u.n}
+                    className="grid grid-cols-1 gap-3 border-b border-line px-5 py-6 last:border-0 sm:grid-cols-[180px_minmax(0,1fr)_200px] sm:items-start sm:gap-8 sm:px-7"
+                  >
+                    <p className="flex items-baseline gap-3 text-[18px] tracking-[-0.01em] text-foreground">
+                      <span className="tnum text-[13px] text-mute">{u.n}</span>
+                      {u.title}
+                    </p>
+                    <p className="max-w-[60ch] text-[14.5px] leading-relaxed text-mute">{u.body}</p>
+                    <span className="inline-flex w-fit items-center gap-2 rounded-full bg-sealed-soft px-3 py-1.5 text-[12.5px] font-medium text-sealed sm:justify-self-end">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-sealed" />
+                      {u.when}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* roadmap */}
+        <section id="roadmap" className="mx-auto max-w-[1240px] scroll-mt-20 px-6 py-20 sm:py-28">
+          <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
+            <div>
+              <p className="t-label">Roadmap</p>
+              <h2 className="t-display-l mt-4 max-w-[12ch]">Where $GLOAM goes from here</h2>
+              <p className="mt-5 max-w-[36ch] text-[15px] leading-relaxed text-mute">
+                Each step lands with the product, not before it. We will share the
+                mainnet date with holders and partners ahead of time.
+              </p>
+            </div>
+            <ol className="relative">
+              {PHASES.map((p, i) => (
+                <li key={p.title} className="relative grid grid-cols-[28px_1fr] gap-5 pb-12 last:pb-0">
+                  {i < PHASES.length - 1 && (
+                    <span aria-hidden className="absolute left-[13px] top-8 bottom-0 w-px bg-line" />
+                  )}
+                  <span
+                    aria-hidden
+                    className={`relative mt-0.5 grid h-7 w-7 place-items-center rounded-full ${
+                      p.done ? "bg-sealed text-panel" : "border border-line-strong bg-panel text-mute"
+                    }`}
+                  >
+                    {p.done ? <Check /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="t-label">{p.tag}</p>
+                    <p className="mt-1.5 text-[22px] leading-snug tracking-[-0.015em]">{p.title}</p>
+                    <ul className="mt-4 space-y-2.5">
+                      {p.items.map((it) => (
+                        <li key={it} className="flex gap-3 text-[14.5px] leading-relaxed text-mute">
+                          <span aria-hidden className={`mt-[9px] h-1 w-1 shrink-0 rounded-full ${p.done ? "bg-sealed" : "bg-faint"}`} />
+                          <span className="min-w-0">{it}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        {/* contract */}
+        <section className="mx-auto max-w-[1400px] px-4 pb-14 sm:px-7 sm:pb-20">
+          <div className="theme-dark gl-panel grid grid-cols-1 gap-10 border border-line bg-background px-5 py-14 text-foreground sm:px-12 sm:py-16 lg:grid-cols-[0.8fr_1.2fr] lg:gap-16">
+            <SealedField tone="soft" />
+            <div className="relative">
+              <p className="t-label">Contract</p>
+              <h2 className="t-display-l mt-4 max-w-[14ch]">Check it yourself</h2>
+              <p className="mt-5 max-w-[42ch] text-[15px] leading-relaxed text-mute">
+                Always copy the address from here or from @gloamtrade on X. Anything
+                else claiming to be $GLOAM is not ours.
+              </p>
+            </div>
+            <div className="relative min-w-0">
+              <CopyAddress address={GLOAM_TOKEN} />
+              <ul className="mt-6 divide-y divide-line border-y border-line text-[15px]">
+                {[
+                  ["Network", "Robinhood Chain (4663)"],
+                  ["Standard", "ERC-20, 18 decimals"],
+                  ["Supply", "500,000, fixed"],
+                ].map(([k, v]) => (
+                  <li key={k} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-4">
+                    <span>{k}</span>
+                    <span className="tnum text-[14px] text-mute">{v}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-6 flex flex-wrap gap-x-6 gap-y-3">
+                <a
+                  href={EXPLORER_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
+                >
+                  View on the explorer <span aria-hidden>↗</span>
+                </a>
+                <a
+                  href={ORYNTH_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed"
+                >
+                  Trade on Orynth <span aria-hidden>↗</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* note */}
+        <section className="mx-auto max-w-[1240px] px-6 pb-20 sm:pb-28">
+          <p className="max-w-[72ch] text-[13px] leading-relaxed text-mute">
+            No promises on price. $GLOAM is a governance and utility token. It is
+            not a share in Gloam and not a claim on its revenue: buybacks are
+            Gloam&apos;s choice of what to do with its fees, not a payout to
+            holders. Nothing here is financial advice. Read the{" "}
+            <Link href="/disclosures" className="text-foreground underline underline-offset-4 hover:text-sealed">
+              risk disclosures
+            </Link>
+            .
+          </p>
+        </section>
+      </main>
+
+      <Footer />
+    </div>
+  );
+}
