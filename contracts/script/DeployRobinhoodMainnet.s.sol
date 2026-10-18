@@ -22,9 +22,13 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *   export PRODUCTION_KEYS=1
  *   # USDG (Paxos Global Dollar, 6 decimals) is 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168,
  *   # per docs.paxos.com and checked on-chain. 0x0 lists native ETH (18 decimals).
- *   export LIMIT_ASSETS=0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168
- *   export LIMIT_PER_DEPOSIT=500000000            # raw units (6 decimals: 500 USDG = 500000000)
- *   export LIMIT_TOTAL=25000000000                # raw units (25,000 USDG)
+ *   # GLOAM (Gloam's token, 18 decimals, 500,000 fixed supply) is
+ *   # 0xDcD885F5c60b3aD49F6D58718696417314e8724d: a plain OpenZeppelin ERC-20 from the
+ *   # Orynth launcher, no transfer tax, checked on-chain. Holders shield it to vote privately.
+ *   # The three lists below go in the same order: USDG first, then GLOAM.
+ *   export LIMIT_ASSETS=0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168,0xDcD885F5c60b3aD49F6D58718696417314e8724d
+ *   export LIMIT_PER_DEPOSIT=500000000,25000000000000000000000      # 500 USDG; 25,000 GLOAM (5% of supply)
+ *   export LIMIT_TOTAL=25000000000,250000000000000000000000         # 25,000 USDG; 250,000 GLOAM (half of supply)
  *   export NEW_OWNER=0x...              # optional: multisig; it must call acceptOwnership()
  *
  * Run (Robinhood Chain is an Arbitrum chain with no special gas cap; the pool

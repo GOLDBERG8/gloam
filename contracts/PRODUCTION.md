@@ -20,8 +20,10 @@ Testnet Poseidon pool is live with **dev ceremony** keys. Mainnet is blocked unt
       `script/MainnetDeploy.sol`. They refuse to run without `PRODUCTION_KEYS=1`.
       The pool estimates ~23.2M gas on Tempo (30M cap); Robinhood Chain has no
       special cap. USDG on Robinhood Chain is `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168`
-- [ ] Beta deposit limits on: each listed stablecoin gets a per-deposit and a
-      total limit; an unlisted asset cannot be deposited
+- [ ] Beta deposit limits on: each listed asset gets a per-deposit and a
+      total limit; an unlisted asset cannot be deposited. Robinhood Chain lists
+      USDG and GLOAM (`0xDcD885F5c60b3aD49F6D58718696417314e8724d`, 18 decimals,
+      25,000 per deposit, 250,000 total) so holders can vote privately
 - [ ] Emergency path: `lowerDepositLimit(asset, 0, 0)` closes deposits at once
       (no timelock); withdrawals and private transfers keep working. Raising a
       limit or listing an asset takes the 3-day timelock
