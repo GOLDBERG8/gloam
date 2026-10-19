@@ -65,6 +65,7 @@ import {
   handsToAdmin,
   hasBearerCode,
   imageRef,
+  impersonates,
   isVague,
   looksLikeBugReport,
   looksLikeQuestion,
@@ -73,6 +74,7 @@ import {
   memoryText,
   mentionsBot,
   messageText,
+  moderationAsk,
   namesPersona,
   parseCommand,
   readSentinel,
@@ -109,6 +111,7 @@ import {
   handedOffLately,
   lockedCodeNear,
   logEscalation,
+  ownerChats,
   logQuestion,
   logAnswered,
   markReplied,
@@ -133,6 +136,7 @@ import {
   tokenCardLately,
 } from "./store";
 import {
+  banMember,
   deleteMessage,
   downloadFile,
   getFile,
@@ -232,7 +236,7 @@ function groupGuide(c: BotConfig): string {
     : "Testing directions land in the Testers topic soon.";
   return (
     `Hi, I'm ${c.persona}, Gloam's community helper bot. Tag me or reply to me with a question, or just ask in Help.\n\n` +
-    `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract. ${testing}\n\n` +
+    `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract, and replying /spam to a message reports it. ${testing}\n\n` +
     `Docs live at gloam.trade/docs, news at @gloamtrade, and anything private goes to hello@gloam.trade. Admins never DM first.`
   );
 }
@@ -332,9 +336,20 @@ function leakWarning(name: string, removed: boolean): string {
   return `${first} Treat that wallet as exposed: move your funds to a new wallet now, and never share it again. Nobody from Gloam will ever ask for it.`;
 }
 
-function scamWarning(removed: boolean): string {
-  const first = removed ? "Heads up, I removed a message that looked like a scam." : "Heads up, that message looks like a scam.";
-  return `${first} Gloam admins never DM first and will never ask for your seed phrase, private key or funds. If someone messages you offering help, it's not us.`;
+function scamWarning(removed: boolean, banned = false): string {
+  const first = removed
+    ? banned
+      ? "Heads up, I removed a scam message and the account that posted it."
+      : "Heads up, I removed a message that looked like a scam."
+    : "Heads up, that message looks like a scam.";
+  return `${first}\n\nGloam admins never DM first and will never ask for your seed phrase, private key or funds. If someone messages you offering help, it's not us.`;
+}
+
+function impostorWarning(banned: boolean): string {
+  const first = banned
+    ? "Heads up, I removed an account pretending to be Gloam."
+    : "Heads up, that account is pretending to be Gloam. Don't reply to it or DM it.";
+  return `${first}\n\nThe real team never DMs first and never asks for funds, keys or seed phrases.`;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -469,7 +484,9 @@ async function flushWelcome(c: BotConfig): Promise<void> {
 }
 
 async function welcome(users: TgUser[], c: BotConfig): Promise<void> {
-  const people = users.filter((u) => !u.is_bot);
+  // an account named like Gloam or the team is out before it can post
+  for (const u of users) if (!u.is_bot && !isTrusted(u, c) && impersonates(u)) await banMember(c.groupId, u.id);
+  const people = users.filter((u) => !u.is_bot && (isTrusted(u, c) || !impersonates(u)));
   if (people.length === 0) return;
   await countMembers("joins", people.map((u) => u.id)).catch(() => {});
   await queueJoiners(people.map(joinerOf)).catch(() => 0);
@@ -538,6 +555,83 @@ async function onCommand(cmd: Command, msg: TgMessage, from: TgUser, c: BotConfi
   await sendMessage(chatId, groupGuide(c), { threadId, replyTo: msg.message_id });
 }
 
+/**
+ * The team asked the helper to deal with a message: it deletes it, and with
+ * remove also takes the person out of the group for good (an admin can lift
+ * the ban in the group settings). Never the team's own messages, never itself.
+ */
+async function moderate(msg: TgMessage, target: TgMessage, remove: boolean, c: BotConfig, me: TgUser, threadId: number | undefined): Promise<void> {
+  const chatId = msg.chat.id;
+  const who = target.from;
+  const say = (text: string) => sendMessage(chatId, text, { threadId, replyTo: msg.message_id });
+  if (who?.id === me.id) {
+    await deleteMessage(chatId, target.message_id);
+    return;
+  }
+  if (who && isTrusted(who, c)) {
+    await say("That one's from the team, so I'll leave it.");
+    return;
+  }
+  const deleted = await deleteMessage(chatId, target.message_id);
+  const banned = remove && who ? await banMember(chatId, who.id) : false;
+  if (deleted) await count("scams");
+  const name = who && !impersonates(who) ? cleanName(who.first_name, "that account") : "that account";
+  if (!deleted && !banned) {
+    await say("Telegram didn't let me. I need the Delete messages and Ban users rights in the group's admin settings.");
+  } else if (remove && !banned) {
+    await say(`Deleted it, but Telegram didn't let me remove ${name}. I need the Ban users right in the group's admin settings.`);
+  } else {
+    await say(remove ? `Done. Deleted it and removed ${name} from the group.` : "Done, deleted.");
+  }
+}
+
+/** What a member types, as a reply, to report a message. */
+const REPORT_COMMANDS = new Set(["spam", "scam", "report"]);
+const REPORTS_PER_MIN = 3;
+
+/**
+ * A member reported the message they replied to. A clear scam or a look-alike
+ * account goes at once, by the same rules as the automatic checks; anything
+ * else goes to the owner's private chat with the link, for a person to judge.
+ * A member's report alone never removes anyone.
+ */
+async function onReport(msg: TgMessage, from: TgUser, target: TgMessage | null, c: BotConfig, me: TgUser, topic: number): Promise<void> {
+  const chatId = msg.chat.id;
+  const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
+  const name = firstName(from, c);
+  const say = (text: string) => sendMessage(chatId, text, { threadId, replyTo: msg.message_id });
+  if (!(await hitRateLimit(`tg:${from.id}`, "tg-report", REPORTS_PER_MIN)).allowed) return;
+  if (!target) {
+    await say("Reply to the message with /spam and I'll take a look.");
+    return;
+  }
+  const who = target.from;
+  if (!who || who.id === me.id || isTrusted(who, c)) {
+    await say("That one's from the team, so it stays.");
+    return;
+  }
+  const targetText = scanCodes(messageText(target)).masked;
+  if (impersonates(who) || scamReason(targetText) || secretLeak(targetText)) {
+    const deleted = await deleteMessage(chatId, target.message_id);
+    const banned = await banMember(chatId, who.id);
+    if (deleted) await count("scams");
+    await say(deleted || banned ? `Thanks ${name}. That was a scam, so it's gone, and so is the account.` : `Thanks ${name}. That's a scam, but Telegram didn't let me remove it, so I've sent it to the admins.`);
+    if (deleted || banned) return;
+  } else {
+    await say(`Thanks ${name}, sent to the admins.`);
+  }
+  const link = messageLink(target);
+  const what = memoryText(targetText) ?? (imageRef(target) || target.document ? "[a picture or GIF]" : "[a message]");
+  await logEscalation({ at: Date.now(), name, topic: topicName(topic), text: `Report about ${cleanName(who.first_name)}: ${what}`.slice(0, 200), link }).catch(() => {});
+  const chats = await ownerChats().catch(() => []);
+  for (const o of chats) {
+    await sendMessage(
+      o.chatId,
+      `${name} reported a message from ${cleanName(who.first_name)} in ${topicName(topic)}: "${what.slice(0, 160)}"${link ? `\n${link}` : ""}\n\nIn the group, reply to it with /ban to remove them, or /del to delete it.`,
+    );
+  }
+}
+
 async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Promise<void> {
   const from = msg.from;
   // other bots, channels, anonymous admins and service messages are not people asking
@@ -546,6 +640,17 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   const topic = topicOf(msg);
   // an edit is the same message again: counted once, when it was posted
   if (!edited) await countMessage(topic, from.id).catch(() => {});
+  // someone posting as "Gloam", "Glim", "Gloam Support" or a team tag: out, whatever they posted (a bare GIF too)
+  if (!isTrusted(from, c) && impersonates(from)) {
+    const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
+    const removed = await deleteMessage(chatId, msg.message_id);
+    const banned = await banMember(chatId, from.id);
+    await count(removed ? "scams" : "scamsMissed");
+    if ((await hitRateLimit(`tg:${chatId}:${topic}`, "tg-warn", WARN_PER_MIN)).allowed) {
+      await sendMessage(chatId, impostorWarning(banned), { threadId, replyTo: removed ? undefined : msg.message_id });
+    }
+    return;
+  }
   const ownPicture = imageRef(msg);
   const raw = messageText(msg);
   if (!raw && !ownPicture) return;
@@ -564,9 +669,11 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   }
   if (!trusted && scamReason(text)) {
     const removed = await deleteMessage(chatId, msg.message_id);
+    // a scam post costs the account its place in the group
+    const banned = removed ? await banMember(chatId, from.id) : false;
     await count(removed ? "scams" : "scamsMissed");
     if ((await hitRateLimit(`tg:${chatId}:${topic}`, "tg-warn", WARN_PER_MIN)).allowed) {
-      await sendMessage(chatId, scamWarning(removed), { threadId, replyTo: removed ? undefined : msg.message_id });
+      await sendMessage(chatId, scamWarning(removed, banned), { threadId, replyTo: removed ? undefined : msg.message_id });
     }
     return;
   }
@@ -583,6 +690,20 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   const me = await getMe();
   if (!me) return;
   const cmd = parseCommand(text, me.username);
+  // the owner or an admin, replying to a message: "delete this", "kick him", /ban, /del
+  const modTarget = trusted && !edited ? explicitReply(msg) : null;
+  if (modTarget) {
+    const tagged = mentionsBot(msg, me) || namesPersona(text, c.persona);
+    const ask = moderationAsk(withoutTag(text, me.username), cmd && !cmd.forOther ? cmd.name : null, tagged);
+    if (ask) {
+      await moderate(msg, modTarget, ask.remove, c, me, threadId);
+      return;
+    }
+  }
+  if (cmd && !cmd.forOther && REPORT_COMMANDS.has(cmd.name)) {
+    await onReport(msg, from, explicitReply(msg), c, me, topic);
+    return;
+  }
   if (cmd) {
     if (!cmd.forOther) await onCommand(cmd, msg, from, c, topic);
     return;

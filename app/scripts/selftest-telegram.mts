@@ -51,6 +51,8 @@ const {
   MAX_IMAGE_BYTES,
   TOPIC,
   asksTokenAddress,
+  impersonates,
+  moderationAsk,
   chainFix,
   markAddresses,
   sentencesOf,
@@ -176,6 +178,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (method === "getMe") return reply({ ok: true, result: BOT });
     if (method === "sendMessage") return reply({ ok: true, result: { message_id: nextId++ } });
     if (method === "deleteMessage") return reply({ ok: true, result: true });
+    if (method === "banChatMember") return reply({ ok: true, result: true });
     if (method === "getChatMemberCount") return reply({ ok: true, result: 123 });
     if (method === "getWebhookInfo") return reply({ ok: true, result: { url: "https://www.gloam.trade/api/telegram" } });
     if (method === "setWebhook") return reply({ ok: true, result: true });
@@ -948,6 +951,87 @@ await test("$GLOAM: a CA ask gets the card with no model call, then a short poin
   assert.equal(String(sends()[3]!.body.text), tokenCard());
 });
 
+await test("moderation: look-alike Gloam accounts, DM lures, and the team's delete and kick", async () => {
+  for (const u of [{ first_name: "Gloam" }, { first_name: "GIoam" }, { first_name: "Gl0am" }, { first_name: "Gloam", last_name: "Support" }, { first_name: "Glim" }, { first_name: "Duke | Gloam" }, { first_name: "Ada", username: "gloam_support" }, { first_name: "Gl\u043eam Official" }, { first_name: "Gloam \u{1F512}" }]) {
+    assert.ok(impersonates(u), JSON.stringify(u));
+  }
+  for (const u of [{ first_name: "Glimmer" }, { first_name: "Gloria" }, { first_name: "Gloam fan" }, { first_name: "Ada", username: "gloamfan" }, { first_name: "Samy" }]) {
+    assert.ok(!impersonates(u), JSON.stringify(u));
+  }
+  assert.equal(scamReason("All HOLDERS DM ME Immediately"), "dm_support");
+  assert.equal(scamReason("investors inbox me now for allocation"), "dm_support");
+  assert.equal(scamReason("can someone dm me the steps?"), null);
+  assert.equal(scamReason("dm me if you want to test a payment"), null);
+  assert.deepEqual(moderationAsk("can you delete and kick him out?", null, true), { remove: true });
+  assert.deepEqual(moderationAsk("delete this", null, true), { remove: false });
+  assert.deepEqual(moderationAsk("", "ban", false), { remove: true });
+  assert.equal(moderationAsk("delete and kick him", null, false), null, "untagged words do nothing");
+
+  // a look-alike posts a bare GIF: deleted, banned, one notice
+  reset();
+  const fake = user(901, "Gloam", "gl0am_hq");
+  await handleUpdate(upd(inTopic(TOPIC.general, "", fake, { document: { file_id: "gif1", file_unique_id: "g1", mime_type: "video/mp4" } })));
+  assert.equal(deletes().length, 1);
+  const ban = calls.find((x) => x.method === "banChatMember")!;
+  assert.equal(ban.body.user_id, 901);
+  assert.ok(String(sends()[0]!.body.text).startsWith("Heads up, I removed an account pretending to be Gloam."));
+
+  // a scam line from a member: deleted and the account removed
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "All holders DM me immediately for the airdrop", user(902, "Nolan"))));
+  assert.equal(deletes().length, 1);
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 1);
+
+  // the owner replies to a scam GIF and asks Glim to deal with it
+  reset();
+  const gif = inTopic(TOPIC.general, "", user(903, "Seller"), { document: { file_id: "gif2", file_unique_id: "g2", mime_type: "video/mp4" } });
+  await handleUpdate(upd(gif));
+  await handleUpdate(upd(inTopic(TOPIC.general, "@glim_gloam_bot can you delete and kick him out?", OWNER, { reply_to_message: gif })));
+  assert.equal(deletes()[deletes().length - 1]!.body.message_id, gif.message_id);
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()!.body.user_id, 903);
+  assert.equal(String(sends().pop()!.body.text), "Done. Deleted it and removed Seller from the group.");
+  assert.equal(modelCalls().length, 0, "no model call for moderation");
+
+  // never against the team, and a member asking does nothing
+  reset();
+  const fromAdmin = inTopic(TOPIC.general, "gm all", YOMI);
+  await handleUpdate(upd(fromAdmin));
+  await handleUpdate(upd(inTopic(TOPIC.general, "@glim_gloam_bot ban him", OWNER, { reply_to_message: fromAdmin })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0);
+  assert.equal(String(sends().pop()!.body.text), "That one's from the team, so I'll leave it.");
+  reset();
+  const victim = inTopic(TOPIC.general, "hello there", user(904, "Ola"));
+  await handleUpdate(upd(victim));
+  await handleUpdate(upd(inTopic(TOPIC.general, "/ban", user(905, "Troll"), { reply_to_message: victim })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, "only the team can ban");
+
+  // a member's /spam: a clear scam goes, anything else goes to the owner, never a ban on their word alone
+  reset();
+  await handleUpdate(upd(dm(OWNER, "hi")));
+  const lure = inTopic(TOPIC.general, "investors inbox me now", user(907, "Pat"));
+  classifierReply = "NO";
+  // posted while the checks were looking the other way: say it slipped through as an edit-free reply target
+  const report1 = inTopic(TOPIC.general, "/spam", user(908, "Kemi"), { reply_to_message: lure });
+  await handleUpdate(upd(report1));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 907);
+  assert.ok(String(sends().pop()!.body.text).startsWith("Thanks Kemi. That was a scam"));
+  reset();
+  await handleUpdate(upd(dm(OWNER, "hi")));
+  const odd = inTopic(TOPIC.general, "", user(909, "Dee"), { document: { file_id: "gif3", file_unique_id: "g3", mime_type: "video/mp4" } });
+  await handleUpdate(upd(odd));
+  await handleUpdate(upd(inTopic(TOPIC.general, "/spam", user(910, "Bola"), { reply_to_message: odd })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, "a report alone bans nobody");
+  const toOwner = sends().filter((x) => x.body.chat_id === OWNER.id);
+  assert.ok(String(toOwner.pop()!.body.text).includes("Bola reported a message from Dee"));
+  assert.ok(sends().some((x) => x.body.chat_id === GROUP && x.body.text === "Thanks Bola, sent to the admins."));
+
+  // a look-alike joining is out before the welcome
+  reset();
+  await handleUpdate({ update_id: nextId++, message: { message_id: nextId++, chat, date: 0, new_chat_members: [user(906, "Gloam Support")] } as TgMessage });
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 1);
+  assert.equal(sends().length, 0, "no welcome for it");
+});
+
 await test("answers are limited per person; past the limit it stays quiet", async () => {
   reset();
   const pia = user(37, "Pia");
@@ -1050,7 +1134,7 @@ await test("owner /report: every section, links to hand-offs and bugs, one model
   assert.ok(text.startsWith("Gloam group report\nLast 24 hours, to "));
   assert.match(text, /to \w{3} \d{1,2} \w{3}, \d{2}:\d{2} WAT\n/);
   assert.ok(text.includes("123 in the group."));
-  assert.match(text, /Handed to an admin: \d+\n- \d{2}:\d{2} Ola in Help: @glim_gloam_bot when is mainnet\? https:\/\/t\.me\/gloamhq\/\d+/);
+  assert.match(text, /Handed to an admin: \d+\n(?:- .*\n)*?- \d{2}:\d{2} Ola in Help: @glim_gloam_bot when is mainnet\? https:\/\/t\.me\/gloamhq\/\d+/);
   assert.match(text, /- Lia: The faucet button is broken on Tempo for me https:\/\/t\.me\/gloamhq\/\d+/);
   assert.ok(text.endsWith("- Most asked how to turn on Recovery\n- A few asked why the faucet was busy"));
   assert.equal(modelCalls().length, 1, "the summary is the only model call");
@@ -1458,7 +1542,7 @@ await test("team chat: admins by handle and by id get replies by first name; cha
   await handleUpdate(upd(dm(ADMIN_BY_ID, "delete the last message in Help and pin the guide")));
   assert.deepEqual(sends().map((x) => x.body.chat_id), [YOMI.id, ADMIN_BY_ID.id]);
   assert.equal(calls.filter((x) => x.host === "api.telegram.org" && !["sendMessage", "getMe", "getChatMemberCount"].includes(x.method)).length, 0);
-  assert.ok(teamSystemPrompt({ persona: "Glim", testingOpen: false, admins: [] }).includes("Chat only. You cannot post in the group"));
+  assert.ok(teamSystemPrompt({ persona: "Glim", testingOpen: false, admins: [] }).includes("Chat only. From this chat you cannot post in the group"));
 
   // off the list again: silence
   reset();

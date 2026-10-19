@@ -323,6 +323,9 @@ const OFFER_DM =
 const SUPPORT_AT =
   /\b(?:support|help ?desk|customer (?:care|service)|tech(?:nical)? (?:team|support)|admins?|moderators?)\b[^.!?\n]{0,30}?\b(?:on|via|at|in|through)\s+(?:dm|pm|inbox|@\w{3,}|t\.me\/\w+)/i;
 const ASKING = /\b(?:can|could|would|will|pls|plz|please)\s+(?:someone|anyone|somebody|an? (?:admin|mod|moderator)|the team|you)\b/i;
+/** "All holders DM me", "investors inbox me now", "DM me immediately": a stranger pulling people into private chats. */
+const DM_LURE =
+  /\b(?:all\s+)?(?:holders?|investors?|members?|everyone|every\s*one|testers?|users?|community|fam)\b[^.!?\n]{0,30}?\b(?:dm|pm|inbox|message|text|contact)\s+(?:me|us)\b|\b(?:dm|pm|inbox|message)\s+(?:me|us)\s+(?:now|immediately|asap|urgently|quick(?:ly)?|right\s+now|fast)\b/i;
 const WALLET_FIX =
   /\b(?:validate|validation|rectify|rectification|reactivate|synchroni[sz]e|resync|whitelist)\s+(?:your\s+|ur\s+|the\s+)?wallets?\b|\bsync\s+(?:your|ur)\s+wallets?\b|\bwallet\s+(?:validation|rectification|synchroni[sz]ation)\b/i;
 const LINK_RE =
@@ -391,6 +394,8 @@ export function scamReason(raw: string): ScamReason | null {
       return "dm_support";
     }
   }
+  const lure = DM_LURE.exec(text);
+  if (lure && !negated(text, lure.index, lure[0]) && !askingForHelp(text, lure)) return "dm_support";
   const fix = WALLET_FIX.exec(text);
   if (fix && !negated(text, fix.index, fix[0])) return "wallet_fix";
   if (LURE.test(text)) {
@@ -437,6 +442,69 @@ export function secretLeak(text: string): Leak | null {
   if (hasSeedPhrase(text)) return "seed_phrase";
   if (hasPrivateKey(text)) return "private_key";
   return null;
+}
+
+// ---------------------------------------------------------------- impersonation and moderation
+
+/** Look-alike letters scammers swap in: digits, Cyrillic and Greek letters that read as Latin ones. */
+const CONFUSABLE: Record<string, string> = {
+  "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "l",
+  "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0445": "x", "\u0456": "i", "\u04cf": "l",
+  "\u03bf": "o", "\u03b1": "a", "\u0131": "i", "\u217c": "l",
+};
+
+/** Lower case, accents off, look-alikes swapped, separators other than "|" turned into spaces. */
+function skeleton(raw: string): string {
+  return raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/./gu, (ch) => CONFUSABLE[ch] ?? ch)
+    .replace(/[^a-z|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const STAFF = /\b(?:support|admin|admins|team|official|mod|mods|moderator|help|helpdesk|desk|care|service|services|announcements?|airdrop|claims?|rewards?|verify|verification)\b/;
+const STAFF_IN_HANDLE = /(?:support|admin|team|official|mod|help|desk|care|service|airdrop|claim|reward|verify|trade|hq)/;
+
+/**
+ * A member passing themselves off as Gloam, Glim or the team: named "Gloam" or
+ * "Glim" (look-alike letters included, "GIoam" with a capital i too), "Gloam
+ * Support" and the like, a team tag such as "Duke | Gloam", or a handle like
+ * gloam_support. Only ever checked for people who are not the owner or an admin.
+ */
+export function impersonates(u: { first_name?: string; last_name?: string; username?: string }): boolean {
+  const name = skeleton(`${u.first_name ?? ""} ${u.last_name ?? ""}`);
+  const words = name.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+  // a capital I looks like an l: "GIoam" reads as Gloam
+  const asL = words.replace(/i/g, "l");
+  const brandOnly = /^(?:gloam|glim)(?: (?:gloam|glim))*$/.test(words) || /^gloam$/.test(asL);
+  const brandStaff = (/\b(?:gloam|glim)\b/.test(words) || /\bgloam\b/.test(asL)) && STAFF.test(words);
+  const teamTag = name.includes("|") && /\bgloam\b/.test(asL);
+  const handle = skeleton(u.username ?? "").replace(/\s+/g, "");
+  const badHandle = /(?:gloam|glim)/.test(handle) && STAFF_IN_HANDLE.test(handle.replace(/gloam|glim/g, " "));
+  return brandOnly || brandStaff || teamTag || badHandle;
+}
+
+export type ModAction = { remove: boolean };
+
+/**
+ * An admin telling the helper to act on the message they replied to:
+ * /del (delete it), /ban, /kick or /spam (delete it and remove the person), or
+ * tagging it with "delete", "remove", "kick" or "ban". Null when it is not that.
+ */
+export function moderationAsk(text: string, command: string | null, tagged: boolean): ModAction | null {
+  if (command) {
+    if (command === "del" || command === "delete") return { remove: false };
+    if (command === "ban" || command === "kick" || command === "spam" || command === "remove") return { remove: true };
+    return null;
+  }
+  if (!tagged) return null;
+  const t = norm(text).toLowerCase();
+  const remove = /\b(?:kick|ban|boot|block|remove\s+(?:him|her|them|this\s+(?:guy|person|user|account|scammer))|throw\s+(?:him|her|them)\s+out|get\s+(?:him|her|them)\s+out)\b/.test(t);
+  const del = /\b(?:delete|remove|take\s+(?:it|this)\s+down)\b/.test(t);
+  return remove || del ? { remove } : null;
 }
 
 // ---------------------------------------------------------------- payment codes and addresses

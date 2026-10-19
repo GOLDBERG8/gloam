@@ -144,6 +144,15 @@ export async function deleteMessage(chatId: number, messageId: number): Promise<
   return (await call("deleteMessage", { chat_id: chatId, message_id: messageId })).ok;
 }
 
+/**
+ * Removes someone from the group and keeps them out, deleting what they posted
+ * there. Works only while the bot is an admin with Ban users. An admin can
+ * lift it in the group's settings.
+ */
+export async function banMember(chatId: number, userId: number): Promise<boolean> {
+  return (await call("banChatMember", { chat_id: chatId, user_id: userId, revoke_messages: true })).ok;
+}
+
 /** The bot's own account, read once per server instance. */
 export async function getMe(): Promise<TgUser | null> {
   const g = globalThis as { __gloamTgMe?: TgUser };
