@@ -115,6 +115,9 @@ type PayStyle = "direct" | "bearer";
  * Move = direct pay-to-tag + bearer tickets + cash out.
  * Never uses a public 0x as the private path.
  */
+/** Testnet pools carry no cash-out fee; every other network must report its fee first. */
+const TESTNET_CHAIN_IDS = new Set<number>([46630, 42431]);
+
 export function MoveView() {
   const shieldLive = isShieldDeployed();
   const poseidonMode = HASH_SCHEME === "poseidon";
@@ -612,6 +615,10 @@ export function MoveView() {
     query: { enabled: Boolean(network.pool) && mode === "cashout" && !demoMode, refetchInterval: 60_000 },
   });
   const cashOutFeeBps = typeof feeBpsRead === "number" ? feeBpsRead : 0;
+  // On mainnet the fee must be known before anyone confirms: a failed read must
+  // not show the full amount when the pool will keep a fee. Testnet pools have no fee.
+  const cashOutFeeUnknown =
+    mode === "cashout" && !demoMode && !TESTNET_CHAIN_IDS.has(network.chainId) && typeof feeBpsRead !== "number";
   const cashOutFee = withdrawFeeOf(cashOutAmount, cashOutFeeBps);
   const cashOutInventoryShort =
     mode === "cashout" &&
@@ -1904,7 +1911,8 @@ export function MoveView() {
                         treeLoading ||
                         working ||
                         selected?.leafIndex == null ||
-                        cashOutInventoryShort
+                        cashOutInventoryShort ||
+                        cashOutFeeUnknown
                       }
                       onClick={() => void onCashOut()}
                       className="btn btn-ink btn-lg btn-block"
@@ -1916,6 +1924,8 @@ export function MoveView() {
                         </>
                       ) : cashOutInventoryShort ? (
                         "Not enough in the vault yet"
+                      ) : cashOutFeeUnknown ? (
+                        "Loading the cash-out fee…"
                       ) : (
                         "Cash out to my wallet"
                       )}
