@@ -50,13 +50,11 @@ export async function readVaultSealedReadiness(): Promise<VaultReadiness> {
     return { status: "ready", verifier: v, pool };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "RPC error";
-    // Known sealed pool + transient RPC: still allow private trade UI
+    // A failed read is not a "yes": sealed swaps are off on-chain (audit H1),
+    // so assuming the known verifier here let people send trades that could
+    // only revert. Say the network is unreachable and let them retry.
     if (isKnownSealed) {
-      return {
-        status: "ready",
-        verifier: KNOWN_SEALED_SWAP_VERIFIER,
-        pool,
-      };
+      return { status: "offline", pool, reason: "Couldn't reach Robinhood Chain just now. Try again in a moment." };
     }
     if (pool.toLowerCase() === LEGACY_POSEIDON_POOL.toLowerCase()) {
       return {

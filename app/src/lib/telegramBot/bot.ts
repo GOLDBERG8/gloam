@@ -735,10 +735,13 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   // their next message right after the helper answered them
   const followUp = isFollowUp(history, name, Math.floor(Date.now() / 1000));
   let asked = !share && looksLikeQuestion(text);
+  // a member talking to Boss Duke or an admin by tag ("@dukedotsol we should..."): theirs to answer, unless it is a question
+  const toTeam = !tagged && tagsSomeone(msg, [...c.admins, ...c.owners.handles], c.owners.ids);
   // no question mark, but asking for help, reporting a problem or getting Gloam wrong: a quick check decides
   if (
     !asked &&
     !tagged &&
+    !toTeam &&
     !share &&
     !ownPicture &&
     (mayNeedHelp(text) || (followUp && wordCount(text) >= 2)) &&

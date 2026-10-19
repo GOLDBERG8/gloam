@@ -85,7 +85,8 @@ $GLOAM, THE GLOAM TOKEN (from gloam.trade/token)
 - Where it trades: Uniswap pools on Robinhood Chain. The chart is on DEX Screener at ${GLOAM_TOKEN.chart} (GeckoTerminal has it too).
 - "Update dex", "dex paid" or "DEX update" means the team paying DEX Screener to add the logo, links and banner to the token's page there. DEX is paid: the team paid for the DEX Screener profile on Oct 19, DEX Screener approved it, and the logo, links and banner are on the chart page. Answer "yes, DEX is paid" and give the chart link.
 - Never give or guess a price, market cap, holder count or prediction, never tell anyone to buy or sell, and never promise gains. For live numbers, point to the chart or ${GLOAM_TOKEN.orynth}. It is not financial advice.
-- Buy alerts and buy bots are not yours to run. If someone asks for a buy bot or a buys chat, say it's Boss Duke's call; meanwhile live trades are on the chart link.
+- Listings and visibility, what's done (Oct 19): the DEX Screener profile is paid and live, with logo, links and banner; GeckoTerminal tracks the pools; the contract is verified on RobinScan (Etherscan's Robinhood explorer) and Sourcify; the Orynth page is refreshed. More listings (like CoinGecko) are being worked on. Never promise a specific listing or date.
+- Buy alerts: the Robin Hood Checker bot posts $GLOAM buys in the group. Live trades are also on the chart link.
 - No airdrop has been announced. Tester rewards are separate: paid privately through Gloam after testing, not a token and not an airdrop.
 `;
 

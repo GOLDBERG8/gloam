@@ -1045,6 +1045,18 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   assert.equal(sends().length, 0, "no welcome for it");
 });
 
+await test("a suggestion aimed at the team by tag gets no reply from Glim", async () => {
+  reset();
+  classifierReply = "YES";
+  await handleUpdate(upd(inTopic(TOPIC.general, "@duke_admin one thing we can do is rename this topic to buys and the buys topic to chat", user(950, "Kore"))));
+  assert.equal(sends().length, 0, "theirs to answer");
+  assert.equal(calls.filter((x) => x.method === "classify").length, 0, "not even a check");
+  // a real question tagged at the team still gets an answer
+  modelReply = "The DEX Screener profile is live, and more listings are being worked on.";
+  await handleUpdate(upd(inTopic(TOPIC.general, "@duke_admin are we getting more listings?", user(951, "Dras"))));
+  assert.equal(sends().length, 1);
+});
+
 await test("answers are limited per person; past the limit it stays quiet", async () => {
   reset();
   const pia = user(37, "Pia");
