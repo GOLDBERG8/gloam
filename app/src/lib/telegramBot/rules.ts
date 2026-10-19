@@ -334,6 +334,17 @@ const ASKING = /\b(?:can|could|would|will|pls|plz|please)\s+(?:someone|anyone|so
 /** Paid shilling: volume, market cap, exposure, calls, KOLs, listings, offered to the project. */
 const PROMO =
   /\b(?:trading\s+volume|more\s+volume|volume\s+(?:boost|bot|service)|higher\s+(?:mc|mcap|market\s*cap)|pump\s+(?:your|the)\s+(?:chart|token|coin)|fast\s+exposure|investor\s+reach|real\s+investors?|marketing\s+(?:services?|campaign|package)|promot(?:e|ion)\s+(?:your|the)\s+(?:project|token|coin)|promotion\s+services?|kols?\b|shill(?:ing|ers)?|calls?\s+(?:channel|group)|trending\s+(?:service|spot)|cmc\s+listing|coingecko\s+listing|listing\s+(?:service|agent)|ama\s+(?:service|session\s+with\s+our))\b/i;
+/** "Follow him, he gives good signals", "join this caller, legit gems": pushing a call channel. */
+const SHILL_FOLLOW =
+  /\b(?:follow|join|check\s+out|subscribe\s+to)\s+(?:him|her|them|this\s+(?:guy|channel|caller|group)|my|our|his)\b[^.!?\n]{0,60}\b(?:signals?|calls?|gems?|alpha|legit|\d+x|x\s*moves?|pumps?)\b/i;
+/** A post from a call channel: "80x move", "just tapped $2M market cap", "our call". */
+const CALL_POST = /\b(?:\d+(?:\.\d+)?x\s+(?:move|gain|from)|x\d+\b|just\s+(?:tapped|hit)\s+\$?\d|from\s+our\s+(?:call|entry|alpha)|(?:gem|alpha|caller)'?s?\s+calls?|new\s+call\b|call\s+channel)/i;
+
+/** A message forwarded or quoted from a channel or group that reads like a paid call. */
+export function forwardedCall(text: string): boolean {
+  return CALL_POST.test(norm(text)) || SHILL_FOLLOW.test(norm(text));
+}
+
 /** Asking to be contacted privately: "DM me", "D.m for collab", "inbox us for details". */
 const DM_ASK =
   /\b(?:d\.?\s?m|p\.?\s?m|inbox|message|contact|text)\s+(?:me|us)\b|\bhit\s+(?:me|us)\s+up\b|\b(?:d\.?\s?m|p\.?\s?m|inbox)\s+(?:me\s+|us\s+)?(?:for|to)\b|\b(?:d\.?\s?m|p\.?\s?m|inbox)\s+(?:collab\w*|partnership|promo\w*|details|business|deals?|offers?)\b/i;
@@ -410,6 +421,8 @@ export function scamReason(raw: string): ScamReason | null {
   }
   const lure = DM_LURE.exec(text);
   if (lure && !negated(text, lure.index, lure[0]) && !askingForHelp(text, lure)) return "dm_support";
+  const shill = SHILL_FOLLOW.exec(text);
+  if (shill && !negated(text, shill.index, shill[0])) return "promo_spam";
   // a shilling service that wants a private chat
   const pitches = text.match(new RegExp(PROMO.source, "gi"))?.length ?? 0;
   if (pitches && DM_ASK.test(text) && (pitches >= 2 || !text.includes("?"))) return "promo_spam";

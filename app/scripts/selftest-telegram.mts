@@ -965,6 +965,8 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   assert.equal(scamReason("Top KOL calls channel for your token, inbox for details"), "promo_spam");
   assert.equal(scamReason("where can I find the volume for GLOAM?"), null);
   assert.equal(scamReason("the trading volume text on the chart looks off"), null);
+  assert.equal(scamReason("Make sure you follow him up he gives good signals and his legit"), "promo_spam");
+  assert.equal(scamReason("follow the docs, the steps are legit"), null);
   assert.equal(scamReason("can someone dm me the steps?"), null);
   assert.equal(scamReason("dm me if you want to test a payment"), null);
   assert.deepEqual(moderationAsk("can you delete and kick him out?", null, true), { remove: true });
@@ -1030,11 +1032,24 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   assert.ok(String(toOwner.pop()!.body.text).includes("Bola reported a message from Dee"));
   assert.ok(sends().some((x) => x.body.chat_id === GROUP && x.body.text === "Thanks Bola, sent to the admins."));
 
+  // a call-channel post quoted in from outside: deleted and the account removed
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "this one is cooking", user(911, "Bull"), { external_reply: { origin: { type: "channel" }, text: "$AGENCY just tapped $2M market cap! 80x move from our call" } })));
+  assert.equal(deletes().length, 1);
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 1);
+
   // a look-alike joining is out before the welcome
   reset();
   await handleUpdate({ update_id: nextId++, message: { message_id: nextId++, chat, date: 0, new_chat_members: [user(906, "Gloam Support")] } as TgMessage });
   assert.equal(calls.filter((x) => x.method === "banChatMember").length, 1);
   assert.equal(sends().length, 0, "no welcome for it");
+});
+
+await test("buy alerts: one post per buy, spaced, with the value and the explorer link", async () => {
+  const { buyText } = await import("../src/lib/telegramBot/buys");
+  const t = buyText({ amount: 1129.48, usd: 248.48, buyer: "0x18f93000000000000000000000000000000a3c2c", tx: "0xabc" });
+  assert.equal(t, "New $GLOAM buy\n\n1,129 GLOAM, about $248\nBuyer 0x18f9...3c2c\n\nrobin.etherscan.io/tx/0xabc");
+  assert.ok(buyText({ amount: 45.5, usd: 10.01, buyer: "0x0000000000000000000000000000000000000001", tx: "0x1" }).includes("about $10.01"));
 });
 
 await test("answers are limited per person; past the limit it stays quiet", async () => {

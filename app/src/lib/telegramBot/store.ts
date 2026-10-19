@@ -490,3 +490,35 @@ export async function tokenCardLately(chatId: number, topic: number): Promise<bo
 export async function markTokenCard(chatId: number, topic: number): Promise<void> {
   await kv([["SET", tokenCardKey(chatId, topic), "1", "EX", TOKEN_CARD_TTL_SEC]]);
 }
+
+// ---------------------------------------------------------------- buy alerts
+
+const BUYS = `${PREFIX}buys:`;
+
+/** One buy check at a time, at most every so many seconds. */
+export async function takeBuysSlot(everySec: number): Promise<boolean> {
+  const [r] = await kv([["SET", `${BUYS}lock`, "1", "EX", everySec, "NX"]]);
+  return r !== null;
+}
+
+/** The last block checked, or null the first time. */
+export async function buysLastBlock(): Promise<number | null> {
+  const [raw] = await kv([["GET", `${BUYS}last`]]);
+  const n = Number(raw);
+  return raw && Number.isSafeInteger(n) ? n : null;
+}
+
+export async function setBuysLastBlock(block: number): Promise<void> {
+  await kv([["SET", `${BUYS}last`, String(block)]]);
+}
+
+/** The Buys topic the helper opened, when it opened one. */
+export async function buysTopic(): Promise<number | null> {
+  const [raw] = await kv([["GET", `${BUYS}topic`]]);
+  const n = Number(raw);
+  return raw && Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+export async function setBuysTopic(threadId: number): Promise<void> {
+  await kv([["SET", `${BUYS}topic`, String(threadId)]]);
+}

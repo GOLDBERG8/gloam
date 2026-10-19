@@ -62,6 +62,7 @@ import {
   wantsGroupAnswer,
   cleanReply,
   explicitReply,
+  forwardedCall,
   handsToAdmin,
   hasBearerCode,
   imageRef,
@@ -667,7 +668,9 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
     await sendMessage(chatId, leakWarning(name, removed), { threadId, replyTo: removed ? undefined : msg.message_id });
     return;
   }
-  if (!trusted && scamReason(text)) {
+  // a call-channel post forwarded or quoted in from elsewhere ("80x move from our call")
+  const outside = msg.forward_origin || msg.external_reply ? [text, msg.external_reply?.text, msg.external_reply?.caption, msg.quote?.text].filter(Boolean).join(" ") : "";
+  if (!trusted && ((outside && forwardedCall(outside)) || scamReason(text))) {
     const removed = await deleteMessage(chatId, msg.message_id);
     // a scam post costs the account its place in the group
     const banned = removed ? await banMember(chatId, from.id) : false;

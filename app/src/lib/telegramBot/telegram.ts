@@ -66,6 +66,11 @@ export type TgMessage = {
   new_chat_members?: TgUser[];
   left_chat_member?: TgUser;
   via_bot?: TgUser;
+  /** Set on a forwarded message: who it first came from (a user, a group or a channel). */
+  forward_origin?: { type: "user" | "hidden_user" | "chat" | "channel"; chat?: TgChat; sender_chat?: TgChat };
+  /** A reply quoting a message from another chat (a channel post, usually). */
+  external_reply?: { origin?: { type: string }; chat?: TgChat; text?: string; caption?: string };
+  quote?: { text?: string };
 };
 
 export type TgChatMember = {
@@ -142,6 +147,12 @@ export async function sendMessage(chatId: number, text: string, opts: SendOption
 /** Deletes a message. Works only while the bot is an admin with Delete messages. */
 export async function deleteMessage(chatId: number, messageId: number): Promise<boolean> {
   return (await call("deleteMessage", { chat_id: chatId, message_id: messageId })).ok;
+}
+
+/** Opens a forum topic and returns its thread id, or null. Needs the Manage topics right. */
+export async function createForumTopic(chatId: number, name: string): Promise<number | null> {
+  const r = await call<{ message_thread_id: number }>("createForumTopic", { chat_id: chatId, name });
+  return r.ok && r.result ? r.result.message_thread_id : null;
 }
 
 /**
