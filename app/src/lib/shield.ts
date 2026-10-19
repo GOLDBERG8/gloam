@@ -108,6 +108,36 @@ export const shieldPoolAbi = [
     ],
   },
   { type: "error", name: "OverDepositLimit", inputs: [] },
+  // Cash-out fee (ShieldPoolCore, mainnet). Pools deployed before it lack these
+  // reads, so a failed read means no fee.
+  {
+    type: "function",
+    name: "withdrawFeeBps",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint16" }],
+  },
+  {
+    type: "function",
+    name: "feeRecipient",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "address" }],
+  },
+  {
+    type: "function",
+    name: "feesOwed",
+    stateMutability: "view",
+    inputs: [{ name: "asset", type: "address" }],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "MAX_WITHDRAW_FEE_BPS",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint16" }],
+  },
   {
     type: "function",
     name: "owner",
@@ -328,6 +358,20 @@ export function formatAssetAmount(raw: bigint | string, asset: string, maxFrac =
 /** "12.5 PathUSD" style label for a raw amount. */
 export function formatAssetLabel(raw: bigint | string, asset: string): string {
   return `${formatAssetAmount(raw, asset)} ${assetLabel(asset)}`;
+}
+
+/**
+ * The cash-out fee the pool keeps from `amount` at `bps` basis points. Same
+ * math as ShieldPoolCore.unshield: floor(amount * bps / 10_000).
+ */
+export function withdrawFeeOf(amount: bigint, bps: number): bigint {
+  if (!Number.isInteger(bps) || bps <= 0) return 0n;
+  return (amount * BigInt(bps)) / 10_000n;
+}
+
+/** "0.25%" for 25 bps, "1%" for 100. */
+export function formatFeePercent(bps: number): string {
+  return `${(bps / 100).toFixed(2).replace(/\.?0+$/, "")}%`;
 }
 
 /** Parse a typed amount into raw units for this asset (null when invalid). */
