@@ -38,6 +38,8 @@ import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
 import { SuccessModal } from "./SuccessModal";
 import { DevKeysBanner } from "./DevKeysBanner";
+import { BridgeInCard } from "./BridgeIn";
+import { BRIDGE_DESTINATIONS, bridgeVisible } from "@/lib/bridge";
 
 type TxKind = "shield" | "approve" | "pull" | null;
 type AssetChoice = "eth" | string; // eth | token id
@@ -924,6 +926,17 @@ export function ShieldView() {
               ) : null
             }
           />
+
+          {bridgeVisible(network) && (!demo || process.env.NEXT_PUBLIC_BRIDGE_PREVIEW === "1") && (
+            <BridgeInCard
+              recipient={address ?? undefined}
+              onArrived={(arrived) => {
+                const landed = tokens.find((t) => t.symbol === BRIDGE_DESTINATIONS[network.key].token.symbol);
+                if (landed) setAssetChoice(landed.id as AssetChoice);
+                setAmount(arrived);
+              }}
+            />
+          )}
 
           <div className="gl-card p-5">
             <p className="text-[13px] text-mute">What the explorer shows</p>
