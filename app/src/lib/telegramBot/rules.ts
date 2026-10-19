@@ -746,6 +746,23 @@ const MAINNET_DATE = new RegExp(
   String.raw`\bmainnet\b[^.!?\n]{0,60}\b${DATE_WORD}\b|\b${DATE_WORD}\b[^.!?\n]{0,60}\bmainnet\b`,
   "i",
 );
+const DATE_WORDS = new RegExp(String.raw`\b${DATE_WORD}\b`, "gi");
+/** The announced launch: 21 October (2026), at 13:00 UTC or 14:00 WAT when a time is given. */
+const LAUNCH_DAY = /\b(?:21(?:st)?\s+oct(?:ober)?|oct(?:ober)?\s+21(?:st)?)\b/i;
+const CLOCK = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(utc|gmt|wat)\b/gi;
+
+/** A mainnet date that is the announced one, and nothing else. */
+function officialLaunch(s: string): boolean {
+  if (!LAUNCH_DAY.test(s)) return false;
+  if ([...s.matchAll(DATE_WORDS)].some((m) => !/^(?:oct(?:ober)?|2026)$/i.test(m[0]))) return false;
+  for (const m of s.matchAll(CLOCK)) {
+    const ampm = m[3]?.toLowerCase();
+    const h = ampm ? (Number(m[1]) % 12) + (ampm === "pm" ? 12 : 0) : Number(m[1]);
+    const utc = m[4]!.toLowerCase() === "wat" ? h - 1 : h;
+    if (utc !== 13 || (m[2] ?? "00") !== "00") return false;
+  }
+  return true;
+}
 const HUMAN_CLAIM =
   /\bi(?:'m| am)\s+(?:a\s+)?(?:real\s+)?(?:human|person|duke|an?\s+admin|a\s+mod(?:erator)?|a\s+team\s+member|(?:on|part\s+of)\s+the\s+(?:gloam\s+)?team)\b|\bi(?:'m| am)\s+not\s+a\s+bot\b/i;
 const AS_AN_AI = /[^.!?\n]*\bas an ai\b[^.!?\n]*[.!?]?\s*/gi;
@@ -803,7 +820,7 @@ function brokenSentence(s: string, team: boolean, okHandles: Set<string>): boole
   if (TOKEN_PRICE.test(s)) return true;
   // $GLOAM really is on Robinhood Chain mainnet; the app is the part that is not
   if (!ABOUT_TOKEN.test(s)) for (const m of s.matchAll(MAINNET_LIVE)) if (!negated(s, m.index ?? 0, m[0])) return true;
-  if (MAINNET_DATE.test(s)) return true;
+  if (MAINNET_DATE.test(s) && !officialLaunch(s)) return true;
   return HUMAN_CLAIM.test(s);
 }
 

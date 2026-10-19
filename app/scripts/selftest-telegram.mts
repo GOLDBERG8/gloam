@@ -481,8 +481,11 @@ await test("replies: mainnet claims, dates, secrets and posing as a person are r
   assert.ok(cleanReply("Gloam is not live on mainnet, it's testnet only.", policy));
   assert.ok(cleanReply("Mainnet isn't live. It waits on a production ceremony and an audit.", policy));
   assert.ok(cleanReply("I'm Glim, Gloam's community helper bot, not a person.", policy));
-  assert.ok(cleanReply("Mainnet goes live within 48 hours of Boss Duke's announcement on X. Until then it's testnet.", policy), "the announced timing goes out");
-  assert.equal(cleanReply("Mainnet goes live on Oct 21.", policy), null, "any other date does not");
+  assert.ok(cleanReply("Mainnet goes live on Wednesday 21 October at 13:00 UTC. Countdown at gloam.trade/mainnet.", policy), "the announced launch goes out");
+  assert.ok(cleanReply("Mainnet is Oct 21, 2pm WAT.", policy), "the same time in WAT too");
+  assert.equal(cleanReply("Mainnet goes live on Oct 22.", policy), null, "any other date does not");
+  assert.equal(cleanReply("Mainnet goes live 21 October at 15:00 UTC.", policy), null, "nor another time");
+  assert.equal(cleanReply("Mainnet is 21 October, or maybe November.", policy), null, "nor a hedge to another month");
 });
 
 const CA = "0xDcD885F5c60b3aD49F6D58718696417314e8724d";

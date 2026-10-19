@@ -3,16 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { CountdownCompact, useMainnetRemaining } from "./MainnetCountdown";
+import { MAINNET_LAUNCH_SHORT, MAINNET_PAGE } from "@/lib/mainnet";
 
-const KEY = "gloam:announce-dismissed:token-v1";
+const KEY = "gloam:announce-dismissed:mainnet-v1";
 
-// Keep the launch note on marketing + docs; stay out of the working app.
-const HIDDEN_ON = ["/app", "/admin", "/verify", "/pitch", "/claim"];
+// Keep the launch note on marketing + docs; stay out of the working app and the countdown page itself.
+const HIDDEN_ON = ["/app", "/admin", "/verify", "/pitch", "/claim", MAINNET_PAGE];
 
-/** Slim site-wide launch note. Dismissible per browser. */
+/** Slim site-wide mainnet countdown. Dismissible per browser. */
 export function AnnouncementBanner() {
   const pathname = usePathname();
   const [dismissed, setDismissed] = useState(false);
+  const remaining = useMainnetRemaining();
 
   useEffect(() => {
     try {
@@ -41,16 +44,24 @@ export function AnnouncementBanner() {
       <div className="mx-auto flex max-w-[1400px] items-center justify-center gap-3 px-4 py-2 sm:px-7">
         <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#8fd3ad]" />
         <p className="min-w-0 truncate text-[13px] leading-tight">
-          <span className="font-medium">Meet $GLOAM, the Gloam token.</span>{" "}
-          <span className="hidden text-white/60 sm:inline">
-            Governance, buybacks and private holding, live on Robinhood Chain.
-          </span>
+          {remaining?.done ? (
+            <span className="font-medium">Gloam mainnet is rolling out now.</span>
+          ) : (
+            <>
+              <span className="font-medium">Mainnet goes live {MAINNET_LAUNCH_SHORT}.</span>{" "}
+              {remaining && (
+                <span className="text-white/60">
+                  In <CountdownCompact />
+                </span>
+              )}
+            </>
+          )}
         </p>
         <Link
-          href="/token"
+          href={MAINNET_PAGE}
           className="shrink-0 text-[13px] font-medium text-[#8fd3ad] underline-offset-4 hover:underline"
         >
-          See more
+          See the countdown
         </Link>
         <button
           type="button"
