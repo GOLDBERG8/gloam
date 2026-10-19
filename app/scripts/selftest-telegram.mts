@@ -52,6 +52,9 @@ const {
   TOPIC,
   asksTokenAddress,
   chainFix,
+  markAddresses,
+  sentencesOf,
+  spaceOut,
   chainMismatch,
   cleanName,
   cleanReply,
@@ -512,6 +515,22 @@ await test("$GLOAM: asking for the contract, and what is not asking", () => {
   }
   assert.ok(tokenCard().includes(CA) && tokenCard().includes("gloam.trade/token") && tokenCard().includes("orynth.dev/projects/gloam"));
   assert.equal(cleanReply(tokenCard(), policy), tokenCard(), "the card passes the reply rules");
+});
+
+await test("replies: spaced out like texts, links never cut, addresses marked, the chart link allowed", () => {
+  const wall = "You add money privately on Portfolio first. Then you pay from Vault > Pay > Send privately. The person you paid opens Receive. It takes a few seconds. Proofs run in your browser.";
+  const spaced = spaceOut(wall);
+  assert.equal(spaced.split("\n\n").length, 2, spaced);
+  assert.equal(spaceOut("Short one. Two."), "Short one. Two.");
+  assert.equal(spaceOut("1. Open Settings.\n2. Tap Back up now. Then wait. Then check."), "1. Open Settings.\n2. Tap Back up now. Then wait. Then check.");
+  assert.deepEqual(sentencesOf("Open gloam.trade/app in Safari. Then tap Use a wallet app."), ["Open gloam.trade/app in Safari.", "Then tap Use a wallet app."]);
+  // the old cut dropped everything before a dot inside a link
+  const long = `Open gloam.trade/app in Safari or Chrome and tap Use a wallet app. ${"Then add the network by hand with RPC https://rpc.testnet.chain.robinhood.com and chain ID 46630. ".repeat(4)}`;
+  assert.ok(trimReply(long).startsWith("Open gloam.trade/app in Safari"), trimReply(long));
+  assert.equal(markAddresses(`real ${CA} and fake 0x1234567890abcdef1234567890abcdef12345678`), `real ${CA} [the official $GLOAM contract] and fake 0x1234567890abcdef1234567890abcdef12345678 [not the $GLOAM contract]`);
+  assert.ok(cleanReply(`Chart: dexscreener.com/robinhood/${CA}`, policy));
+  assert.equal(cleanReply("Chart: dexscreener.com/robinhood/0x1234567890abcdef1234567890abcdef12345678", policy), null);
+  assert.ok(tokenCard().includes(`dexscreener.com/robinhood/${CA}`) && tokenCard().split("\n\n").length >= 4, "the card is spaced too");
 });
 
 // ---------------------------------------------------------------- payment codes and addresses
@@ -1903,8 +1922,28 @@ await test("edits and links: a question added in an edit is answered once, and t
   assert.equal(post.body.message_thread_id, TOPIC.help);
   assert.ok(JSON.stringify(post.body).includes(String(ask.message_id)), "a reply to that message");
   assert.ok(String(sends()[sends().length - 1]!.body.text).startsWith("Posted in Help, replying to Ola:"));
+  // asked again: the team only does that when the first answer was off, so it posts a correction
+  modelReply = "Quick correction, Ola: no Discord, the community lives here on Telegram.";
+  const callsBefore = modelCalls().length;
   await handleUpdate(upd(dm(OWNER, `answer this t.me/gloamhq/${ask.message_id}`)));
-  assert.ok(String(sends()[sends().length - 1]!.body.text).startsWith("I already answered that one"));
+  assert.ok(String(sends()[sends().length - 1]!.body.text).startsWith("Corrected in Help, replying to Ola:"));
+  assert.ok(JSON.stringify(modelCalls()[callsBefore]!.body).includes("that answer was wrong or out of date"));
+  // "go answer them" with no link: the links Glim named in its last reply
+  reset();
+  const q1 = inTopic(TOPIC.general, "airdrop for testers?", user(104, "Bayo"));
+  const q2 = inTopic(TOPIC.general, "contract?", user(105, "Kemi"));
+  classifierReply = "NO";
+  modelReply = "x";
+  await handleUpdate(upd(q1));
+  await handleUpdate(upd(q2));
+  reset();
+  modelReply = `Two to fix: Bayo at t.me/gloamhq/${q1.message_id} and Kemi at t.me/gloamhq/${q2.message_id}.`;
+  await handleUpdate(upd(dm(OWNER, "who still needs an answer?")));
+  modelReply = "No airdrop has been announced. Tester rewards are separate.";
+  await handleUpdate(upd(dm(OWNER, "So go and reply them")));
+  const toGroup = sends().filter((x) => x.body.chat_id === GROUP);
+  assert.equal(toGroup.length, 2, "both members answered in the group");
+  assert.ok(String(sends()[sends().length - 1]!.body.text).includes("replying to Bayo") && String(sends()[sends().length - 1]!.body.text).includes("replying to Kemi"));
   // a link without asking to answer: the message comes into the chat as context
   reset();
   modelReply = "That's Ola asking about Discord in Help; I answered it.";
@@ -1913,7 +1952,7 @@ await test("edits and links: a question added in an edit is answered once, and t
   assert.ok(ctx.includes("LINKED MESSAGES") && ctx.includes("discord link pls") && ctx.includes("you answered it"));
   // a link Glim has no record of
   await handleUpdate(upd(dm(OWNER, "go answer it t.me/gloamhq/999999")));
-  assert.ok(String(sends()[sends().length - 1]!.body.text).startsWith("I don't have that message on record"));
+  assert.ok(String(sends()[sends().length - 1]!.body.text).includes("I don't have that message on record"));
 
   // the owner turns on edits
   reset();

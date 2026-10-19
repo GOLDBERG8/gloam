@@ -115,13 +115,48 @@ export function trimReply(text: string, max = REPLY_MAX_WORDS): string {
     out = next;
   }
   if (out) return out;
-  const sentences = paras[0]!.match(/[^.!?]+[.!?]+["')\]]*(?:\s+|$)/g) ?? [paras[0]!];
   let acc = "";
-  for (const sentence of sentences) {
-    if (acc && wordsIn(acc + sentence) > max) break;
-    acc += sentence;
+  for (const sentence of sentencesOf(paras[0]!)) {
+    const next = acc ? `${acc} ${sentence}` : sentence;
+    if (acc && wordsIn(next) > max) break;
+    acc = next;
   }
   return acc.trim();
+}
+
+/**
+ * A paragraph's sentences. A sentence ends at ".", "!" or "?" followed by a
+ * space, so "gloam.trade/app" and "1." in a list stay inside their sentence.
+ */
+export function sentencesOf(text: string): string[] {
+  return text
+    .split(/(?<=\D[.!?]["')\]]?)\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Paragraphs this long, or longer, get split into pairs of sentences. */
+const DENSE_WORDS = 30;
+
+/**
+ * Breaks dense paragraphs into short ones, two sentences each, with a blank
+ * line between, so a reply reads like a text message and not a wall. Lists
+ * and short paragraphs are left as written.
+ */
+export function spaceOut(text: string): string {
+  return text
+    .split(/\n\s*\n/)
+    .map((p) => {
+      if (/^\s*(?:-|\d+[.)])\s/m.test(p) || p.includes("\n") || wordsIn(p) < DENSE_WORDS) return p;
+      const s = sentencesOf(p);
+      if (s.length < 3) return p;
+      const chunks: string[] = [];
+      for (let i = 0; i < s.length; i += 2) chunks.push(s.slice(i, i + 2).join(" "));
+      // a lone short sentence at the end rides with the one before it
+      if (chunks.length > 1 && wordsIn(chunks[chunks.length - 1]!) < 6) chunks.splice(-2, 2, `${chunks[chunks.length - 2]} ${chunks[chunks.length - 1]}`);
+      return chunks.join("\n\n");
+    })
+    .join("\n\n");
 }
 
 export type Command = { name: string; args: string; forOther: boolean };
@@ -643,6 +678,7 @@ function linkAllowed(link: string): boolean {
   if (host === "gloam.trade") return true;
   if (host === "x.com" || host === "twitter.com") return /^\/gloamtrade(?:[/?#]|$)/i.test(path);
   if (host === "orynth.dev") return /^\/projects\/gloam(?:[/?#]|$)/i.test(path);
+  if (host === "dexscreener.com") return path.toLowerCase().startsWith(`/robinhood/${GLOAM_TOKEN.address.toLowerCase()}`);
   return isGroupLink(host, path);
 }
 
@@ -750,6 +786,16 @@ export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
 
 // ---------------------------------------------------------------- $GLOAM
 
+/**
+ * Every 0x contract or wallet address in chat text, marked for the model as
+ * $GLOAM's real contract or not, so it never compares 42 characters by eye.
+ */
+export function markAddresses(text: string): string {
+  return text.replace(ANY_EVM_ADDRESS, (a) =>
+    a.toLowerCase() === GLOAM_TOKEN.address.toLowerCase() ? `${a} [the official $GLOAM contract]` : `${a} [not the $GLOAM contract]`,
+  );
+}
+
 const CA_WORD = String.raw`(?:ca|c\.a\.?|contract(?:\s+(?:address|addy))?|token\s+(?:address|addy|contract)|addy)`;
 const CA_ONLY = new RegExp(
   String.raw`^(?:(?:pls|please|yo|hey|hi|gm|ser|sir|bro|fam|admin|team|so|and|ok|okay|wen|drop|send|share|post|give(?:\s+(?:me|us))?|need|any|what'?s|whats|what\s+is|where'?s|wheres|where\s+is|the|ur|your|our|token|gloam|\$gloam|its)[\s,:]+)*${CA_WORD}(?:[\s,]+(?:pls|please|ser|sir|bro|fam|admin|again|here|(?:of|for)\s+(?:the\s+)?(?:token|\$?gloam)))*[\s?!.]*$`,
@@ -769,12 +815,12 @@ export function asksTokenAddress(raw: string): boolean {
 
 /** The official answer to "CA?": the address, the facts that matter, and where the rest lives. */
 export function tokenCard(): string {
-  return (
-    `$GLOAM on Robinhood Chain mainnet:\n${GLOAM_TOKEN.address}\n\n` +
-    `Fixed supply of 500,000, launch liquidity locked for good, no presale and no team allocation. ` +
-    `Uses, tokenomics and the roadmap are at ${GLOAM_TOKEN.page}, and it trades on Orynth at ${GLOAM_TOKEN.orynth}. ` +
-    `That address is the only real one. Not financial advice.`
-  );
+  return [
+    `$GLOAM on Robinhood Chain mainnet:\n${GLOAM_TOKEN.address}`,
+    "Fixed supply of 500,000. Launch liquidity locked for good. No presale and no team allocation.",
+    `Uses, tokenomics and roadmap: ${GLOAM_TOKEN.page}\nGet it on Orynth: ${GLOAM_TOKEN.orynth}\nChart: ${GLOAM_TOKEN.chart}`,
+    "That address is the only real one. Not financial advice.",
+  ].join("\n\n");
 }
 
 /** The same ask again soon after the card went up in that topic: the address, without the whole card. */
@@ -845,9 +891,9 @@ export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
     ? "Testers, your guide is pinned in the Testers topic."
     : "Testing directions land in the Testers topic soon.";
   return (
-    `Welcome to Gloam, ${list}. Glad you're here. Ask anything in Help, share ideas in Feedback, ` +
-    `and keep an eye on Announcements. ${testing} Everything else lives at gloam.trade, ` +
-    `or write to hello@gloam.trade. Admins never DM first.`
+    `Welcome to Gloam, ${list}. Glad you're here.\n\n` +
+    `Ask anything in Help, share ideas in Feedback, and keep an eye on Announcements. ${testing}\n\n` +
+    `Everything else lives at gloam.trade, or write to hello@gloam.trade. Admins never DM first.`
   );
 }
 

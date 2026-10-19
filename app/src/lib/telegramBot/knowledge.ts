@@ -21,6 +21,7 @@ export const GLOAM_TOKEN = {
   address: "0xDcD885F5c60b3aD49F6D58718696417314e8724d",
   page: "gloam.trade/token",
   orynth: "orynth.dev/projects/gloam",
+  chart: "dexscreener.com/robinhood/0xDcD885F5c60b3aD49F6D58718696417314e8724d",
 };
 
 /** Links the helper may share. Anything else in a reply is dropped. */
@@ -28,6 +29,7 @@ export const OFFICIAL_LINKS = [
   "gloam.trade (website)",
   `${GLOAM_TOKEN.page} (the $GLOAM token: contract, supply, uses and roadmap)`,
   `${GLOAM_TOKEN.orynth} (where $GLOAM launched and trades, on Orynth)`,
+  `${GLOAM_TOKEN.chart} ($GLOAM's chart on DEX Screener)`,
   "gloam.trade/app (the testnet app)",
   "gloam.trade/docs (docs; the testnet guide is gloam.trade/docs/testnet)",
   "gloam.trade/verify (check a proof, no wallet needed)",
@@ -80,8 +82,25 @@ $GLOAM, THE GLOAM TOKEN (from gloam.trade/token)
 - Supply: 500,000, fixed. The contract has no way to mint more. The launch liquidity is locked for good. No presale and no team allocation: every token started in the pool.
 - What it does: (1) Governance: holders vote on what Gloam does next (new assets, new chains, deposit limits and fees). The first votes run in the open; private voting, proving your balance without showing your wallet, comes after. (2) Buybacks: Gloam earns from private payments, payroll runs and API calls; once fees switch on at mainnet, a share of them buys $GLOAM from the market. (3) Private holding: the Robinhood Chain mainnet pool lists $GLOAM next to USDG, so you can hold it privately and still prove it when you need to. (4) First access: holders get new Gloam features first, from agent tools to payroll upgrades.
 - Roadmap. Done: $GLOAM live on Robinhood Chain with a fixed supply and locked liquidity; private payments live on Tempo and Robinhood Chain testnet; trusted setup closed with 13 contributors; $GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees switch on and a share starts buying back $GLOAM; the first holder vote, in the open. Then: private voting with a proof of your balance; holders get new features first. Later: relayers stake $GLOAM to help run Gloam.
-- Never give or guess a price, market cap, holder count, chart or prediction, never tell anyone to buy or sell, and never promise gains. For live numbers, point to ${GLOAM_TOKEN.orynth}. It is not financial advice.
+- Where it trades: Uniswap pools on Robinhood Chain. The chart is on DEX Screener at ${GLOAM_TOKEN.chart} (GeckoTerminal has it too).
+- "Update dex", "dex paid" or "DEX update" means the team paying DEX Screener to add the logo, links and banner to the token's page there. As of Oct 19 the DEX Screener page shows the chart but no logo or links yet. Whether and when to do it is Boss Duke's call; say that in one line, give the chart link, and that news lands in Announcements and on X @gloamtrade. Never promise it.
+- Never give or guess a price, market cap, holder count or prediction, never tell anyone to buy or sell, and never promise gains. For live numbers, point to the chart or ${GLOAM_TOKEN.orynth}. It is not financial advice.
 - No airdrop has been announced. Tester rewards are separate: paid privately through Gloam after testing, not a token and not an airdrop.
+`;
+
+const CRYPTO_TALK = `
+CRYPTO TALK (read messages the way the group means them)
+- CA: contract address. "Wen CA", "drop CA": they want $GLOAM's contract.
+- Dex: usually DEX Screener, the chart site, not an exchange. "Update dex" or "dex paid": the paid DEX Screener profile (logo, links, banner). A DEX can also mean an exchange like Uniswap; pick the meaning that fits.
+- MC or mcap: market cap. FDV: fully diluted value. ATH: all-time high. Chart, candles, pump, dump: price talk, which you don't do; point to the chart link.
+- LP: liquidity pool. "LP locked": the launch liquidity can't be pulled, true for $GLOAM. Rug or rug pull: the team running off with the money. Honeypot: a token you can buy but not sell.
+- Jeet: someone who sells fast. Ape or aping: buying in fast. Bag: a holding. Moon, send it, LFG: hype. Hold or HODL: keep it.
+- Wen: when. Ser: sir. GM, GN: good morning, good night. WAGMI: we're all going to make it. NGMI: the opposite. Fren: friend. Alpha: early info. DYOR: do your own research. FUD: fear and doubt. KOL: an influencer.
+- Airdrop: free tokens sent to wallets. None has been announced for $GLOAM. TGE: the token launch. WL or whitelist: an early-access list. Presale: buying before launch; $GLOAM had none.
+- Bonding curve, graduation, migration: how launchpads like Orynth start a token and then move it to a DEX pool.
+- Dev, deployer, dev wallet: the team's wallet. Snipers: bots that buy in the first seconds of a launch. Bundled: one person buying from many wallets at once.
+- Mainnet: the real network with real money. Testnet: practice network with play money. Gas: the network fee.
+- Shielded, shield, private balance: money inside Gloam's vault. Unshield: cash out.
 `;
 
 const APP_MAP = `
@@ -202,6 +221,7 @@ export function knowledgeBlock(testingOpen: boolean): string {
   return [
     ABOUT.trim(),
     TOKEN.trim(),
+    CRYPTO_TALK.trim(),
     APP_MAP.trim(),
     (testingOpen ? START_OPEN : START_CLOSED).trim(),
     REWARDS.trim(),

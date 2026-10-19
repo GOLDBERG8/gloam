@@ -68,6 +68,7 @@ import {
   isVague,
   looksLikeBugReport,
   looksLikeQuestion,
+  markAddresses,
   mayNeedHelp,
   memoryText,
   mentionsBot,
@@ -80,6 +81,7 @@ import {
   secretLeak,
   sharesPhrase,
   sniffImage,
+  spaceOut,
   tagsSomeone,
   teamMemoryText,
   tokenCard,
@@ -229,8 +231,8 @@ function groupGuide(c: BotConfig): string {
     ? "Testers, your guide is pinned in the Testers topic."
     : "Testing directions land in the Testers topic soon.";
   return (
-    `Hi, I'm ${c.persona}, Gloam's community helper bot. Tag me or reply to me with a question, or just ask in Help. ` +
-    `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract. ${testing} ` +
+    `Hi, I'm ${c.persona}, Gloam's community helper bot. Tag me or reply to me with a question, or just ask in Help.\n\n` +
+    `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract. ${testing}\n\n` +
     `Docs live at gloam.trade/docs, news at @gloamtrade, and anything private goes to hello@gloam.trade. Admins never DM first.`
   );
 }
@@ -449,7 +451,8 @@ async function compose(x: Compose): Promise<{ reply: string | null; sentinel: Se
   if (x.image && sentinel === "skip" && (x.input.picture?.mayIgnore || !text)) return { reply: null, sentinel };
   if (!text) return { reply: null, sentinel: null };
   const handles = [...x.c.admins, x.from.username, x.me.username].filter((h): h is string => Boolean(h));
-  return { reply: cleanReply(trimReply(text), { handles }), sentinel: null };
+  const reply = cleanReply(trimReply(text), { handles });
+  return { reply: reply ? spaceOut(reply) : null, sentinel: null };
 }
 
 // ---------------------------------------------------------------- welcomes
@@ -784,15 +787,15 @@ async function chatWithTeam(
     ),
     picture ? loadPicture(picture) : Promise.resolve(null),
   ]);
-  const fullContext = extra ? `${context}\n\n${extra}` : context;
+  const fullContext = markAddresses(extra ? `${context}\n\n${extra}` : context);
   const said = picture
     ? image
       ? text || "(a picture, no caption)"
       : `(sent a picture you could not open)${text ? ` ${text}` : ""}`
     : text;
   const turns: ChatTurn[] = [
-    ...history.map((l): ChatTurn => ({ role: l.b ? "assistant" : "user", text: l.t })),
-    { role: "user", text: said },
+    ...history.map((l): ChatTurn => ({ role: l.b ? "assistant" : "user", text: l.b ? l.t : markAddresses(l.t) })),
+    { role: "user", text: markAddresses(said) },
   ];
   const r = await askTeamChat(teamSystemPrompt({ persona: c.persona, testingOpen: c.testingOpen, admins: c.admins }), fullContext, turns, image);
   if (!("text" in r)) {
@@ -849,7 +852,7 @@ async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
   if (cmd) {
     const name = firstName(from, c);
     if (cmd.name === "answer") {
-      await answerLinked(chatId, from, c, raw);
+      await answerLinked(chatId, from, c, groupMessageIds(raw));
       return;
     }
     if (cmd.name === "webhook" && owner) {
@@ -871,10 +874,15 @@ async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
     await sendMessage(chatId, await buildReport(c.groupId, c.persona));
     return;
   }
-  // a link to a group message: answer it there when asked, else bring its text into the chat
-  const linked = groupMessageIds(raw);
+  // a link to a group message: answer it there when asked, else bring its text into the chat.
+  // "go answer them" with no link: the links the helper itself named in its last reply here.
+  let linked = groupMessageIds(raw);
+  if (!linked.length && wantsGroupAnswer(text)) {
+    const last = (await dmHistory(from.id).catch(() => [])).filter((l) => l.b).pop();
+    linked = last ? groupMessageIds(last.t) : [];
+  }
   if (linked.length && wantsGroupAnswer(text)) {
-    await answerLinked(chatId, from, c, raw);
+    await answerLinked(chatId, from, c, linked);
     return;
   }
   const extra = linked.length ? await linkedContext(linked) : "";
@@ -903,27 +911,29 @@ function watClock(ms: number): string {
 }
 
 /**
- * A team member linked a group message and asked the helper to answer it: the
- * helper answers it in the group, as a reply, the way it would have if tagged,
- * and says in the private chat what it posted.
+ * A team member linked group messages (or said "go answer them" after the
+ * helper named some) and asked the helper to answer: it answers each in the
+ * group, as a reply, the way it would have if tagged, and says in the private
+ * chat what it posted. A message it already answered gets a fresh answer that
+ * corrects the old one, since the team only asks again when the first was off.
  */
-async function answerLinked(chatId: number, from: TgUser, c: BotConfig, raw: string): Promise<void> {
-  const [id] = groupMessageIds(raw);
-  if (!id) {
+async function answerLinked(chatId: number, from: TgUser, c: BotConfig, ids: number[]): Promise<void> {
+  if (!ids.length) {
     await sendMessage(chatId, "Send the link to the message with it, like: answer this t.me/gloamhq/209");
-    return;
-  }
-  const [rec] = await storedMessages([id]).catch(() => [null]);
-  if (!rec) {
-    await sendMessage(chatId, "I don't have that message on record (I keep the group's messages for 3 days). Paste its text here and I'll draft a reply for you to post.");
-    return;
-  }
-  if (await wasReplied(id).catch(() => false)) {
-    await sendMessage(chatId, `I already answered that one from ${cleanName(rec.n)}. Want a follow-up instead? Tell me what to add.`);
     return;
   }
   const me = await getMe();
   if (!me) return;
+  const report: string[] = [];
+  for (const id of ids.slice(0, 3)) report.push(await answerOne(c, me, from, id));
+  await sendMessage(chatId, report.join("\n\n"));
+}
+
+/** Answers one linked group message; returns the line for the private chat. */
+async function answerOne(c: BotConfig, me: TgUser, from: TgUser, id: number): Promise<string> {
+  const [rec] = await storedMessages([id]).catch(() => [null]);
+  if (!rec) return `t.me/gloamhq/${id}: I don't have that message on record (I keep the group's messages for 3 days). Paste its text here and I'll draft a reply for you to post.`;
+  const correcting = await wasReplied(id).catch(() => false);
   const lines = await recentThreads(c.groupId, [rec.topic]).catch(() => new Map<number, ChatLine[]>());
   const asker = cleanName(rec.n);
   const { reply } = await compose({
@@ -936,26 +946,25 @@ async function answerLinked(chatId: number, from: TgUser, c: BotConfig, raw: str
       text: rec.t,
       topic: topicName(rec.topic),
       history: lines.get(rec.topic) ?? [],
-      taggedBy: { name: firstName(from, c), text: "" },
+      taggedBy: {
+        name: firstName(from, c),
+        text: correcting
+          ? "You answered this earlier and that answer was wrong or out of date. Answer it fresh from the facts, and open with a short, plain correction."
+          : "",
+      },
       adminInvolved: true,
       handedOff: false,
     },
   });
-  if (!reply) {
-    await sendMessage(chatId, "I couldn't put a good answer together for that one. Tell me what you want it to say and I'll word it.");
-    return;
-  }
+  if (!reply) return `${asker} (t.me/gloamhq/${id}): I couldn't put a good answer together for that one. Tell me what you want it to say and I'll word it.`;
   const threadId = rec.topic === TOPIC.general ? undefined : rec.topic;
   const sent = await sendMessage(c.groupId, reply, { threadId, replyTo: id });
-  if (!sent) {
-    await sendMessage(chatId, "Telegram didn't take the post. The message may have been deleted. Here's what I'd have said:\n\n" + reply);
-    return;
-  }
+  if (!sent) return `${asker} (t.me/gloamhq/${id}): Telegram didn't take the post. The message may have been deleted. Here's what I'd have said:\n\n${reply}`;
   await markReplied(id).catch(() => {});
   await remember(c.groupId, rec.topic, { n: c.persona, t: reply.slice(0, 400), b: 1, a: Math.floor(Date.now() / 1000) }).catch(() => {});
   await count("answered");
   await logAnswered({ at: Date.now(), name: asker, topic: topicName(rec.topic), text: rec.t.slice(0, 200), reply: reply.slice(0, 200), link: `https://t.me/gloamhq/${id}` }).catch(() => {});
-  await sendMessage(chatId, `Posted in ${topicName(rec.topic)}, replying to ${asker}:\n\n${reply}`);
+  return `${correcting ? "Corrected" : "Posted"} in ${topicName(rec.topic)}, replying to ${asker}:\n\n${reply}`;
 }
 
 // ---------------------------------------------------------------- entry
