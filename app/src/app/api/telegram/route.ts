@@ -1,5 +1,6 @@
 import { NextResponse, after } from "next/server";
-import { handleUpdate } from "@/lib/telegramBot/bot";
+import { botConfig, handleUpdate } from "@/lib/telegramBot/bot";
+import { pollBuys } from "@/lib/telegramBot/buys";
 import { webhookSecretOk } from "@/lib/telegramBot/rules";
 import type { TgUpdate } from "@/lib/telegramBot/telegram";
 
@@ -58,11 +59,13 @@ export async function POST(req: Request) {
   }
   if (update && typeof update.update_id === "number") {
     const u = update;
-    after(() =>
-      handleUpdate(u).catch((e) => {
+    after(async () => {
+      await handleUpdate(u).catch((e) => {
         console.error("telegram: update failed", e instanceof Error ? e.message : "unknown");
-      }),
-    );
+      });
+      // any update is a chance to post new $GLOAM buys in the Buys topic (at most every 20 seconds)
+      await pollBuys(botConfig().groupId);
+    });
   }
   return NextResponse.json({ ok: true });
 }

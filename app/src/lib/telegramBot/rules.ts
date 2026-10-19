@@ -10,7 +10,7 @@ import { GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
 
 /** Forum topics in t.me/gloamhq, by message_thread_id. General messages carry no thread id. */
-export const TOPIC = { general: 1, testers: 2, announcements: 3, help: 4, feedback: 5 } as const;
+export const TOPIC = { general: 1, testers: 2, announcements: 3, help: 4, feedback: 5, buys: 798 } as const;
 
 const TOPIC_NAME: Record<number, string> = {
   [TOPIC.general]: "General",
@@ -18,6 +18,7 @@ const TOPIC_NAME: Record<number, string> = {
   [TOPIC.announcements]: "Announcements",
   [TOPIC.help]: "Help",
   [TOPIC.feedback]: "Feedback",
+  [TOPIC.buys]: "Buys",
 };
 
 export function topicName(topic: number): string {

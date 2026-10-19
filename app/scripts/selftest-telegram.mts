@@ -1057,6 +1057,17 @@ await test("a suggestion aimed at the team by tag gets no reply from Glim", asyn
   assert.equal(sends().length, 1);
 });
 
+await test("buy alerts: every buy, spaced, with value, price, market cap and links", async () => {
+  const { buyText } = await import("../src/lib/telegramBot/buys");
+  const t = buyText({ amount: 1129.48, usd: 248.48, buyer: "0x18f93000000000000000000000000000000a3c2c", tx: "0xabc", price: 0.22, marketCap: 215260 });
+  assert.equal(
+    t,
+    "New $GLOAM buy\n\n1,129 GLOAM, about $248\nBuyer 0x18f9...3c2c\n\nPrice $0.2200\nMarket cap $215.3K\n\nTx: robin.etherscan.io/tx/0xabc\nChart: dexscreener.com/robinhood/0xDcD885F5c60b3aD49F6D58718696417314e8724d",
+  );
+  const small = buyText({ amount: 2, usd: 0.44, buyer: "0x0000000000000000000000000000000000000001", tx: "0x1" });
+  assert.ok(small.includes("about $0.44") && !small.includes("Market cap"), "small buys post too, stats only when known");
+});
+
 await test("answers are limited per person; past the limit it stays quiet", async () => {
   reset();
   const pia = user(37, "Pia");
