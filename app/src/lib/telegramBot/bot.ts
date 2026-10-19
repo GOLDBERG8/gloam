@@ -51,6 +51,7 @@ import {
   MAX_IMAGE_BYTES,
   SHORT_CAPTION_WORDS,
   TOPIC,
+  asksTokenAddress,
   chainFix,
   chainMismatch,
   cleanName,
@@ -81,6 +82,8 @@ import {
   sniffImage,
   tagsSomeone,
   teamMemoryText,
+  tokenCard,
+  tokenPointer,
   topicName,
   topicOf,
   wantsReport,
@@ -107,6 +110,7 @@ import {
   logQuestion,
   logAnswered,
   markReplied,
+  markTokenCard,
   rememberMessage,
   storedMessages,
   wasReplied,
@@ -124,6 +128,7 @@ import {
   threadThenRemember,
   watchLockedCode,
   type Counter,
+  tokenCardLately,
 } from "./store";
 import {
   deleteMessage,
@@ -225,7 +230,7 @@ function groupGuide(c: BotConfig): string {
     : "Testing directions land in the Testers topic soon.";
   return (
     `Hi, I'm ${c.persona}, Gloam's community helper bot. Tag me or reply to me with a question, or just ask in Help. ` +
-    `Ideas and bugs go in Feedback, or type /bug and what happened. ${testing} ` +
+    `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract. ${testing} ` +
     `Docs live at gloam.trade/docs, news at @gloamtrade, and anything private goes to hello@gloam.trade. Admins never DM first.`
   );
 }
@@ -240,6 +245,7 @@ function ownerHelp(c: BotConfig): string {
     `Owner commands\n` +
     `/report - the last 24 hours in the group: members, activity, what ${c.persona} did, bug reports and what people asked\n` +
     `/help - this list\n` +
+    `/ca - the $GLOAM contract and token page (same in the group)\n` +
     `/answer <message link> - I answer that group message in the group, as a reply (or say "go answer this" with the link)\n` +
     `/webhook - turn on edited messages, so a question added in an edit gets an answer\n` +
     `You can also just say "report" or "how was today".\n\n${CHAT_HELP}${daily}`
@@ -482,12 +488,40 @@ function left(u: TgChatMemberUpdated): boolean {
 
 // ---------------------------------------------------------------- group
 
+/** Commands that answer with the $GLOAM contract. */
+const TOKEN_COMMANDS = new Set(["ca", "contract", "token"]);
+
+/**
+ * The $GLOAM card as a reply, from the facts, with no model call. Asked again
+ * in the same topic within a few minutes, a short pointer instead, so the
+ * group is not the same card over and over.
+ */
+async function sendTokenCard(msg: TgMessage, c: BotConfig, topic: number, name: string): Promise<void> {
+  const chatId = msg.chat.id;
+  const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
+  const lately = await tokenCardLately(chatId, topic).catch(() => false);
+  const reply = lately ? tokenPointer(name) : tokenCard();
+  if (!(await sendMessage(chatId, reply, { threadId, replyTo: msg.message_id }))) return;
+  if (!lately) await markTokenCard(chatId, topic).catch(() => {});
+  await markReplied(msg.message_id).catch(() => {});
+  await remember(chatId, topic, { n: c.persona, t: reply.slice(0, 400), b: 1, a: Math.floor(Date.now() / 1000) }).catch(() => {});
+  await count("answered");
+  const asked = memoryText(messageText(msg));
+  if (asked) {
+    await logAnswered({ at: Date.now(), name, topic: topicName(topic), text: asked.slice(0, 200), reply: reply.slice(0, 200), link: messageLink(msg) }).catch(() => {});
+  }
+}
+
 async function onCommand(cmd: Command, msg: TgMessage, from: TgUser, c: BotConfig, topic: number): Promise<void> {
   const chatId = msg.chat.id;
   const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
   const name = firstName(from, c);
-  if (cmd.name !== "help" && cmd.name !== "start" && cmd.name !== "bug") return;
+  if (cmd.name !== "help" && cmd.name !== "start" && cmd.name !== "bug" && !TOKEN_COMMANDS.has(cmd.name)) return;
   if (!(await withinLimits(from.id))) return;
+  if (TOKEN_COMMANDS.has(cmd.name)) {
+    await sendTokenCard(msg, c, topic, name);
+    return;
+  }
   if (cmd.name === "bug") {
     if (cmd.args.length < 3) {
       await sendMessage(chatId, "Tell me what happened after /bug, like: /bug The faucet button keeps spinning on Tempo.", { threadId, replyTo: msg.message_id });
@@ -555,6 +589,13 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   const history = edited
     ? await threadThenRemember(chatId, topic, null).catch(() => [])
     : await historyFor(chatId, topic, name, ownPicture ? `[picture]${text ? ` ${text}` : ""}` : text);
+  // "CA?", "what's the contract", "where can I buy $GLOAM": the official answer, straight away
+  if (!edited && asksTokenAddress(text)) {
+    const kept = memoryText(text);
+    if (kept) await logQuestion(kept).catch(() => {});
+    if (await withinLimits(from.id)) await sendTokenCard(msg, c, topic, name);
+    return;
+  }
   const replied = explicitReply(msg);
   const toBot = replied?.from?.id === me.id;
   // a tag, a reply to Glim, or saying its name; questions get answered in every topic (not Announcements)
@@ -822,6 +863,7 @@ async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
     }
     let reply = owner ? ownerHelp(c) : adminHelp(name);
     if (cmd.name === "report") reply = owner ? await buildReport(c.groupId, c.persona) : ADMIN_REPORT;
+    if (TOKEN_COMMANDS.has(cmd.name)) reply = tokenCard();
     await sendMessage(chatId, reply);
     return;
   }

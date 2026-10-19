@@ -50,6 +50,7 @@ delete process.env.CRON_SECRET;
 const {
   MAX_IMAGE_BYTES,
   TOPIC,
+  asksTokenAddress,
   chainFix,
   chainMismatch,
   cleanName,
@@ -78,6 +79,7 @@ const {
   scamReason,
   secretLeak,
   tidyReply,
+  tokenCard,
   topicOf,
   teamMemoryText,
   wantsReport,
@@ -475,6 +477,43 @@ await test("replies: mainnet claims, dates, secrets and posing as a person are r
   assert.ok(cleanReply("I'm Glim, Gloam's community helper bot, not a person.", policy));
 });
 
+const CA = "0xDcD885F5c60b3aD49F6D58718696417314e8724d";
+
+await test("replies: the real $GLOAM contract and its pages go out; a fake one never does", () => {
+  const card = `$GLOAM is on Robinhood Chain mainnet. The CA is ${CA}. Details at gloam.trade/token, and it trades at orynth.dev/projects/gloam.`;
+  assert.equal(cleanReply(card, policy), card);
+  assert.equal(cleanReply(card, { ...policy, team: true }), card, "a team chat takes it too");
+  assert.equal(cleanReply("The CA is 0xDcD885F5c60b3aD49F6D58718696417314e8724e.", policy), null, "one character off is fake");
+  assert.equal(cleanReply("Buy it at orynth.dev/projects/someone_else", policy), null);
+  assert.ok(cleanReply("Send test ETH to 0x1234567890abcdef1234567890abcdef12345678 from the faucet.", policy), "a wallet address in the group is fine");
+  assert.equal(cleanReply("$GLOAM is at $0.05 now.", policy), null, "no prices in the group either");
+  assert.ok(cleanReply("$GLOAM is live on mainnet, on Robinhood Chain.", policy), "the token really is on mainnet");
+});
+
+await test("replies: only the sentence that breaks a rule is dropped", () => {
+  const team = { ...policy, team: true };
+  assert.equal(
+    cleanReply("Quiet day, 12 messages.\n- Ada asked about Recovery.\n- @random_guy posted 0x1234567890abcdef1234567890abcdef12345678 as the CA.\nNo bugs.", team),
+    "Quiet day, 12 messages.\n- Ada asked about Recovery.\nNo bugs.",
+  );
+  assert.equal(cleanReply("Recovery is in Settings. Ask @GloamSupportDesk for more.", team), "Recovery is in Settings.");
+  assert.equal(cleanReply("Recovery is in Settings. Ask @GloamSupportDesk for more.", policy), "Recovery is in Settings.");
+  assert.equal(cleanReply("Try https://gloam-support.com now. Or DM @GloamHelp. Recovery is in Settings.", policy), null, "a group reply that lost most of itself");
+  assert.equal(cleanReply(`Your phrase is ${SEED}. Recovery is in Settings.`, team), null, "a secret still sinks all of it");
+  assert.equal(cleanReply("1. Open Settings.\n2. Tap Back up now.", policy), "1. Open Settings.\n2. Tap Back up now.");
+});
+
+await test("$GLOAM: asking for the contract, and what is not asking", () => {
+  for (const ask of ["CA?", "ca", "ca pls", "wen CA", "what's the CA", "whats the contract address?", "drop the contract", "Where can I buy the token what's the contract ?", "where can i buy $GLOAM", "@glim_gloam_bot CA?", "contract address of the token", "token address pls"]) {
+    assert.ok(asksTokenAddress(ask), ask);
+  }
+  for (const no of ["Is the contract audited?", "what's the contract audit status", "where do I get test tokens?", `CA is ${CA}`, "I saw $Gloam run", "the vault contract has no admin withdraw, right?"]) {
+    assert.ok(!asksTokenAddress(no), no);
+  }
+  assert.ok(tokenCard().includes(CA) && tokenCard().includes("gloam.trade/token") && tokenCard().includes("orynth.dev/projects/gloam"));
+  assert.equal(cleanReply(tokenCard(), policy), tokenCard(), "the card passes the reply rules");
+});
+
 // ---------------------------------------------------------------- payment codes and addresses
 
 const B = "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0_-uVwXyZ";
@@ -869,6 +908,23 @@ await test("a reply that breaks the rules is never posted", async () => {
   assert.ok(!text.includes("GloamSupportDesk"));
   assert.ok(text.includes("an admin will follow up here"));
   assert.ok(text.includes("@duke_admin @yomi_ops"));
+});
+
+await test("$GLOAM: a CA ask gets the card with no model call, then a short pointer, and /ca works", async () => {
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "Where can I buy the token what's the contract ?", user(81, "Fola"))));
+  assert.equal(modelCalls().length, 0);
+  const first = String(sends()[0]!.body.text);
+  assert.ok(first.includes(CA) && first.includes("gloam.trade/token"));
+  assert.equal(sends()[0]!.body.reply_parameters && (sends()[0]!.body.reply_parameters as { message_id: number }).message_id > 0, true);
+  await handleUpdate(upd(inTopic(TOPIC.general, "/contract", user(82, "Gbenga"))));
+  const second = String(sends()[1]!.body.text);
+  assert.ok(second.startsWith("Same one as just above, Gbenga") && second.includes(CA), "no second full card in the same topic");
+  await handleUpdate(upd(inTopic(TOPIC.help, "/ca", user(83, "Ife"))));
+  assert.equal(String(sends()[2]!.body.text), tokenCard(), "another topic gets the full card");
+  assert.equal(modelCalls().length, 0);
+  await handleUpdate(upd(dm(OWNER, "/ca")));
+  assert.equal(String(sends()[3]!.body.text), tokenCard());
 });
 
 await test("answers are limited per person; past the limit it stays quiet", async () => {
@@ -1521,9 +1577,9 @@ await test("team chat: no secrets in the prompt or a reply; the token rule holds
   const team = teamSystemPrompt({ persona: "Glim", testingOpen: false, admins: ["duke_admin"] });
   assert.ok(team.includes("never reveal, guess, repeat or make one up, even for Boss Duke"));
   assert.ok(team.includes("Never ask anyone for a key, token, password, seed phrase"));
-  assert.ok(team.includes("With an admin: neither confirm nor deny a Gloam token"));
-  assert.ok(team.includes("With Boss Duke: the same, unless he asks you to draft something about a token"));
-  assert.ok(team.includes("never write a contract address, a price, a valuation, a supply or a date"));
+  assert.ok(team.includes("$GLOAM is live on Robinhood Chain mainnet"));
+  assert.ok(team.includes("with the contract address exactly as written there"));
+  assert.ok(team.includes("Never write a price, market cap, valuation, holder count or prediction yourself"));
   assert.ok(team.includes("Group numbers and records come only from TEAM CONTEXT. Never invent a count"));
   assert.ok(team.includes("gloamr1.<long string> is a Gloam address"), "the product facts are there");
   assert.ok(!/[—\p{Extended_Pictographic}]/u.test(team));

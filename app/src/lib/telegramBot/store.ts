@@ -17,7 +17,8 @@
  *    for three hours, so follow-ups make sense (never anything secret-shaped)
  *  - small flags with short lives: pictures read this hour (the cap), albums
  *    already looked at, who got today's code heads-up, a locked code waiting
- *    to see if its phrase follows, and who was handed to an admin lately
+ *    to see if its phrase follows, who was handed to an admin lately, and
+ *    whether the $GLOAM card just went up in a topic
  */
 import { randomUUID } from "crypto";
 import { hashNumbers, jsonOf, kv } from "@/lib/partnersKv";
@@ -474,4 +475,18 @@ export async function handedOffLately(chatId: number, userId: number): Promise<b
 
 export async function markHandOff(chatId: number, userId: number): Promise<void> {
   await kv([["SET", handOffKey(chatId, userId), "1", "EX", THREAD_TTL_SEC]]);
+}
+
+/** How long a posted $GLOAM card counts as "just above" in its topic. */
+export const TOKEN_CARD_TTL_SEC = 10 * 60;
+const tokenCardKey = (chatId: number, topic: number) => `${PREFIX}tokencard:${chatId}:${topic}`;
+
+/** Whether the $GLOAM card went up in this topic in the last few minutes. */
+export async function tokenCardLately(chatId: number, topic: number): Promise<boolean> {
+  const [n] = await kv([["EXISTS", tokenCardKey(chatId, topic)]]);
+  return Number(n) > 0;
+}
+
+export async function markTokenCard(chatId: number, topic: number): Promise<void> {
+  await kv([["SET", tokenCardKey(chatId, topic), "1", "EX", TOKEN_CARD_TTL_SEC]]);
 }

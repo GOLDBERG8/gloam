@@ -6,6 +6,7 @@
  */
 import { createHash, timingSafeEqual } from "crypto";
 import { english } from "viem/accounts";
+import { GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
 
 /** Forum topics in t.me/gloamhq, by message_thread_id. General messages carry no thread id. */
@@ -636,12 +637,65 @@ export type ReplyPolicy = {
   secrets?: string[];
 };
 
-/** A link the helper may share: the website, the group, the X account. */
+/** A link the helper may share: the website, the group, the X account, $GLOAM's page on Orynth. */
 function linkAllowed(link: string): boolean {
   const { host, path } = hostOf(link);
   if (host === "gloam.trade") return true;
   if (host === "x.com" || host === "twitter.com") return /^\/gloamtrade(?:[/?#]|$)/i.test(path);
+  if (host === "orynth.dev") return /^\/projects\/gloam(?:[/?#]|$)/i.test(path);
   return isGroupLink(host, path);
+}
+
+const ANY_EVM_ADDRESS = /\b0x[0-9a-fA-F]{40}\b/g;
+const TOKEN_TALK = /\b(?:tokens?|ca|contract|coin|buy|sell|chart|ticker|listing|launch(?:ed)?)\b|\$[A-Za-z]{2,10}\b/i;
+const ABOUT_TOKEN = /\$gloam\b|\btoken\b/i;
+
+/**
+ * A 0x address other than $GLOAM's. In a team chat that is any of them; in the
+ * group, one next to token words, so a mistyped or fake contract never goes out.
+ */
+function wrongAddress(s: string, team: boolean): boolean {
+  const others = (s.match(ANY_EVM_ADDRESS) ?? []).filter((a) => a.toLowerCase() !== GLOAM_TOKEN.address.toLowerCase());
+  return others.length > 0 && (team || TOKEN_TALK.test(s));
+}
+
+/** One sentence breaks a rule that dropping it fixes: an off-list link, email or handle, a wrong address, a price, a mainnet claim or date, posing as a person. */
+function brokenSentence(s: string, team: boolean, okHandles: Set<string>): boolean {
+  if ((s.match(LINK_RE) ?? []).some((l) => !linkAllowed(l))) return true;
+  if ((s.match(EMAIL_RE) ?? []).some((e) => e.toLowerCase() !== "hello@gloam.trade")) return true;
+  for (const m of s.matchAll(HANDLE_RE)) if (!okHandles.has(m[1]!.toLowerCase())) return true;
+  if (wrongAddress(s, team)) return true;
+  if (TOKEN_PRICE.test(s)) return true;
+  // $GLOAM really is on Robinhood Chain mainnet; the app is the part that is not
+  if (!ABOUT_TOKEN.test(s)) for (const m of s.matchAll(MAINNET_LIVE)) if (!negated(s, m.index ?? 0, m[0])) return true;
+  if (MAINNET_DATE.test(s)) return true;
+  return HUMAN_CLAIM.test(s);
+}
+
+/**
+ * The reply without the sentences that break a rule, so one bad line never
+ * costs the whole answer. Sentences end at a full stop, "!" or "?" before a
+ * space, or at a line break; "1." in a list is not an end.
+ */
+function dropBroken(text: string, bad: (s: string) => boolean): { text: string; kept: number; dropped: number } {
+  const parts = text.split(/(\n+|(?<=\D[.!?]["')\]]?)[ \t]+)/);
+  let out = "";
+  let kept = 0;
+  let dropped = 0;
+  for (let i = 0; i < parts.length; i += 2) {
+    const s = parts[i] ?? "";
+    const sep = parts[i + 1] ?? "";
+    if (!s.trim()) {
+      out += sep;
+    } else if (bad(s)) {
+      dropped++;
+      if (sep.includes("\n")) out = out.trimEnd() + sep;
+    } else {
+      kept++;
+      out += s + sep;
+    }
+  }
+  return { text: out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(), kept, dropped };
 }
 
 /** Cuts at the last full sentence that fits. */
@@ -673,27 +727,59 @@ export function tidyReply(raw: string): string {
 }
 
 /**
- * The model's reply, made safe to post, or null when it breaks a rule that
- * tidying cannot fix: a link, email or handle that is not official, anything
- * shaped like a seed phrase or key, a payment code or claim link, a claim
- * that mainnet is live or a date for it, or claiming to be a person.
+ * The model's reply, made safe to post, or null. Anything shaped like a seed
+ * phrase, key or deployment secret, or a payment code or claim link, sinks the
+ * whole reply. A sentence with an off-list link, email or handle, an address
+ * that is not $GLOAM's, a token price, a claim that the app is on mainnet or a
+ * date for it, or claiming to be a person is dropped, and the rest goes out.
+ * A group reply that lost most of its sentences is not sent at all.
  */
 export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
   const text = clip(tidyReply(raw), policy.maxChars ?? MAX_REPLY);
   if (!text) return null;
   if (policy.secrets?.some((v) => v.length >= 8 && raw.includes(v))) return null;
-  if (policy.team && (EVM_ADDRESS.test(text) || TOKEN_PRICE.test(text))) return null;
-  if ((text.match(LINK_RE) ?? []).some((l) => !linkAllowed(l))) return null;
-  if ((text.match(EMAIL_RE) ?? []).some((e) => e.toLowerCase() !== "hello@gloam.trade")) return null;
-  const okHandles = new Set(["gloamtrade", "gloamhq", ...policy.handles.map((h) => h.toLowerCase())]);
-  for (const m of text.matchAll(HANDLE_RE)) if (!okHandles.has(m[1]!.toLowerCase())) return null;
   if (secretLeak(text)) return null;
   // a code or claim link read off a screenshot is never repeated; an address is fine
   if ([...scanCodes(text).kinds].some((k) => k !== "address" && k !== "request_link")) return null;
-  for (const m of text.matchAll(MAINNET_LIVE)) if (!negated(text, m.index ?? 0, m[0])) return null;
-  if (MAINNET_DATE.test(text)) return null;
-  if (HUMAN_CLAIM.test(text)) return null;
-  return text;
+  const okHandles = new Set(["gloamtrade", "gloamhq", ...policy.handles.map((h) => h.toLowerCase())]);
+  const r = dropBroken(text, (s) => brokenSentence(s, Boolean(policy.team), okHandles));
+  if (!r.kept) return null;
+  if (!policy.team && r.dropped * 2 > r.kept + r.dropped) return null;
+  return r.text;
+}
+
+// ---------------------------------------------------------------- $GLOAM
+
+const CA_WORD = String.raw`(?:ca|c\.a\.?|contract(?:\s+(?:address|addy))?|token\s+(?:address|addy|contract)|addy)`;
+const CA_ONLY = new RegExp(
+  String.raw`^(?:(?:pls|please|yo|hey|hi|gm|ser|sir|bro|fam|admin|team|so|and|ok|okay|wen|drop|send|share|post|give(?:\s+(?:me|us))?|need|any|what'?s|whats|what\s+is|where'?s|wheres|where\s+is|the|ur|your|our|token|gloam|\$gloam|its)[\s,:]+)*${CA_WORD}(?:[\s,]+(?:pls|please|ser|sir|bro|fam|admin|again|here|(?:of|for)\s+(?:the\s+)?(?:token|\$?gloam)))*[\s?!.]*$`,
+  "i",
+);
+const CA_ASKED =
+  /\b(?:what(?:'s|\s+is)|whats|where(?:'s|\s+is)|drop|share|send|post|give\s+(?:me|us))\s+(?:the\s+|ur\s+|your\s+|our\s+|its\s+)?(?:\$?gloam\s+|token\s+)?(?:ca\b|contract\b(?!\s+(?:audit|code|source|logic|function|call|work|risk))|(?:token|contract)\s+address\b)/i;
+const BUY_ASKED =
+  /\b(?:where|how)\s+(?:can|do|should|to)\s+(?:i\s+|we\s+|one\s+)?(?:buy|purchase|ape(?:\s+into)?|get)\s+(?:some\s+)?(?:\$gloam|gloam\s+tokens?|the\s+gloam\s+token)\b|\b(?:where|how)\s+(?:can|do|should|to)\s+(?:i\s+|we\s+)?(?:buy|purchase|ape)\b[^.!?\n]{0,20}\b(?:\$?gloam|the\s+token)\b/i;
+
+/** "CA?", "wen contract", "what's the CA", "where can I buy $GLOAM": asking for the token's address. A message that already has one is not asking. */
+export function asksTokenAddress(raw: string): boolean {
+  const t = norm(raw).replace(/(?<![\w@])@\w+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t || wordCount(t) > 25 || EVM_ADDRESS.test(t)) return false;
+  return CA_ONLY.test(t) || CA_ASKED.test(t) || BUY_ASKED.test(t);
+}
+
+/** The official answer to "CA?": the address, the facts that matter, and where the rest lives. */
+export function tokenCard(): string {
+  return (
+    `$GLOAM on Robinhood Chain mainnet:\n${GLOAM_TOKEN.address}\n\n` +
+    `Fixed supply of 500,000, launch liquidity locked for good, no presale and no team allocation. ` +
+    `Uses, tokenomics and the roadmap are at ${GLOAM_TOKEN.page}, and it trades on Orynth at ${GLOAM_TOKEN.orynth}. ` +
+    `That address is the only real one. Not financial advice.`
+  );
+}
+
+/** The same ask again soon after the card went up in that topic: the address, without the whole card. */
+export function tokenPointer(name: string): string {
+  return `Same one as just above, ${name}: ${GLOAM_TOKEN.address}. The rest is at ${GLOAM_TOKEN.page}.`;
 }
 
 // ---------------------------------------------------------------- names and welcomes

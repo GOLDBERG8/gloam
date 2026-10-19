@@ -16,9 +16,18 @@ const RH_CONNECT = WALLET_APP
   ? "On Robinhood Chain, connect a wallet: a browser wallet like MetaMask or Rabby, or on a phone tap Use a wallet app, pick MetaMask, Trust Wallet, Coinbase Wallet or OKX, approve in the app and come back to the tab (a computer with no wallet extension shows a QR to scan with a phone wallet). Passkey accounts live on Tempo only."
   : "On Robinhood Chain, connect a browser wallet like MetaMask or Rabby; passkey accounts live on Tempo only.";
 
+/** The $GLOAM token, as gloam.trade/token shows it. The only contract address the helper may share. */
+export const GLOAM_TOKEN = {
+  address: "0xDcD885F5c60b3aD49F6D58718696417314e8724d",
+  page: "gloam.trade/token",
+  orynth: "orynth.dev/projects/gloam",
+};
+
 /** Links the helper may share. Anything else in a reply is dropped. */
 export const OFFICIAL_LINKS = [
   "gloam.trade (website)",
+  `${GLOAM_TOKEN.page} (the $GLOAM token: contract, supply, uses and roadmap)`,
+  `${GLOAM_TOKEN.orynth} (where $GLOAM launched and trades, on Orynth)`,
   "gloam.trade/app (the testnet app)",
   "gloam.trade/docs (docs; the testnet guide is gloam.trade/docs/testnet)",
   "gloam.trade/verify (check a proof, no wallet needed)",
@@ -37,8 +46,7 @@ WHAT GLOAM IS
 - Gloam is private money on public chains: private stablecoin payments, payroll and proofs. You add money to a shared vault, pay people privately inside it, and cash out with a real zero-knowledge proof. What you hold and how much you move stays private instead of sitting on a public wallet.
 - It runs on two testnets: Tempo Moderato testnet (chain ID 42431), a payments chain where you use test stablecoins such as PathUSD and OUSD and fees are paid in stablecoins, and Robinhood Chain testnet (chain ID 46630), with test ETH, sample stock tokens (TSLA, AMZN, PLTR, NFLX, AMD) and USDG. The network selector in the app header switches between them.
 - Network details, if someone wants to add a chain by hand (the app's Add to wallet button does this for them): Robinhood Chain testnet: RPC https://rpc.testnet.chain.robinhood.com, chain ID 46630, currency ETH, explorer https://explorer.testnet.chain.robinhood.com. Tempo testnet (Moderato): RPC https://rpc.moderato.tempo.xyz, chain ID 42431, currency USD, explorer https://explore.testnet.tempo.xyz. Give these exactly when asked; never make up any other URL.
-- Testnet only. Play money and development proving keys, no real dollars. Mainnet is blocked in the app until a production trusted-setup ceremony and an external audit are done. There is no date.
-- Token questions (is there a token, price, contract address, airdrop, listing, when token): do not confirm, deny or speculate. Say anything token-related comes from the team in Announcements and on X @gloamtrade, and steer back to the product. Never share or confirm a contract address, and never say Gloam has no token.
+- The app is on testnet for now: play money and development proving keys, no real dollars. Mainnet is coming on both Tempo and Robinhood Chain. The trusted-setup ceremony for mainnet is done (13 contributors). Never give or guess a launch date; launch news comes in Announcements and on X @gloamtrade.
 - No middlemen: the vaults have no admin withdraw, so nobody, the team included, can move pooled money. Money leaves only through a cash out with a valid proof. Rule changes are queued on-chain three days before they apply.
 - Proofs are made in your browser and take about 10 to 30 seconds. Keep the tab open. A desktop or laptop is best for first proofs.
 
@@ -61,6 +69,19 @@ WHAT YOU CAN DO (LIVE ON TESTNET)
 - Stocks and trading: on Robinhood Chain you can already hold and send the sample stock tokens privately (Vault > Add, then Vault > Pay). Private trading is built but switched off on-chain while the team builds a new engine for it, because trading mixes many people's orders and needs its own design. It is underway; never promise a date.
 - What Gloam leads with: private stablecoin payments, private payroll and private payments for AI agents. Gloam is not only stablecoins.
 - Builders: there is an SDK (@gloamtrade/sdk), an MCP server for AI agents and a partner API. Point them to gloam.trade/docs.
+`;
+
+const TOKEN = `
+$GLOAM, THE GLOAM TOKEN (from gloam.trade/token)
+- Gloam has a token: $GLOAM. It is live on Robinhood Chain MAINNET (chain ID 4663), launched on Orynth. The app itself is still on testnet; the token is not a testnet token.
+- Contract address (CA): ${GLOAM_TOKEN.address}. This is the only real one. Write it exactly like that, every character.
+- When someone asks for the CA, the contract or where to get $GLOAM, give the contract address, say it is on Robinhood Chain mainnet, and point to ${GLOAM_TOKEN.page} for everything else and ${GLOAM_TOKEN.orynth} to get it. Answer it straight, no hedging.
+- Any other address someone calls $GLOAM, or the Gloam token, is fake. If someone posts the address above, it is the real one; say so.
+- Supply: 500,000, fixed. The contract has no way to mint more. The launch liquidity is locked for good. No presale and no team allocation: every token started in the pool.
+- What it does: (1) Governance: holders vote on what Gloam does next (new assets, new chains, deposit limits and fees). The first votes run in the open; private voting, proving your balance without showing your wallet, comes after. (2) Buybacks: Gloam earns from private payments, payroll runs and API calls; once fees switch on at mainnet, a share of them buys $GLOAM from the market. (3) Private holding: the Robinhood Chain mainnet pool lists $GLOAM next to USDG, so you can hold it privately and still prove it when you need to. (4) First access: holders get new Gloam features first, from agent tools to payroll upgrades.
+- Roadmap. Done: $GLOAM live on Robinhood Chain with a fixed supply and locked liquidity; private payments live on Tempo and Robinhood Chain testnet; trusted setup closed with 13 contributors; $GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees switch on and a share starts buying back $GLOAM; the first holder vote, in the open. Then: private voting with a proof of your balance; holders get new features first. Later: relayers stake $GLOAM to help run Gloam.
+- Never give or guess a price, market cap, holder count, chart or prediction, never tell anyone to buy or sell, and never promise gains. For live numbers, point to ${GLOAM_TOKEN.orynth}. It is not financial advice.
+- No airdrop has been announced. Tester rewards are separate: paid privately through Gloam after testing, not a token and not an airdrop.
 `;
 
 const APP_MAP = `
@@ -137,7 +158,7 @@ COMMON ISSUES (from the app)
 - Robinhood faucet: one claim every 24 hours, to the same address you use in Gloam.
 - Adding the network to a wallet: Gloam does it. Settings > Network > Add to wallet adds the selected testnet to the wallet, and when the wallet is on another network the wallet button shows "Switch to <network>", which adds the network if it is missing and switches. The faucet page is not needed for this.
 - Wrong network: the app's network selector and the wallet must both be on the same chain. Robinhood Chain testnet is chain ID 46630, Tempo testnet is 42431. Passkey accounts are on Tempo; Robinhood Chain needs ${WALLET_APP ? "a wallet (a browser wallet, or a wallet app through Use a wallet app)" : "a browser wallet"}.
-- Robinhood Chain MAINNET is chain ID 4663 (one digit shorter than the testnet's 46630). Gloam is not on mainnet. A wallet set to "Robinhood Chain" is often on mainnet, which is the wrong one.
+- Robinhood Chain MAINNET is chain ID 4663 (one digit shorter than the testnet's 46630). The Gloam app is not on mainnet yet (only the $GLOAM token is). A wallet set to "Robinhood Chain" is often on mainnet, which is the wrong one for the app.
 - The error "The current chain of the wallet (id: 4663) does not match the target chain for the transaction (id: 46630)", or "Current Chain ID: 4663, Expected Chain ID: 46630": the wallet is on Robinhood Chain mainnet and the app needs Robinhood Chain testnet. Fix: tap "Switch to Robinhood Chain" on the wallet button at the top of the app (or Settings > Network > Add to wallet), approve it in the wallet, then try again; if the wallet will not switch, add the testnet by hand with the details above. Any other pair of IDs means the same thing: the wallet is on the first chain, the app wants the second (42431 is Tempo testnet). This is a known fix: answer it straight away, never hand it to the team.
 - "Leave a little ETH for gas": on Robinhood Chain, keep some ETH in the wallet when adding ETH privately.
 - "The backup service failed. Try again." under Settings > Recovery: the backup could not be saved on Gloam's server. It is not the person's wallet or device. Try Back up now again a little later; if it keeps failing, it is on Gloam's side and the team will fix it. The private balance itself is safe on that device meanwhile.
@@ -180,6 +201,7 @@ REPORTING BUGS AND WHERE TO GO
 export function knowledgeBlock(testingOpen: boolean): string {
   return [
     ABOUT.trim(),
+    TOKEN.trim(),
     APP_MAP.trim(),
     (testingOpen ? START_OPEN : START_CLOSED).trim(),
     REWARDS.trim(),
