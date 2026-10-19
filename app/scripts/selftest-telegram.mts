@@ -1068,6 +1068,15 @@ await test("buy alerts: every buy, spaced, with value, price, market cap and lin
   assert.ok(small.includes("about $0.44") && !small.includes("Market cap"), "small buys post too, stats only when known");
 });
 
+await test("buy alerts: a burst carries over to the next check, never split inside a block", async () => {
+  const { pickBuys } = await import("../src/lib/telegramBot/buys");
+  const b = (block: number) => ({ block });
+  assert.deepEqual(pickBuys([b(1), b(2)], 10), { take: [b(1), b(2)], until: null });
+  const burst = [b(1), b(2), b(3), b(3), b(3), b(4)];
+  assert.deepEqual(pickBuys(burst, 3), { take: burst.slice(0, 5), until: 3 }, "block 3 stays whole");
+  assert.deepEqual(pickBuys([b(5), b(5), b(5)], 2), { take: [b(5), b(5), b(5)], until: null }, "one big block posts whole");
+});
+
 await test("answers are limited per person; past the limit it stays quiet", async () => {
   reset();
   const pia = user(37, "Pia");

@@ -21,12 +21,14 @@ const RPC = "https://rpc.mainnet.chain.robinhood.com";
 const POOL_MANAGER = "0x8366a39cc670b4001a1121b8f6a443a643e40951";
 const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const EXPLORER = "robin.etherscan.io";
-export const BUY_CHECK_SEC = 20;
+/** Checks at least this far apart; with MAX_POSTS that stays under Telegram's 20 posts a minute in a group. */
+export const BUY_CHECK_SEC = 30;
 /** Blocks read per check; Robinhood Chain makes about 10 a second. */
 const MAX_RANGE = 20_000;
 /** Further behind than this (the bot was off), it skips ahead instead of posting old buys. */
 const MAX_LAG = 60_000;
-const MAX_POSTS = 8;
+/** Posts per check. Any more wait for the next check, so every buy gets its own post. */
+const MAX_POSTS = 10;
 
 type Log = { transactionHash: string; blockNumber: string; data: string; topics: string[] };
 
@@ -94,6 +96,18 @@ function buysTopic(): number {
   return Number.isSafeInteger(fromEnv) && fromEnv > 0 ? fromEnv : TOPIC.buys;
 }
 
+/**
+ * The buys to post now, oldest first: up to `max`, but never splitting a block,
+ * so the next check can start at the following block without posting one twice.
+ * `until` is the last block taken when some are left over, else null.
+ */
+export function pickBuys<T extends { block: number }>(buys: T[], max: number): { take: T[]; until: number | null } {
+  if (buys.length <= max) return { take: buys, until: null };
+  let n = max;
+  while (n < buys.length && buys[n]!.block === buys[n - 1]!.block) n++;
+  return n < buys.length ? { take: buys.slice(0, n), until: buys[n - 1]!.block } : { take: buys, until: null };
+}
+
 /** Checks for new buys and posts them. Returns how many it posted. Never throws. */
 export async function pollBuys(groupId: number, force = false): Promise<number> {
   if (!buyAlertsOn()) return 0;
@@ -118,27 +132,34 @@ export async function pollBuys(groupId: number, force = false): Promise<number> 
     ]);
     if (!outs || !ins) return 0;
     // net per transaction: an arbitrage moves $GLOAM in and out of the pools at once and is not a buy
-    const net = new Map<string, number>();
-    for (const l of outs) net.set(l.transactionHash, (net.get(l.transactionHash) ?? 0) + Number(BigInt(l.data)) / 1e18);
-    for (const l of ins) if (net.has(l.transactionHash)) net.set(l.transactionHash, net.get(l.transactionHash)! - Number(BigInt(l.data)) / 1e18);
-    const byTx = new Map([...net].filter(([, a]) => a > 0.01));
+    const net = new Map<string, { amount: number; block: number }>();
+    for (const l of outs) {
+      const cur = net.get(l.transactionHash);
+      net.set(l.transactionHash, { amount: (cur?.amount ?? 0) + Number(BigInt(l.data)) / 1e18, block: parseInt(l.blockNumber, 16) });
+    }
+    for (const l of ins) {
+      const cur = net.get(l.transactionHash);
+      if (cur) cur.amount -= Number(BigInt(l.data)) / 1e18;
+    }
+    const found = pickBuys([...net].filter(([, v]) => v.amount > 0.01).map(([tx, v]) => ({ tx, ...v })), MAX_POSTS);
     let posted = 0;
-    if (byTx.size) {
+    if (found.take.length) {
       const topic = buysTopic();
       const m = await market();
       const price = m?.price ?? null;
       const floor = minUsd();
-      const buys: Buy[] = [];
-      for (const [tx, amount] of byTx) {
+      for (const { tx, amount } of found.take) {
         const usd = price !== null ? amount * price : null;
         if (usd !== null && usd < floor) continue;
         const t = await rpc<{ from: string }>("eth_getTransactionByHash", [tx]);
-        buys.push({ amount, usd, buyer: t?.from ?? "0x0000000000000000000000000000000000000000", tx, price, marketCap: m?.marketCap ?? null });
+        const b: Buy = { amount, usd, buyer: t?.from ?? "0x0000000000000000000000000000000000000000", tx, price, marketCap: m?.marketCap ?? null };
+        if (await sendMessage(groupId, buyText(b), { threadId: topic })) posted++;
       }
-      for (const b of buys.slice(0, MAX_POSTS)) if (await sendMessage(groupId, buyText(b), { threadId: topic })) posted++;
-      if (buys.length > MAX_POSTS) {
-        await sendMessage(groupId, `And ${buys.length - MAX_POSTS} more buys just now.\n\nChart: ${GLOAM_TOKEN.chart}`, { threadId: topic });
-      }
+    }
+    // with buys left over, the next check starts right after the last block posted
+    if (found.until !== null) {
+      await setBuysLastBlock(found.until);
+      return posted;
     }
     await setBuysLastBlock(to);
     return posted;
