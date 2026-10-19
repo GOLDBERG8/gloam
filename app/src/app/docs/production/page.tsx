@@ -16,7 +16,7 @@ export default function DocsProductionPage() {
       lede="Testnet is live. Mainnet and real money wait on this checklist, we will not skip it."
       glance={[
         { label: "Today", value: "Testnet + dev keys" },
-        { label: "Keys", value: "Dev ceremony" },
+        { label: "Ceremony", value: "Done, 13 people" },
         { label: "Audit", value: "Required" },
         { label: "Mainnet", value: "Blocked" },
       ]}
@@ -24,8 +24,10 @@ export default function DocsProductionPage() {
       <h2>Why this page exists</h2>
       <p>
         The app proves shield, unshield, and private send in the browser. That is
-        real cryptography, and still <strong>not</strong> production-safe while
-        the proving keys come from a development trusted setup.
+        real cryptography. Testnet still runs on development keys, which are{" "}
+        <strong>not</strong> production-safe. The production trusted setup is
+        done (see the <a href="https://github.com/cryptoduke01/gloam/releases/tag/ceremony-final">transcript</a>), and its keys go
+        in with mainnet.
       </p>
 
       <FlowDiagram
@@ -33,8 +35,8 @@ export default function DocsProductionPage() {
         steps={[
           {
             n: "1",
-            title: "Production ceremony",
-            body: "Multi-party Powers of Tau + circuit-specific contribution. Publish transcripts. Replace app zkeys and redeploy verifiers.",
+            title: "Production ceremony (done)",
+            body: "Done 17 October: the public Hermez Powers of Tau, then 13 contributions to the six mainnet circuits, sealed with drand round 6561386. Transcript public. Next: the app's zkeys and the verifiers switch to these keys for mainnet.",
           },
           {
             n: "2",
@@ -56,10 +58,10 @@ export default function DocsProductionPage() {
 
       <h2>Ceremony checklist (keys)</h2>
       <ul>
-        <li>Document phase-1 ptau source (or re-run public Powers of Tau)</li>
+        <li>Done: phase 1 is the public Hermez Powers of Tau (54 contributors)</li>
         <li>
-          Phase-2 contributions for unshield + transfer + sealed swap circuits
-          with public logs
+          Done: phase 2, 13 contributions to shield, unshield, transfer,
+          solvency, receipt and payroll_total, each round a public release
         </li>
         <li>Export new <code>*.zkey</code> + Solidity verifiers; match public inputs layout v2</li>
         <li>Update SHA-256 fingerprints in <code>circuitArtifacts.ts</code></li>

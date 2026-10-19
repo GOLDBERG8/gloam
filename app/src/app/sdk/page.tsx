@@ -551,8 +551,8 @@ export default function SdkPage() {
                   body: "Live on Robinhood Chain testnet and Tempo Moderato, with play money.",
                 },
                 {
-                  title: "Development keys",
-                  body: "Proofs use keys from a development ceremony. A production ceremony and an external audit come before mainnet.",
+                  title: "Keys",
+                  body: "Testnet proofs use development keys. The production ceremony is done, with 13 contributors, and mainnet uses its final keys. An external audit comes before mainnet.",
                 },
                 {
                   title: "Nothing faked",

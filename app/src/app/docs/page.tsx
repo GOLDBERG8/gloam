@@ -32,7 +32,9 @@ export default function DocsOverviewPage() {
       </p>
       <p>
         Right now everything is <strong>testnet</strong>, play money,{" "}
-        <strong>development proving keys</strong>. No real dollars.
+        <strong>development proving keys</strong>. No real dollars. The
+        production trusted setup is done, with 13 contributors, and its final
+        keys go live with mainnet.
       </p>
 
       <PoolPicture title="One picture" />

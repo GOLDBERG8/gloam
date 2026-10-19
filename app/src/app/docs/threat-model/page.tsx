@@ -188,8 +188,9 @@ export default function DocsThreatModelPage() {
       <h2 id="gaps">Known gaps</h2>
       <ul>
         <li>
-          <strong>Dev-ceremony keys.</strong> Testnet proving keys had one contributor.
-          Mainnet waits on a multi-party ceremony.
+          <strong>Dev-ceremony keys on testnet.</strong> Testnet proving keys had one
+          contributor. The multi-party ceremony for mainnet is done, with 13
+          contributors, and mainnet uses its keys.
         </li>
         <li>
           <strong>Internal audits only.</strong> Several internal rounds, with fixes

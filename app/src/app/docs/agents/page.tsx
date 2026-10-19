@@ -402,8 +402,9 @@ const hash = await wallet.writeContract({
         No fabricated fills, ever. If a private path is not live, the tool says so
         and returns a plan rather than a fake success. Sealed swaps are currently
         disabled pending the H1 solvency work; shield, private send, cash out, and
-        disclosure are live and proof-gated. Testnet only, with dev-ceremony keys,
-        until a production ceremony and an external audit.
+        disclosure are live and proof-gated. Testnet runs on dev-ceremony keys.
+        The production ceremony is done, and its keys ship with mainnet after an
+        external audit.
       </p>
     </DocsLayout>
   );

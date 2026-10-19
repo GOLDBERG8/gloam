@@ -83,7 +83,7 @@ const NETWORK_PROP = {
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true } as const;
 
 const STATUS =
-  "Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Development proving keys, not a production ceremony. Private trade (sealed swaps) is paused until its solvency accounting lands.";
+  "Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Testnet proofs use development keys; the production ceremony is done (13 contributors) and its keys ship with mainnet. Private trade (sealed swaps) is paused until its solvency accounting lands.";
 
 const WHAT_IS_PUBLIC =
   "Deposits and cash outs are public transactions (wallet, asset and amount show on chain). What stays private is everything in between: balances inside the vault, the amounts and parties of private sends, and the link between a deposit and a later cash out.";

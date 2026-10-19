@@ -596,9 +596,10 @@ export default function VerifyPage() {
             <div>
               <h2 className="t-display-l max-w-[10ch]">No middlemen</h2>
               <p className="mt-5 max-w-[34ch] text-[15px] leading-relaxed text-mute">
-                Testnet with play money. Proofs use keys from a development
-                ceremony. A production ceremony and an external audit come before
-                mainnet.
+                Testnet with play money, so testnet proofs still use development
+                keys. The production trusted setup closed on 17 October with 13
+                contributors, and mainnet uses its final keys. An external audit
+                comes before mainnet.
               </p>
             </div>
             <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">

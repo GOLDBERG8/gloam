@@ -136,7 +136,7 @@ export default function DocsPrivatePayPage() {
       </ul>
       <p>What still gates a full Zcash-class experience:</p>
       <ul>
-        <li>Production trusted setup (not dev zkeys)</li>
+        <li>Mainnet on the production keys (the trusted setup itself is done)</li>
         <li>Stronger public-input privacy on trade rates / pair</li>
         <li>Anonymity set / usage</li>
         <li>Audit before real money</li>

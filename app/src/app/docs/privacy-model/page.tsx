@@ -318,8 +318,10 @@ export default function DocsPrivacyPage() {
       </p>
       <ul>
         <li>
-          <strong>Dev-ceremony proving keys.</strong> The testnet setup had a
-          single contributor. Mainnet needs a multi-party trusted setup.
+          <strong>Dev-ceremony proving keys on testnet.</strong> The testnet
+          setup had a single contributor. The multi-party trusted setup for
+          mainnet closed on 17 October with 13 contributors, and those keys go
+          live with mainnet.
         </li>
         <li>
           <strong>Internal audits only.</strong> Several rounds, with fixes

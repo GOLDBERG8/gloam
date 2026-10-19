@@ -152,9 +152,10 @@ export default function DocsNetworksPage() {
 
       <h2>Honest status</h2>
       <p>
-        Both deployments are testnet with play money. The proving keys are a
-        development ceremony. A production multi-party ceremony and an external
-        audit are the gate before any mainnet, on either chain. The contracts
+        Both deployments are testnet with play money, and testnet proving keys
+        come from a development ceremony. The production multi-party ceremony
+        closed on 17 October with 13 contributors, and mainnet on both chains
+        uses its keys. An external audit is the remaining gate. The contracts
         were self-reviewed across two multi-agent audit passes, the findings
         fixed, and the hardened pools redeployed on both chains.
       </p>

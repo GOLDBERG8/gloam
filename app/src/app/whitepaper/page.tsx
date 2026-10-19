@@ -332,8 +332,9 @@ export default function WhitepaperPage() {
         BN254, generated in the browser with snarkjs 0.7.5 and checked by
         on-chain verifiers. The trusted setup used on testnet is a
         single-contributor dev ceremony: its keys must not be treated as a
-        production setup, and a multi-party ceremony is required before
-        mainnet.
+        production setup. The multi-party ceremony for mainnet closed on 17
+        October 2026 with 13 contributors, sealed with drand round 6561386, and
+        mainnet uses its keys.
       </p>
       <p>
         Public-input layouts are versioned. Shield binds commitment, amount,
@@ -609,7 +610,7 @@ export default function WhitepaperPage() {
           Smart contract and circuit bugs: audits so far are internal, with no
           external audit yet
         </li>
-        <li>Development proving keys from a single-contributor dev ceremony</li>
+        <li>Testnet runs on development proving keys from a single-contributor dev ceremony (mainnet uses the 13-contributor keys)</li>
         <li>
           Rule changes, including verifier swaps, by a single owner wallet,
           limited by a public 3-day delay

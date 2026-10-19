@@ -243,9 +243,9 @@ export default function DocsComparePage() {
       <h2 id="behind">Where Gloam is behind</h2>
       <ul>
         <li>
-          <strong>Testnet only.</strong> Proving keys come from a
-          single-contributor dev ceremony. A multi-party ceremony comes before
-          real money.
+          <strong>Testnet only, for now.</strong> Testnet keys come from a
+          single-contributor dev ceremony. The multi-party ceremony for mainnet
+          is done, with 13 contributors.
         </li>
         <li>
           <strong>Internal audits only.</strong> Two rounds, with fixes
