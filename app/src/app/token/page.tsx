@@ -44,7 +44,7 @@ const USES = [
   {
     n: "02",
     title: "Buybacks",
-    body: "Gloam earns from private payments, payroll runs and API calls. Once fees switch on at mainnet, a share of them buys $GLOAM from the market.",
+    body: "At mainnet, deposits and private payments are free and cash-outs carry a 0.25% fee. A share of those fees buys $GLOAM from the market.",
     when: "Starts when fees go live",
   },
   {

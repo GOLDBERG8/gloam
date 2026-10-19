@@ -4,17 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatUnits, type Hex } from "viem";
-import { useWriteContract } from "wagmi";
+import { useReadContract, useWriteContract } from "wagmi";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { shortAddress } from "@/lib/chain";
-import { useAppAccount, useAppTxReceipt, useAppWriteContract } from "@/lib/demo";
+import { useAppAccount, useAppTxReceipt, useAppWriteContract, useDemo } from "@/lib/demo";
 import { shieldTokensFor } from "@/lib/tokens";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient } from "@/lib/rhClient";
-import { HASH_SCHEME, gasFor, SHIELD_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
+import { HASH_SCHEME, gasFor, SHIELD_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
   claimNoteId,
   isClaimedNote,
@@ -115,6 +115,9 @@ type PayStyle = "direct" | "bearer";
  * Move = direct pay-to-tag + bearer tickets + cash out.
  * Never uses a public 0x as the private path.
  */
+/** Testnet pools carry no cash-out fee; every other network must report its fee first. */
+const TESTNET_CHAIN_IDS = new Set<number>([46630, 42431]);
+
 export function MoveView() {
   const shieldLive = isShieldDeployed();
   const poseidonMode = HASH_SCHEME === "poseidon";
@@ -601,6 +604,22 @@ export function MoveView() {
     mode === "cashout" ? cashOutAsset : null
   );
   const cashOutAmount = selected ? BigInt(selected.amountWei) : 0n;
+  // Cash-out fee (mainnet pools). The proof still spends the whole note; the
+  // pool keeps the fee and pays the rest. Older pools fail this read: no fee.
+  const demoMode = useDemo();
+  const { data: feeBpsRead } = useReadContract({
+    address: network.pool ?? undefined,
+    abi: shieldPoolAbi,
+    functionName: "withdrawFeeBps",
+    chainId: network.chainId,
+    query: { enabled: Boolean(network.pool) && mode === "cashout" && !demoMode, refetchInterval: 60_000 },
+  });
+  const cashOutFeeBps = typeof feeBpsRead === "number" ? feeBpsRead : 0;
+  // On mainnet the fee must be known before anyone confirms: a failed read must
+  // not show the full amount when the pool will keep a fee. Testnet pools have no fee.
+  const cashOutFeeUnknown =
+    mode === "cashout" && !demoMode && !TESTNET_CHAIN_IDS.has(network.chainId) && typeof feeBpsRead !== "number";
+  const cashOutFee = withdrawFeeOf(cashOutAmount, cashOutFeeBps);
   const cashOutInventoryShort =
     mode === "cashout" &&
     selected != null &&
@@ -1839,11 +1858,17 @@ export function MoveView() {
                         You get, in your connected wallet
                       </p>
                       <p className="tnum mt-2.5 truncate text-[32px] font-light leading-none tracking-[-0.02em] text-foreground">
-                        {formatAssetAmount(selected.amountWei, selected.asset)}{" "}
+                        {formatAssetAmount(cashOutAmount - cashOutFee, selected.asset)}{" "}
                         <span className="text-[15px] tracking-normal text-mute">
                           {assetLabel(selected.asset)}
                         </span>
                       </p>
+                      {cashOutFeeBps > 0 && (
+                        <p className="tnum mt-2 text-[12.5px] text-mute">
+                          You receive {formatAssetLabel(cashOutAmount - cashOutFee, selected.asset)} (
+                          {formatFeePercent(cashOutFeeBps)} fee: {formatAssetLabel(cashOutFee, selected.asset)})
+                        </p>
+                      )}
                       <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3 text-[13px]">
                         <span className="text-mute">
                           In the vault ({assetLabel(selected.asset)})
@@ -1886,7 +1911,8 @@ export function MoveView() {
                         treeLoading ||
                         working ||
                         selected?.leafIndex == null ||
-                        cashOutInventoryShort
+                        cashOutInventoryShort ||
+                        cashOutFeeUnknown
                       }
                       onClick={() => void onCashOut()}
                       className="btn btn-ink btn-lg btn-block"
@@ -1898,6 +1924,8 @@ export function MoveView() {
                         </>
                       ) : cashOutInventoryShort ? (
                         "Not enough in the vault yet"
+                      ) : cashOutFeeUnknown ? (
+                        "Loading the cash-out fee…"
                       ) : (
                         "Cash out to my wallet"
                       )}

@@ -29,10 +29,15 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *   export LIMIT_ASSETS=0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168,0xDcD885F5c60b3aD49F6D58718696417314e8724d
  *   export LIMIT_PER_DEPOSIT=500000000,25000000000000000000000      # 500 USDG; 25,000 GLOAM (5% of supply)
  *   export LIMIT_TOTAL=25000000000,250000000000000000000000         # 25,000 USDG; 250,000 GLOAM (half of supply)
+ *   # Cash-out fee: deposits and private transfers are free, unshield keeps this share of the
+ *   # amount for FEE_RECIPIENT (paid out by collectFees(asset)). Capped at 100 bps (1%) in the contract.
+ *   # Leave FEE_RECIPIENT unset to launch with the fee off; turning it on later takes the 3-day timelock.
+ *   export WITHDRAW_FEE_BPS=25          # 0.25%; this is the default when unset
+ *   export FEE_RECIPIENT=0x...          # fee collector (e.g. the treasury multisig)
  *   export NEW_OWNER=0x...              # optional: multisig; it must call acceptOwnership()
  *
  * Run (Robinhood Chain is an Arbitrum chain with no special gas cap; the pool
- * is about 10.4 KB of code, well under the 24 KB limit):
+ * is about 11.9 KB of code, well under the 24 KB limit):
  *   forge script script/DeployRobinhoodMainnet.s.sol:DeployRobinhoodMainnet --rpc-url $RPC_URL --broadcast
  *
  * After: record the pool address and deploy block in app/src/lib/networks.ts.
