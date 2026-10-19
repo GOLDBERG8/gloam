@@ -149,12 +149,6 @@ export async function deleteMessage(chatId: number, messageId: number): Promise<
   return (await call("deleteMessage", { chat_id: chatId, message_id: messageId })).ok;
 }
 
-/** Opens a forum topic and returns its thread id, or null. Needs the Manage topics right. */
-export async function createForumTopic(chatId: number, name: string): Promise<number | null> {
-  const r = await call<{ message_thread_id: number }>("createForumTopic", { chat_id: chatId, name });
-  return r.ok && r.result ? r.result.message_thread_id : null;
-}
-
 /**
  * Removes someone from the group and keeps them out, deleting what they posted
  * there. Works only while the bot is an admin with Ban users. An admin can

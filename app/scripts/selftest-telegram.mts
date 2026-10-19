@@ -1045,13 +1045,6 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   assert.equal(sends().length, 0, "no welcome for it");
 });
 
-await test("buy alerts: one post per buy, spaced, with the value and the explorer link", async () => {
-  const { buyText } = await import("../src/lib/telegramBot/buys");
-  const t = buyText({ amount: 1129.48, usd: 248.48, buyer: "0x18f93000000000000000000000000000000a3c2c", tx: "0xabc" });
-  assert.equal(t, "New $GLOAM buy\n\n1,129 GLOAM, about $248\nBuyer 0x18f9...3c2c\n\nrobin.etherscan.io/tx/0xabc");
-  assert.ok(buyText({ amount: 45.5, usd: 10.01, buyer: "0x0000000000000000000000000000000000000001", tx: "0x1" }).includes("about $10.01"));
-});
-
 await test("answers are limited per person; past the limit it stays quiet", async () => {
   reset();
   const pia = user(37, "Pia");
