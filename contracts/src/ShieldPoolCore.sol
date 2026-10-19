@@ -25,8 +25,8 @@ interface IERC20 {
  * Owner powers (no-middlemen hardening):
  *  - The owner has NO function that moves user funds. There is no emergencyWithdraw;
  *    notes leave the pool only through proof-gated unshield(). sweepStrayNative()
- *    can only take native currency above deposited[address(0)], i.e. ETH sent
- *    straight to receive() that backs no note.
+ *    can only take native currency above deposited[address(0)] + feesOwed[address(0)],
+ *    i.e. ETH sent straight to receive() that backs no note and is no owed fee.
  *  - Every setter that affects proof validity or asset flows is instant only
  *    during setup mode. After endSetup() it must go through ChangeTimelock:
  *    queueChange -> CHANGE_DELAY (3 days) public notice -> executeChange.
@@ -35,6 +35,14 @@ interface IERC20 {
  *    asset with no limit cannot be deposited at all. The owner can LOWER a limit
  *    instantly (down to zero, which closes deposits for that asset); raising one
  *    goes through the timelock. Limits never touch transfers or withdrawals.
+ *  - Cash-out fee (mainnet): deposits and private transfers are free; unshield()
+ *    keeps withdrawFeeBps of the proven amount (rounded down, capped at
+ *    MAX_WITHDRAW_FEE_BPS = 1%) in the pool as feesOwed[asset]. Anyone can call
+ *    collectFees(asset) to send it to feeRecipient; unshield never calls the
+ *    recipient, so a frozen or reverting recipient cannot block a withdrawal.
+ *    Off (0 bps, no recipient) by default. Set instantly in setup, then only
+ *    through the timelock; lowering or turning it off is instant.
+ *    Invariant: balance(asset) >= deposited[asset] + feesOwed[asset].
  */
 abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
     using IMT for IMT.Tree;
@@ -76,6 +84,18 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
     ///         reliance on CEI + STATICCALL-only view calls holding under future edits.
     uint256 private _entered;
 
+    /// @notice Cash-out fee receiver. address(0) means the fee is off.
+    address public feeRecipient;
+    /// @notice Cash-out fee in basis points of the unshielded amount. 0 means off.
+    uint16 public withdrawFeeBps;
+    /// @notice Cash-out fees held in the pool per asset, waiting for collectFees().
+    ///         Kept apart from deposited[]: they back no note.
+    mapping(address => uint256) public feesOwed;
+
+    /// @notice Hard cap on the cash-out fee: 100 bps = 1%.
+    uint16 public constant MAX_WITHDRAW_FEE_BPS = 100;
+    uint256 private constant BPS = 10_000;
+
     uint256 public constant PROOF_LAYOUT_VERSION = 2;
     string public constant HASH_SCHEME = "poseidon";
 
@@ -86,6 +106,11 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
     event StrayNativeSwept(address indexed to, uint256 amount);
     event DepositLimitsOn();
     event DepositLimitSet(address indexed asset, uint128 perDeposit, uint128 total);
+    event WithdrawFeeSet(uint16 bps, address indexed recipient);
+    /// @notice Emitted by unshield() when a fee is kept, next to Unshielded (whose
+    ///         amount stays the full proven amount; `to` received amount - fee).
+    event WithdrawFee(bytes32 indexed nullifier, address indexed asset, uint256 fee);
+    event FeesCollected(address indexed asset, address indexed recipient, uint256 amount);
 
     error NotOwner();
     error NotPendingOwner();
@@ -108,6 +133,9 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
     error NothingToSweep();
     error OverDepositLimit();
     error LimitNotLower();
+    error FeeTooHigh();
+    error FeeNotLower();
+    error NothingToCollect();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -181,6 +209,20 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
         _setDepositLimit(asset, perDeposit, total);
     }
 
+    /// @notice Set the cash-out fee and who collects it. Instant in setup; after
+    ///         it, queue it. bps is capped at MAX_WITHDRAW_FEE_BPS, and a non-zero
+    ///         fee needs a recipient. (0, address(0)) turns the fee off.
+    function setWithdrawFee(uint16 bps, address recipient) external onlyOwner onlySetup {
+        _setWithdrawFee(bps, recipient);
+    }
+
+    /// @notice Lower the cash-out fee at once, with no timelock, down to 0 (off).
+    ///         Cannot raise it or change the recipient, so owed fees stay collectable.
+    function lowerWithdrawFee(uint16 bps) external onlyOwner {
+        if (bps > withdrawFeeBps) revert FeeNotLower();
+        _setWithdrawFee(bps, feeRecipient);
+    }
+
     function _setVerifier(address verifier_) internal {
         verifier = IVerifier(verifier_);
         emit VerifierSet(verifier_);
@@ -198,6 +240,14 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
         emit DepositLimitSet(asset, perDeposit, total);
     }
 
+    function _setWithdrawFee(uint16 bps, address recipient) internal {
+        if (bps > MAX_WITHDRAW_FEE_BPS) revert FeeTooHigh();
+        if (bps != 0 && recipient == address(0)) revert ZeroAddress();
+        withdrawFeeBps = bps;
+        feeRecipient = recipient;
+        emit WithdrawFeeSet(bps, recipient);
+    }
+
     // ── ChangeTimelock hooks ────────────────────────────────────────────────
 
     function _checkOwner() internal view override {
@@ -210,6 +260,7 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
         if (selector == ShieldPoolCore.setVerifier.selector) return 1;
         if (selector == ShieldPoolCore.setShieldVerifier.selector) return 1;
         if (selector == ShieldPoolCore.setDepositLimit.selector) return 3;
+        if (selector == ShieldPoolCore.setWithdrawFee.selector) return 2;
         return 0;
     }
 
@@ -222,6 +273,9 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
         } else if (selector == ShieldPoolCore.setDepositLimit.selector) {
             (address asset, uint128 per, uint128 total) = abi.decode(args, (address, uint128, uint128));
             _setDepositLimit(asset, per, total);
+        } else if (selector == ShieldPoolCore.setWithdrawFee.selector) {
+            (uint16 bps, address recipient) = abi.decode(args, (uint16, address));
+            _setWithdrawFee(bps, recipient);
         } else {
             revert UnknownChange();
         }
@@ -247,18 +301,33 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
     /// @notice Recover native currency that was sent directly (via receive()) and is
     ///         not backing any shielded note. Audit INFO-1: such ETH is otherwise
     ///         permanently stuck, since unshield only pays proof-bound notes. Only
-    ///         the surplus over deposited[address(0)] is sweepable, so shielded
-    ///         native balances are never touched. This is the owner's only
-    ///         value-moving function and it cannot reach note-backing funds.
+    ///         the surplus over deposited[address(0)] + feesOwed[address(0)] is
+    ///         sweepable, so shielded native balances and owed fees are never
+    ///         touched. This is the owner's only value-moving function and it
+    ///         cannot reach note-backing funds.
     function sweepStrayNative(address to) external onlyOwner nonReentrant {
         if (to == address(0)) revert ZeroAddress();
-        uint256 backed = deposited[address(0)];
+        uint256 backed = deposited[address(0)] + feesOwed[address(0)];
         uint256 bal = address(this).balance;
         if (bal <= backed) revert NothingToSweep();
         uint256 surplus = bal - backed;
         (bool ok, ) = to.call{value: surplus}("");
         if (!ok) revert TransferFailed();
         emit StrayNativeSwept(to, surplus);
+    }
+
+    /// @notice Send an asset's owed cash-out fees to feeRecipient. Anyone may call
+    ///         it; the destination is fixed. It moves only feesOwed[asset], never
+    ///         note-backing funds. If the recipient cannot receive (e.g. frozen by
+    ///         the token issuer) this reverts and the fees stay owed in the pool.
+    function collectFees(address asset) external nonReentrant {
+        address recipient = feeRecipient;
+        if (recipient == address(0)) revert ZeroAddress();
+        uint256 amount = feesOwed[asset];
+        if (amount == 0) revert NothingToCollect();
+        feesOwed[asset] = 0;
+        _pushAsset(asset, recipient, amount);
+        emit FeesCollected(asset, recipient, amount);
     }
 
     function nextIndex() external view returns (uint256) {
@@ -383,10 +452,24 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
         spent[nullifier] = true;
 
         if (deposited[asset] < amount) revert InsufficientPoolBalance();
+        // The proof binds the full `amount`; the note is spent in full. The fee
+        // stays in the pool as feesOwed (no call to the recipient here), and `to`
+        // gets the rest. fee < amount always, since bps <= 1%.
+        uint256 fee = _withdrawFee(amount);
         deposited[asset] -= amount;
-        _pushAsset(asset, to, amount);
+        if (fee != 0) feesOwed[asset] += fee;
+        _pushAsset(asset, to, amount - fee);
 
         emit Unshielded(nullifier, asset, to, amount);
+        if (fee != 0) emit WithdrawFee(nullifier, asset, fee);
+    }
+
+    /// @dev floor(amount * bps / 10_000), rounding in the user's favour, split so
+    ///      it cannot overflow for any amount. 0 while the fee is off.
+    function _withdrawFee(uint256 amount) internal view returns (uint256) {
+        uint256 bps = withdrawFeeBps;
+        if (bps == 0 || feeRecipient == address(0)) return 0;
+        return (amount / BPS) * bps + ((amount % BPS) * bps) / BPS;
     }
 
     function _requireTransferProof(

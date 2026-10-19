@@ -22,10 +22,18 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *   export LIMIT_ASSETS=0xA,0xB         # stablecoins to list (TIP-20 addresses); Tempo has no native coin
  *   export LIMIT_PER_DEPOSIT=500000000,500000000      # raw units (6 decimals: 500 = 500000000)
  *   export LIMIT_TOTAL=25000000000,25000000000        # raw units per asset
+ *   # Cash-out fee: deposits and private transfers are free, unshield keeps this share of the
+ *   # amount for FEE_RECIPIENT (paid out by collectFees(asset)). Capped at 100 bps (1%) in the contract.
+ *   # Leave FEE_RECIPIENT unset to launch with the fee off; turning it on later takes the 3-day timelock.
+ *   # A frozen FEE_RECIPIENT never blocks withdrawals; fees just wait in the pool until it can receive.
+ *   export WITHDRAW_FEE_BPS=25          # 0.25%; this is the default when unset
+ *   export FEE_RECIPIENT=0x...          # fee collector (e.g. the treasury multisig)
  *   export NEW_OWNER=0x...              # optional: multisig; it must call acceptOwnership()
  *
- * Run (Tempo caps a tx at 30M gas; the pool estimates ~23.2M, so keep the
- * multiplier at or under 125; forge's default 130 is too high):
+ * Run (Tempo caps a tx at 30M gas and meters code at about 1,100 gas per byte.
+ * The pool was ~23.2M at 10.4 KB; the cash-out fee adds ~1.5 KB, so expect about
+ * 24.9M. Keep the multiplier at or under 120; forge's default 130 is too high.
+ * Check the dry run's estimate before broadcasting):
  *   forge script script/DeployTempoMainnet.s.sol:DeployTempoMainnet --rpc-url $RPC_URL \
  *     --broadcast --gas-estimate-multiplier 115
  *

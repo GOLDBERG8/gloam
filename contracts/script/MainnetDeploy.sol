@@ -16,11 +16,18 @@ import {DualProofVerifier} from "../src/verifiers/DualProofVerifier.sol";
  * same pool wired the same way: the Groth16 verifiers and their adapters, the
  * DualProofVerifier, ShieldPoolPayments (no sealed swap), the shield verifier
  * (deposits need shieldBound()), deposit limits on with each listed asset,
- * an optional handoff to a multisig owner, and endSetup() last.
+ * the cash-out fee, an optional handoff to a multisig owner, and endSetup() last.
  *
  * After endSetup the owner can lower a limit at once (lowerDepositLimit, down
  * to 0/0 to close deposits) but raising one or listing a new asset takes the
  * 3-day timelock. Withdrawals and private transfers are never limited.
+ *
+ * Cash-out fee: deposits and private transfers are free; unshield keeps
+ * WITHDRAW_FEE_BPS of the amount in the pool for FEE_RECIPIENT, who is paid by
+ * collectFees(asset) (anyone may call it). The contract caps it at 100 bps (1%).
+ * After endSetup the fee can be lowered at once (lowerWithdrawFee) but raising
+ * it or changing the recipient takes the 3-day timelock, so if FEE_RECIPIENT is
+ * left unset the pool launches with the fee off.
  *
  * Environment (read by every chain's script):
  *   DEPLOYER_PK          funded deployer
@@ -29,6 +36,8 @@ import {DualProofVerifier} from "../src/verifiers/DualProofVerifier.sol";
  *   LIMIT_ASSETS         assets to list, comma separated (0x0 means the chain's native coin, where allowed)
  *   LIMIT_PER_DEPOSIT    per-deposit limit for each, raw units, same order
  *   LIMIT_TOTAL          total limit for each, raw units, same order
+ *   WITHDRAW_FEE_BPS     cash-out fee in basis points, default 25 (0.25%), max 100 (1%)
+ *   FEE_RECIPIENT        who collects cash-out fees; unset means the fee stays OFF
  *   NEW_OWNER            optional multisig; it must call acceptOwnership() afterwards
  */
 abstract contract MainnetDeploy is Script {
@@ -54,6 +63,7 @@ abstract contract MainnetDeploy is Script {
         require(poseidon2.code.length > 0, "POSEIDON2 has no code on this chain");
         address newOwner = vm.envOr("NEW_OWNER", address(0));
         Limits memory lim = _readLimits(allowNative);
+        (uint16 feeBps, address feeRecipient) = _readWithdrawFee();
 
         vm.startBroadcast(pk);
         (address dual, address shieldI) = _deployVerifiers();
@@ -62,6 +72,9 @@ abstract contract MainnetDeploy is Script {
         pool.turnOnDepositLimits();
         for (uint256 i = 0; i < lim.assets.length; i++) {
             pool.setDepositLimit(lim.assets[i], uint128(lim.perDeposit[i]), uint128(lim.total[i]));
+        }
+        if (feeRecipient != address(0)) {
+            pool.setWithdrawFee(feeBps, feeRecipient);
         }
         if (newOwner != address(0)) {
             pool.transferOwnership(newOwner);
@@ -93,6 +106,18 @@ abstract contract MainnetDeploy is Script {
         }
     }
 
+    /// @dev WITHDRAW_FEE_BPS (default 25) and FEE_RECIPIENT. No recipient: fee off.
+    function _readWithdrawFee() internal view returns (uint16 bps, address recipient) {
+        uint256 raw = vm.envOr("WITHDRAW_FEE_BPS", uint256(25));
+        require(raw <= 100, "WITHDRAW_FEE_BPS above the 100 bps (1%) cap");
+        bps = uint16(raw);
+        recipient = vm.envOr("FEE_RECIPIENT", address(0));
+        if (recipient == address(0)) {
+            console2.log("FEE_RECIPIENT unset: cash-out fee left OFF (0 bps). Turning it on later takes the 3-day timelock.");
+            bps = 0;
+        }
+    }
+
     function _deployVerifiers() internal returns (address dual, address shieldI) {
         ShieldIVerifier s = new ShieldIVerifier(new ShieldVerifier());
         UnshieldIVerifier u = new UnshieldIVerifier(new UnshieldVerifier());
@@ -115,6 +140,8 @@ abstract contract MainnetDeploy is Script {
         console2.log("ShieldIVerifier", shieldI);
         console2.log("depositLimitsOn (must be true)", pool.depositLimitsOn());
         console2.log("setupMode (must be false)", pool.setupMode());
+        console2.log("withdrawFeeBps", uint256(pool.withdrawFeeBps()));
+        console2.log("feeRecipient", pool.feeRecipient());
         for (uint256 i = 0; i < assets.length; i++) {
             (uint128 per, uint128 cap) = pool.depositLimit(assets[i]);
             console2.log("listed", assets[i]);
