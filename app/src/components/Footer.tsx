@@ -174,7 +174,15 @@ export function Footer() {
             </div>
           </div>
 
-          <div className="mt-12 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          {/* the official contract on every page, so anyone can check an address against the site */}
+          <p className="mt-12 text-[12.5px] text-mute">
+            $GLOAM contract on Robinhood Chain:{" "}
+            <Link href="/token" className="tnum text-soft [overflow-wrap:anywhere] transition-colors hover:text-foreground">
+              0xDcD885F5c60b3aD49F6D58718696417314e8724d
+            </Link>
+          </p>
+
+          <div className="mt-5 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <p className="text-[12.5px] text-mute">
               © {year} Gloam. Testnet software with play money. Not investment,
               legal or tax advice.
