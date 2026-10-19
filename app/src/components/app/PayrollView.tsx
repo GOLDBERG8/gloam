@@ -26,10 +26,11 @@ import { track } from "@/lib/track";
 import { shieldTokensFor, supportsNativeShield } from "@/lib/tokens";
 import {
   NATIVE_ASSET,
-  SHIELD_GAS_LIMIT,
+  TRANSFER_GAS_LIMIT,
   activeSpendableNotes,
   assetDecimals,
   formatAssetAmount,
+  gasFor,
   shieldPoolAbi,
 } from "@/lib/shield";
 import { MEMO_GAS_LIMIT, isPayMemoLive, payMemoAbi, payMemoAddress } from "@/lib/payMemo";
@@ -552,7 +553,7 @@ export function PayrollView() {
                 abi: shieldPoolAbi,
                 functionName: "transfer",
                 args: [a.proof, a.root, a.nullifier, [a.commitments[0], a.commitments[1]]],
-                gas: SHIELD_GAS_LIMIT,
+                gas: gasFor(network.chainId, TRANSFER_GAS_LIMIT),
                 chainId: network.chainId,
               }),
         submitMemo: memoOn
@@ -564,7 +565,7 @@ export function PayrollView() {
                     abi: payMemoAbi,
                     functionName: "postMemo",
                     args: [m.paymentCommitment, m.memo],
-                    gas: MEMO_GAS_LIMIT,
+                    gas: gasFor(network.chainId, MEMO_GAS_LIMIT),
                     chainId: network.chainId,
                   })
           : null,

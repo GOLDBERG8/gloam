@@ -76,7 +76,8 @@ export async function assertArtifactIntegrity(
   const key = `${path}:${expectedSha256}`;
   if (verified.has(key)) return;
 
-  const res = await fetch(path, { cache: "force-cache" });
+  // revalidate (a 304 when unchanged), so a copy cached before a regeneration can't fail the check forever
+  const res = await fetch(path, { cache: "no-cache" });
   if (!res.ok) {
     throw new Error(`Missing circuit file ${path} (${res.status}).`);
   }

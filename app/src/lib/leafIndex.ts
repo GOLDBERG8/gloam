@@ -238,6 +238,21 @@ async function logsSafe(
   throw last;
 }
 
+/** Every log `address` emitted in [from, to], in range order, split and retried as the node allows. */
+export async function walkLogs(
+  client: PublicClient,
+  address: Address,
+  from: bigint,
+  to: bigint,
+  tuning: WalkTuning
+): Promise<Log[]> {
+  if (from > to) return [];
+  const parts = await mapLimit(ranges(from, to, tuning.span), tuning.parallel, tuning.spacingMs, ([a, b]) =>
+    logsSafe(client, address, a, b, tuning)
+  );
+  return parts.flat();
+}
+
 /** Every insert the pool logged in [from, to], in chain order. */
 export async function walkInserts(
   client: PublicClient,
@@ -246,11 +261,7 @@ export async function walkInserts(
   to: bigint,
   tuning: WalkTuning
 ): Promise<RawInsert[]> {
-  if (from > to) return [];
-  const parts = await mapLimit(ranges(from, to, tuning.span), tuning.parallel, tuning.spacingMs, ([a, b]) =>
-    logsSafe(client, pool, a, b, tuning)
-  );
-  return sortInserts(decodeInserts(parts.flat()));
+  return sortInserts(decodeInserts(await walkLogs(client, pool, from, to, tuning)));
 }
 
 // ------------------------------------------------------------------ wire

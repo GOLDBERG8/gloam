@@ -14,7 +14,7 @@ import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient } from "@/lib/rhClient";
-import { HASH_SCHEME, gasFor, SHIELD_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
+import { HASH_SCHEME, gasFor, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
   claimNoteId,
   isClaimedNote,
@@ -212,6 +212,8 @@ export function MoveView() {
   /** Relay: submit proven actions from the Gloam relay so the wallet never shows. */
   const [relayAvailable, setRelayAvailable] = useState(false);
   const [relayOn, setRelayOn] = useState(false);
+  /** The relay status has loaded for this network; until then nothing is sent, so a quick click can't go out from the wallet. */
+  const [relayChecked, setRelayChecked] = useState(false);
   const [relayHash, setRelayHash] = useState<Hex | undefined>(undefined);
   /** The last confirmed action was a private payment, so success offers the share post. */
   const [paidPrivately, setPaidPrivately] = useState(false);
@@ -320,11 +322,13 @@ export function MoveView() {
 
   useEffect(() => {
     let live = true;
+    setRelayChecked(false);
     void relayFor(network.chainId).then((r) => {
       if (!live) return;
       const ok = Boolean(r?.enabled);
       setRelayAvailable(ok);
       setRelayOn(ok && relayPreferred());
+      setRelayChecked(true);
     });
     return () => {
       live = false;
@@ -882,7 +886,7 @@ export function MoveView() {
             fieldToBytes32(w.publicInputs.newCommitment1),
           ],
         ],
-        gas: gasFor(network.chainId, SHIELD_GAS_LIMIT),
+        gas: gasFor(network.chainId, TRANSFER_GAS_LIMIT),
         chainId: network.chainId,
       });
       setSuccessTitle(
@@ -974,7 +978,7 @@ export function MoveView() {
             abi: shieldPoolAbi,
             functionName: "transfer",
             args: [args[0], args[1], args[2], [args[3][0], args[3][1]]],
-            gas: gasFor(network.chainId, SHIELD_GAS_LIMIT),
+            gas: gasFor(network.chainId, TRANSFER_GAS_LIMIT),
             chainId: network.chainId,
           }),
         onStage: setStatus,
@@ -1786,6 +1790,7 @@ export function MoveView() {
                         !selected ||
                         matchesChain === false ||
                         treeLoading ||
+                        !relayChecked ||
                         working ||
                         (payStyle !== "bearer" && !recipientTag.trim())
                       }
@@ -1909,6 +1914,7 @@ export function MoveView() {
                         !selected ||
                         matchesChain === false ||
                         treeLoading ||
+                        !relayChecked ||
                         working ||
                         selected?.leafIndex == null ||
                         cashOutInventoryShort ||

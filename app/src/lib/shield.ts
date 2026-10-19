@@ -279,6 +279,8 @@ export const shieldPoolAbi = [
 /** RH L2 gas headroom */
 /** Poseidon verify + tree insert, 500k was tight; unshield/transfer need headroom */
 export const SHIELD_GAS_LIMIT = 1_500_000n;
+/** A private transfer verifies a proof and inserts two notes: about 1.75M on Robinhood Chain. */
+export const TRANSFER_GAS_LIMIT = 2_400_000n;
 // shieldBound also verifies a Groth16 proof on-chain (~250k extra).
 export const SHIELD_BOUND_GAS_LIMIT = 1_900_000n;
 /** Sealed swap proof verify is heavier */
@@ -291,7 +293,7 @@ export const APPROVE_GAS_LIMIT = 120_000n;
  * the app's number as-is, so on Tempo the wallet estimates instead.
  */
 export function gasFor(chainId: number, limit: bigint): bigint | undefined {
-  return chainId === 42431 ? undefined : limit;
+  return chainId === 42431 || chainId === 4217 ? undefined : limit;
 }
 
 export function isShieldDeployed(): boolean {

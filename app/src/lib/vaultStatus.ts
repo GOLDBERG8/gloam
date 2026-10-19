@@ -7,8 +7,9 @@ import {
   TESTNET_POSEIDON_POOL,
   LEGACY_POSEIDON_POOL,
 } from "./config";
+import { getActiveNetwork } from "./networks";
 import { getRhPublicClient } from "./rhClient";
-import { SHIELD_POOL_ADDRESS, shieldPoolAbi } from "./shield";
+import { shieldPoolAbi } from "./shield";
 import { readDemo } from "./demoFlag";
 import { demoPoolInventory } from "./demo/chain";
 
@@ -23,7 +24,8 @@ export type VaultReadiness =
   | { status: "offline"; pool: Address | null; reason: string };
 
 export async function readVaultSealedReadiness(): Promise<VaultReadiness> {
-  const pool = SHIELD_POOL_ADDRESS;
+  // the client reads the active network, so the pool must be that network's too
+  const pool = getActiveNetwork().pool;
   if (!pool) {
     return { status: "offline", pool: null, reason: "No vault address in app config." };
   }
@@ -70,7 +72,7 @@ export async function readVaultSealedReadiness(): Promise<VaultReadiness> {
 export async function readPoolDeposited(asset: Address): Promise<bigint | null> {
   // Recording demo: the vault always holds enough to cover the pretend wallet.
   if (readDemo()) return demoPoolInventory(asset);
-  const pool = SHIELD_POOL_ADDRESS;
+  const pool = getActiveNetwork().pool;
   if (!pool) return null;
   try {
     const client = getRhPublicClient();

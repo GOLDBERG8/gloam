@@ -3,7 +3,8 @@
  * After vault transfer, sender posts encrypted ticket; recipient scans logs.
  */
 
-import type { Address, Hex, PublicClient } from "viem";
+import { parseEventLogs, type Address, type Hex, type PublicClient } from "viem";
+import { walkLogs, walkTuning } from "./leafIndex";
 import { getActiveNetwork, type PayMemoBoard } from "./networks";
 import { readDemo } from "./demoFlag";
 import { demoPaymentMemos } from "./demo/chain";
@@ -94,7 +95,10 @@ export async function fetchPaymentMemos(
   if (readDemo()) return demoPaymentMemos();
   const board = activePayMemo();
   if (!board) return [];
-  const fromBlock = fromBlockOverride ?? board.deployBlock;
+  const net = getActiveNetwork();
+  // a memo from before the pool existed can't be for one of its notes, so start at whichever came later
+  const floor = net.deployBlock != null && net.deployBlock > board.deployBlock ? net.deployBlock : board.deployBlock;
+  const fromBlock = fromBlockOverride ?? floor;
   // First deploy indexed the poster too; the fixed board emits only commitment + memo.
   const inputs = board.emitsPoster
     ? ([
@@ -108,36 +112,27 @@ export async function fetchPaymentMemos(
       ] as const);
   const latest = toBlock ?? (await client.getBlockNumber());
   if (latest < fromBlock) return [];
-  const CHUNK = getActiveNetwork().logRange;
+  const raw = await walkLogs(client, board.address, fromBlock, latest, walkTuning(net.chainId, net.logRange));
+  const logs = parseEventLogs({ abi: [{ type: "event", name: "PaymentMemo", inputs }], logs: raw, strict: false });
   const out: ScannedMemo[] = [];
-  for (let start = fromBlock; start <= latest; start += CHUNK) {
-    let end = start + CHUNK - 1n;
-    if (end > latest) end = latest;
-    const logs = await client.getLogs({
-      address: board.address,
-      event: { type: "event", name: "PaymentMemo", inputs },
-      fromBlock: start,
-      toBlock: end,
-    });
-    for (const log of logs) {
-      const args = log.args as {
-        paymentCommitment?: Hex;
-        poster?: Address;
-        memo?: Hex;
-      };
-      if (!args.paymentCommitment || !args.memo) continue;
-      try {
-        out.push({
-          paymentCommitment: args.paymentCommitment,
-          poster: (args.poster ??
-            "0x0000000000000000000000000000000000000000") as Address,
-          ticket: memoBytesToTicket(args.memo),
-          txHash: log.transactionHash as Hex | undefined,
-          blockNumber: log.blockNumber ?? undefined,
-        });
-      } catch {
-        /* skip */
-      }
+  for (const log of logs) {
+    const args = log.args as {
+      paymentCommitment?: Hex;
+      poster?: Address;
+      memo?: Hex;
+    };
+    if (!args.paymentCommitment || !args.memo) continue;
+    try {
+      out.push({
+        paymentCommitment: args.paymentCommitment,
+        poster: (args.poster ??
+          "0x0000000000000000000000000000000000000000") as Address,
+        ticket: memoBytesToTicket(args.memo),
+        txHash: log.transactionHash as Hex | undefined,
+        blockNumber: log.blockNumber ?? undefined,
+      });
+    } catch {
+      /* skip */
     }
   }
   return out.reverse(); // newest first

@@ -539,13 +539,17 @@ export type RelayNetworkStatus = {
 
 /** Relay balance reads kept briefly, so a public status poll is not an RPC call each time. */
 const BALANCE_TTL_MS = 30_000;
+const RELAY_RESERVE_GAS = 2n * 2_400_000n;
 const balances = new Map<number, { at: number; empty: boolean }>();
 
 async function relayEmpty(net: GloamNetwork, account: PrivateKeyAccount): Promise<boolean> {
   const hit = balances.get(net.chainId);
   if (hit && Date.now() - hit.at < BALANCE_TTL_MS) return hit.empty;
   try {
-    const empty = (await relayPublicClient(net).getBalance({ address: account.address })) === 0n;
+    const client = relayPublicClient(net);
+    const [balance, gasPrice] = await Promise.all([client.getBalance({ address: account.address }), client.getGasPrice()]);
+    // empty = can't pay for a couple more private transfers (about 1.8M gas each)
+    const empty = balance < gasPrice * RELAY_RESERVE_GAS;
     balances.set(net.chainId, { at: Date.now(), empty });
     return empty;
   } catch {
