@@ -135,8 +135,10 @@ export function sentencesOf(text: string): string[] {
     .filter(Boolean);
 }
 
-/** Paragraphs this long, or longer, get split into pairs of sentences. */
-const DENSE_WORDS = 30;
+/** Paragraphs this long, or longer, get split up. */
+const DENSE_WORDS = 18;
+/** Sentences this short ride along with the next one. */
+const SHORT_SENTENCE = 8;
 
 /**
  * Breaks dense paragraphs into short ones, two sentences each, with a blank
@@ -149,11 +151,17 @@ export function spaceOut(text: string): string {
     .map((p) => {
       if (/^\s*(?:-|\d+[.)])\s/m.test(p) || p.includes("\n") || wordsIn(p) < DENSE_WORDS) return p;
       const s = sentencesOf(p);
-      if (s.length < 3) return p;
+      if (s.length < 2) return p;
+      // one sentence per paragraph; a short one shares with its neighbour
       const chunks: string[] = [];
-      for (let i = 0; i < s.length; i += 2) chunks.push(s.slice(i, i + 2).join(" "));
-      // a lone short sentence at the end rides with the one before it
-      if (chunks.length > 1 && wordsIn(chunks[chunks.length - 1]!) < 6) chunks.splice(-2, 2, `${chunks[chunks.length - 2]} ${chunks[chunks.length - 1]}`);
+      for (const sentence of s) {
+        const last = chunks[chunks.length - 1];
+        if (last !== undefined && (wordsIn(last) < SHORT_SENTENCE || wordsIn(sentence) < SHORT_SENTENCE / 2) && wordsIn(last) + wordsIn(sentence) <= 22) {
+          chunks[chunks.length - 1] = `${last} ${sentence}`;
+        } else {
+          chunks.push(sentence);
+        }
+      }
       return chunks.join("\n\n");
     })
     .join("\n\n");
@@ -323,6 +331,12 @@ const OFFER_DM =
 const SUPPORT_AT =
   /\b(?:support|help ?desk|customer (?:care|service)|tech(?:nical)? (?:team|support)|admins?|moderators?)\b[^.!?\n]{0,30}?\b(?:on|via|at|in|through)\s+(?:dm|pm|inbox|@\w{3,}|t\.me\/\w+)/i;
 const ASKING = /\b(?:can|could|would|will|pls|plz|please)\s+(?:someone|anyone|somebody|an? (?:admin|mod|moderator)|the team|you)\b/i;
+/** Paid shilling: volume, market cap, exposure, calls, KOLs, listings, offered to the project. */
+const PROMO =
+  /\b(?:trading\s+volume|more\s+volume|volume\s+(?:boost|bot|service)|higher\s+(?:mc|mcap|market\s*cap)|pump\s+(?:your|the)\s+(?:chart|token|coin)|fast\s+exposure|investor\s+reach|real\s+investors?|marketing\s+(?:services?|campaign|package)|promot(?:e|ion)\s+(?:your|the)\s+(?:project|token|coin)|promotion\s+services?|kols?\b|shill(?:ing|ers)?|calls?\s+(?:channel|group)|trending\s+(?:service|spot)|cmc\s+listing|coingecko\s+listing|listing\s+(?:service|agent)|ama\s+(?:service|session\s+with\s+our))\b/i;
+/** Asking to be contacted privately: "DM me", "D.m for collab", "inbox us for details". */
+const DM_ASK =
+  /\b(?:d\.?\s?m|p\.?\s?m|inbox|message|contact|text)\s+(?:me|us)\b|\bhit\s+(?:me|us)\s+up\b|\b(?:d\.?\s?m|p\.?\s?m|inbox)\s+(?:me\s+|us\s+)?(?:for|to)\b|\b(?:d\.?\s?m|p\.?\s?m|inbox)\s+(?:collab\w*|partnership|promo\w*|details|business|deals?|offers?)\b/i;
 /** "All holders DM me", "investors inbox me now", "DM me immediately": a stranger pulling people into private chats. */
 const DM_LURE =
   /\b(?:all\s+)?(?:holders?|investors?|members?|everyone|every\s*one|testers?|users?|community|fam)\b[^.!?\n]{0,30}?\b(?:dm|pm|inbox|message|text|contact)\s+(?:me|us)\b|\b(?:dm|pm|inbox|message)\s+(?:me|us)\s+(?:now|immediately|asap|urgently|quick(?:ly)?|right\s+now|fast)\b/i;
@@ -373,7 +387,7 @@ function askingForHelp(text: string, m: RegExpExecArray): boolean {
   return ASKING.test(around) || (end >= 0 && text[m.index + end] === "?");
 }
 
-export type ScamReason = "secret_request" | "dm_support" | "wallet_fix" | "phishing_link";
+export type ScamReason = "secret_request" | "dm_support" | "wallet_fix" | "phishing_link" | "promo_spam";
 
 /**
  * Obvious scam patterns, conservative on purpose: asking for a seed phrase or
@@ -396,6 +410,9 @@ export function scamReason(raw: string): ScamReason | null {
   }
   const lure = DM_LURE.exec(text);
   if (lure && !negated(text, lure.index, lure[0]) && !askingForHelp(text, lure)) return "dm_support";
+  // a shilling service that wants a private chat
+  const pitches = text.match(new RegExp(PROMO.source, "gi"))?.length ?? 0;
+  if (pitches && DM_ASK.test(text) && (pitches >= 2 || !text.includes("?"))) return "promo_spam";
   const fix = WALLET_FIX.exec(text);
   if (fix && !negated(text, fix.index, fix[0])) return "wallet_fix";
   if (LURE.test(text)) {

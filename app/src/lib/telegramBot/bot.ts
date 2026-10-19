@@ -310,9 +310,8 @@ function cantAnswer(c: BotConfig, name: string, topic: number, kind: Fallback): 
   if (kind === "already") {
     return `This one's already with the team from earlier, ${name}. If anything changed, send the exact error text or a screenshot and I'll take another look.`;
   }
-  const cc = c.admins.length ? ` (${c.admins.map((h) => `@${h}`).join(" ")})` : "";
-  if (topic === TOPIC.help) return `Not going to guess on that one, ${name}. I'll take it to Boss Duke, and an admin will follow up here${cc}.`;
-  return `Not going to guess on that one, ${name}. I'll take it to Boss Duke. Drop it in the Help topic or email hello@gloam.trade, and an admin will follow up${cc}.`;
+  if (topic === TOPIC.help) return `Not going to guess on that one, ${name}. I'll take it to Boss Duke, and an admin will follow up here.`;
+  return `Not going to guess on that one, ${name}. I'll take it to Boss Duke, and an admin will follow up. For anything private, write to hello@gloam.trade.`;
 }
 
 function codeTip(name: string): string {
@@ -465,7 +464,8 @@ async function compose(x: Compose): Promise<{ reply: string | null; sentinel: Se
   if (x.image && sentinel === "secret") return { reply: null, sentinel };
   if (x.image && sentinel === "skip" && (x.input.picture?.mayIgnore || !text)) return { reply: null, sentinel };
   if (!text) return { reply: null, sentinel: null };
-  const handles = [...x.c.admins, x.from.username, x.me.username].filter((h): h is string => Boolean(h));
+  // the admins are never tagged in the group; people are pointed to the email or X instead
+  const handles = [x.from.username, x.me.username].filter((h): h is string => Boolean(h));
   const reply = cleanReply(trimReply(text), { handles });
   return { reply: reply ? spaceOut(reply) : null, sentinel: null };
 }
