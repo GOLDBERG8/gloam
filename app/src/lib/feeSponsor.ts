@@ -24,6 +24,10 @@
  *
  * Path 2 is wired into the browser wallet connector (`tempoFeeAware` in
  * lib/wagmi.ts) so call sites do not change. Path 1 lives in lib/tempoWallet.ts.
+ *
+ * Path 2 covers Tempo mainnet too, once its pool is filled in: there the
+ * candidates are the mainnet pool's stablecoins (USDC.e, USDT0, OUSD after
+ * pathUSD). Path 1 (passkeys) is Moderato only.
  */
 
 import {
@@ -33,15 +37,33 @@ import {
   toFunctionSelector,
   zeroAddress,
   type Address,
+  type Chain,
   type Hex,
   type PublicClient,
 } from "viem";
 import type { CreateConnectorFn } from "wagmi";
-import { tempoTestnet } from "./networks";
-import { TEMPO_STABLE_TOKENS, type OnchainToken } from "./tokens";
+import { NETWORK_KEYS, tempoMainnet, tempoTestnet } from "./networks";
+import { TEMPO_MAINNET_TOKENS, TEMPO_STABLE_TOKENS, type OnchainToken } from "./tokens";
 
+/** Tempo Moderato, where passkeys (Tempo Wallet) and sponsored fees live. */
 export const TEMPO_CHAIN_ID = tempoTestnet.id;
 export const TEMPO_RPC_URL = tempoTestnet.rpcUrls.default.http[0];
+
+/**
+ * The Tempo chains whose browser-wallet sends get a fee token first, with the
+ * stablecoins Gloam lists there: Moderato always, mainnet once its pool is in.
+ */
+const FEE_CHAINS = new Map<number, { chain: Chain; tokens: OnchainToken[] }>([
+  [tempoTestnet.id, { chain: tempoTestnet, tokens: TEMPO_STABLE_TOKENS }],
+  ...(NETWORK_KEYS.includes("tempo-mainnet")
+    ? ([[tempoMainnet.id, { chain: tempoMainnet, tokens: TEMPO_MAINNET_TOKENS }]] as const)
+    : []),
+]);
+
+/** A Tempo chain Gloam pays fees on with a fee token (Moderato, or mainnet once live). */
+export function isTempoFeeChain(chainId: number | undefined): boolean {
+  return chainId !== undefined && FEE_CHAINS.has(chainId);
+}
 
 // ------------------------------------------------------------------ sponsor
 
@@ -106,27 +128,36 @@ const SELF_PAYING_SELECTORS = new Set<string>([
   toFunctionSelector("transferWithMemo(address,uint256,bytes32)"),
 ]);
 
-let client: PublicClient | undefined;
-function tempoClient(): PublicClient {
-  client ??= createPublicClient({
-    chain: tempoTestnet,
-    transport: http(TEMPO_RPC_URL),
+const clients = new Map<number, PublicClient>();
+function tempoClient(chainId: number = TEMPO_CHAIN_ID): PublicClient {
+  const hit = clients.get(chainId);
+  if (hit) return hit;
+  const chain = FEE_CHAINS.get(chainId)?.chain ?? tempoTestnet;
+  const c = createPublicClient({
+    chain,
+    transport: http(chain.rpcUrls.default.http[0]),
   }) as PublicClient;
-  return client;
+  clients.set(chainId, c);
+  return c;
 }
 
 function sameAddress(a: string | undefined | null, b: string | undefined | null) {
   return Boolean(a && b && a.toLowerCase() === b.toLowerCase());
 }
 
-/** Symbol for a Tempo stablecoin address, if it is one we list. */
-export function tempoStableSymbol(token: string | null | undefined): string | null {
-  return TEMPO_STABLE_TOKENS.find((t) => sameAddress(t.address, token))?.symbol ?? null;
+/** Symbol for a Tempo stablecoin address, if it is one we list (on `chainId` first). */
+export function tempoStableSymbol(token: string | null | undefined, chainId: number = TEMPO_CHAIN_ID): string | null {
+  const lists = [FEE_CHAINS.get(chainId)?.tokens ?? [], TEMPO_STABLE_TOKENS, TEMPO_MAINNET_TOKENS];
+  for (const list of lists) {
+    const hit = list.find((t) => sameAddress(t.address, token));
+    if (hit) return hit.symbol;
+  }
+  return null;
 }
 
 /** The account's fee token preference on Tempo, or null when none is set. */
-export async function readFeeToken(address: Address): Promise<Address | null> {
-  const token = await tempoClient().readContract({
+export async function readFeeToken(address: Address, chainId: number = TEMPO_CHAIN_ID): Promise<Address | null> {
+  const token = await tempoClient(chainId).readContract({
     address: FEE_MANAGER,
     abi: feeManagerAbi,
     functionName: "userTokens",
@@ -161,15 +192,16 @@ export type FeeTokenPlan =
 /**
  * Decides whether a browser wallet needs a fee token set before it can send on
  * Tempo: only when it has no preference and its PathUSD cannot cover a fee.
- * Prefers OUSD, then any other listed stablecoin that covers the budget.
+ * On Moderato it prefers OUSD, then any other listed stablecoin that covers the
+ * budget; on mainnet it goes down the pool's list (USDC.e, USDT0, OUSD).
  */
-export async function planFeeToken(address: Address): Promise<FeeTokenPlan> {
-  const c = tempoClient();
-  if (await readFeeToken(address)) return { action: "none", reason: "preference-set" };
-  const candidates: OnchainToken[] = [
-    OUSD_TOKEN,
-    ...TEMPO_STABLE_TOKENS.filter((t) => t.id !== "ousd"),
-  ];
+export async function planFeeToken(address: Address, chainId: number = TEMPO_CHAIN_ID): Promise<FeeTokenPlan> {
+  const c = tempoClient(chainId);
+  if (await readFeeToken(address, chainId)) return { action: "none", reason: "preference-set" };
+  const candidates: OnchainToken[] =
+    chainId === TEMPO_CHAIN_ID
+      ? [OUSD_TOKEN, ...TEMPO_STABLE_TOKENS.filter((t) => t.id !== "ousd")]
+      : (FEE_CHAINS.get(chainId)?.tokens ?? []);
   const [gasPrice, ...balances] = await Promise.all([
     c.getGasPrice(),
     ...candidates.map((t) =>
@@ -201,34 +233,39 @@ type RequestArgs = { method: string; params?: unknown };
 type Eip1193Like = { request: (args: RequestArgs) => Promise<unknown> };
 type TxParams = { from?: string; to?: string; data?: string; input?: string; chainId?: string | number };
 
-/** Accounts known to have a fee token set this session (no need to re-read). */
+/** Accounts known to have a fee token set this session, per chain (no need to re-read). */
 const settled = new Set<string>();
 const pending = new Map<string, Promise<void>>();
 
-async function isTempoTx(provider: Eip1193Like, tx: TxParams): Promise<boolean> {
+/** The Tempo chain a transaction goes to, or null when it is not one Gloam handles fees on. */
+async function tempoTxChain(provider: Eip1193Like, tx: TxParams): Promise<number | null> {
   if (tx.chainId !== undefined && tx.chainId !== null) {
-    return Number(tx.chainId) === TEMPO_CHAIN_ID;
+    const id = Number(tx.chainId);
+    return isTempoFeeChain(id) ? id : null;
   }
-  const id = await provider.request({ method: "eth_chainId" }).catch(() => null);
-  return id !== null && Number(id) === TEMPO_CHAIN_ID;
+  const raw = await provider.request({ method: "eth_chainId" }).catch(() => null);
+  if (raw === null) return null;
+  const id = Number(raw);
+  return isTempoFeeChain(id) ? id : null;
 }
 
 /** True for transactions that already settle their own fee token question. */
 function skipsFeeCheck(tx: TxParams): boolean {
   if (sameAddress(tx.to, FEE_MANAGER)) return true;
   const data = (tx.data ?? tx.input ?? "").toLowerCase();
-  const isStable = TEMPO_STABLE_TOKENS.some((t) => sameAddress(t.address, tx.to));
+  const isStable = [...TEMPO_STABLE_TOKENS, ...TEMPO_MAINNET_TOKENS].some((t) => sameAddress(t.address, tx.to));
   return isStable && SELF_PAYING_SELECTORS.has(data.slice(0, 10));
 }
 
-async function ensureFeeToken(provider: Eip1193Like, from: Address): Promise<void> {
-  const key = from.toLowerCase();
+async function ensureFeeToken(provider: Eip1193Like, from: Address, chainId: number): Promise<void> {
+  // Moderato keeps its old key, so nothing changes for it.
+  const key = chainId === TEMPO_CHAIN_ID ? from.toLowerCase() : `${chainId}:${from.toLowerCase()}`;
   if (settled.has(key)) return;
   const inflight = pending.get(key);
   if (inflight) return inflight;
   const run = (async () => {
     // A read failure must not block the user's transaction; fall through.
-    const plan = await planFeeToken(from).catch(() => null);
+    const plan = await planFeeToken(from, chainId).catch(() => null);
     if (!plan) return;
     if (plan.action === "none") {
       if (plan.reason === "preference-set") settled.add(key);
@@ -241,11 +278,11 @@ async function ensureFeeToken(provider: Eip1193Like, from: Address): Promise<voi
           from,
           to: FEE_MANAGER,
           data: setFeeTokenData(plan.token),
-          chainId: `0x${TEMPO_CHAIN_ID.toString(16)}`,
+          chainId: `0x${chainId.toString(16)}`,
         },
       ],
     })) as Hex;
-    const receipt = await tempoClient().waitForTransactionReceipt({
+    const receipt = await tempoClient(chainId).waitForTransactionReceipt({
       hash,
       timeout: 90_000,
     });
@@ -273,8 +310,9 @@ export function withTempoFeeToken<P>(provider: P): P {
   const request = async (args: RequestArgs) => {
     if (args.method === "eth_sendTransaction" || args.method === "wallet_sendTransaction") {
       const tx = (Array.isArray(args.params) ? args.params[0] : undefined) as TxParams | undefined;
-      if (tx?.from && !skipsFeeCheck(tx) && (await isTempoTx(target, tx))) {
-        await ensureFeeToken(target, tx.from as Address);
+      const chainId = tx?.from && !skipsFeeCheck(tx) ? await tempoTxChain(target, tx) : null;
+      if (tx?.from && chainId !== null) {
+        await ensureFeeToken(target, tx.from as Address, chainId);
       }
     }
     return target.request(args);

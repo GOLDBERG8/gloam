@@ -13,12 +13,14 @@ import {
   useWriteContract,
 } from "wagmi";
 import { exitDemo, useAppAccount } from "@/lib/demo";
-import { ensureRhTestnetWallet, shortAddress } from "@/lib/chain";
+import { ensureRhTestnetWallet, ensureWalletOnChain, shortAddress } from "@/lib/chain";
+import { networkName, type GloamChainId } from "@/lib/networks";
 import {
   FEE_MANAGER,
   OUSD,
   TEMPO_CHAIN_ID,
   TEMPO_SPONSORED,
+  isTempoFeeChain,
   feeManagerAbi,
   tempoStableSymbol,
 } from "@/lib/feeSponsor";
@@ -126,7 +128,8 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
       try {
         await switchChain({ chainId: network.chainId });
       } catch {
-        await ensureRhTestnetWallet();
+        // testnets keep their old fallback; a mainnet adds its own chain
+        await (network.testnet ? ensureRhTestnetWallet() : ensureWalletOnChain(network.chain));
         await switchChain({ chainId: network.chainId });
       }
     } catch {
@@ -239,7 +242,8 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
       );
     }
 
-    if (TURNKEY_ENABLED) {
+    // Turnkey passkeys live on Robinhood Chain testnet only.
+    if (TURNKEY_ENABLED && network.testnet) {
       return (
         <div
           ref={root}
@@ -321,7 +325,9 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
         </button>
         {!compact && (
           <p className="mt-1 text-[12px] leading-snug text-mute">
-            Passkey accounts are on Tempo. {network.label} needs {wc ? "a wallet app" : "a browser wallet"}.
+            {network.testnet
+              ? `Passkey accounts are on Tempo. ${network.label} needs ${wc ? "a wallet app" : "a browser wallet"}.`
+              : `Passkey accounts are on Tempo testnet. ${network.label} mainnet needs ${wc ? "a wallet app" : "a browser wallet"}.`}
           </p>
         )}
         {sheet}
@@ -408,7 +414,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
                 {shortAddress(address, 6)}
               </p>
               <p className="mt-0.5 truncate text-[12px] text-mute">
-                {network.label} testnet
+                {network.testnet ? networkName(network) : `${network.label} mainnet`}
               </p>
             </div>
             <button
@@ -421,10 +427,11 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               {copied ? <CheckGlyph /> : <CopyGlyph />}
             </button>
           </div>
-          {network.chainId === TEMPO_CHAIN_ID && !demo && (
+          {isTempoFeeChain(network.chainId) && !demo && (
             <TempoFeeRow
               address={address as Address}
               passkey={isTempoWallet(connector)}
+              chainId={network.chainId}
             />
           )}
           <div className="mx-1 h-px bg-line" />
@@ -432,13 +439,16 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
             <MenuLink href="/app" onClick={() => setOpen(false)} icon={<GridGlyph />}>
               Portfolio
             </MenuLink>
-            <MenuLink
-              href="/app/trade?path=sealed"
-              onClick={() => setOpen(false)}
-              icon={<TradeGlyph />}
-            >
-              Private trade
-            </MenuLink>
+            {/* the mainnet pools take payments only: no private trade there */}
+            {network.testnet && (
+              <MenuLink
+                href="/app/trade?path=sealed"
+                onClick={() => setOpen(false)}
+                icon={<TradeGlyph />}
+              >
+                Private trade
+              </MenuLink>
+            )}
             <MenuLink
               href="/app/move"
               onClick={() => setOpen(false)}
@@ -486,18 +496,29 @@ function connectErrorText(error: Error): string {
  * How this account pays network fees on Tempo. Passkey accounts are
  * sponsored. Browser wallets pay in their chosen fee token, else PathUSD, so
  * one tap sets OUSD (that call pays its own fee in OUSD, no PathUSD needed).
+ * On mainnet the row only says which token pays; when the wallet has none set
+ * and too little pathUSD, the app sets one before the first send.
  */
-function TempoFeeRow({ address, passkey }: { address: Address; passkey: boolean }) {
+function TempoFeeRow({
+  address,
+  passkey,
+  chainId,
+}: {
+  address: Address;
+  passkey: boolean;
+  chainId: GloamChainId;
+}) {
+  const mainnet = chainId !== TEMPO_CHAIN_ID;
   const pref = useReadContract({
     address: FEE_MANAGER,
     abi: feeManagerAbi,
     functionName: "userTokens",
     args: [address],
-    chainId: TEMPO_CHAIN_ID,
+    chainId,
     query: { enabled: !passkey },
   });
   const { writeContract, data: hash, isPending, error, reset } = useWriteContract();
-  const receipt = useWaitForTransactionReceipt({ hash, chainId: TEMPO_CHAIN_ID });
+  const receipt = useWaitForTransactionReceipt({ hash, chainId });
   const { refetch } = pref;
 
   useEffect(() => {
@@ -521,7 +542,11 @@ function TempoFeeRow({ address, passkey }: { address: Address; passkey: boolean 
 
   if (pref.data === undefined) return null;
   const set = !/^0x0{40}$/i.test(pref.data);
-  const symbol = set ? (tempoStableSymbol(pref.data) ?? "your chosen stablecoin") : "PathUSD";
+  const symbol = set
+    ? (tempoStableSymbol(pref.data, chainId) ?? "your chosen stablecoin")
+    : mainnet
+      ? "pathUSD"
+      : "PathUSD";
   const saving = isPending || receipt.isLoading;
 
   return (
@@ -530,7 +555,7 @@ function TempoFeeRow({ address, passkey }: { address: Address; passkey: boolean 
       <span className="min-w-0 flex-1">
         {error ? "Not changed. Try again." : `Fees paid in ${symbol}`}
       </span>
-      {!set && (
+      {!set && !mainnet && (
         <button
           type="button"
           onClick={() =>
