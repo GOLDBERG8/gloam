@@ -10,15 +10,14 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  * The USER runs this. It is NOT executed by CI or by any agent.
  *
  * Before running:
- *   1. Production keys. src/verifiers/*.sol must be regenerated from the
- *      multi-party ceremony's final zkeys (the repo's are the dev ceremony).
- *      Then set PRODUCTION_KEYS=1; the script refuses to run without it.
+ *   1. Keys: the script deploys the ceremony-final verifiers (src/verifiers/final)
+ *      and refuses to create the pool unless they accept final-key proofs and
+ *      reject dev-key ones (MainnetDeploy._requireCeremonyKeys).
  *   2. Deploy Poseidon on mainnet:  node circuits/scripts/deploy-poseidon.mjs
  *
  *   export DEPLOYER_PK=0x...            # funded mainnet deployer (gas is paid in USD)
  *   export RPC_URL=https://rpc.tempo.xyz
  *   export POSEIDON2=0x...              # PoseidonT3 from step 2
- *   export PRODUCTION_KEYS=1
  *   export LIMIT_ASSETS=0xA,0xB         # stablecoins to list (TIP-20 addresses); Tempo has no native coin
  *   export LIMIT_PER_DEPOSIT=500000000,500000000      # raw units (6 decimals: 500 = 500000000)
  *   export LIMIT_TOTAL=25000000000,25000000000        # raw units per asset
@@ -28,7 +27,7 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *   # A frozen FEE_RECIPIENT never blocks withdrawals; fees just wait in the pool until it can receive.
  *   export WITHDRAW_FEE_BPS=25          # 0.25%; this is the default when unset
  *   export FEE_RECIPIENT=0x...          # fee collector (e.g. the treasury multisig)
- *   export NEW_OWNER=0x...              # optional: multisig; it must call acceptOwnership()
+ *   export NEW_OWNER=0x...              # the owner multisig; it must call acceptOwnership()
  *
  * Run (Tempo caps a tx at 30M gas and meters code at about 1,100 gas per byte.
  * The pool was ~23.2M at 10.4 KB; the cash-out fee adds ~1.5 KB, so expect about

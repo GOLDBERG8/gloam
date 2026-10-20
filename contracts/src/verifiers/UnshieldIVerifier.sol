@@ -7,7 +7,7 @@ import {UnshieldVerifier} from "./UnshieldVerifier.sol";
 /**
  * @title UnshieldIVerifier
  * @notice abi.encode(a,b,c) proof + 5 public inputs → Groth16.
- * @dev For Poseidon pool only. Dev zkey until production ceremony.
+ * @dev For Poseidon pool only. Dev keys (single party): testnet only. Mainnet deploys UnshieldIVerifierFinal (verifiers/final).
  */
 contract UnshieldIVerifier is IVerifier {
     UnshieldVerifier public immutable groth16;

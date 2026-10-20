@@ -10,7 +10,7 @@ import {ShieldVerifier} from "./ShieldVerifier.sol";
  * @dev C1 fix: binds the note commitment to (amount, asset) at deposit so a shield
  *      cannot mint a commitment worth more than the value actually sent. Order MUST match
  *      shield.circom `public [commitment, amount, asset]` and ShieldPoolPoseidon.shieldBound.
- *      Dev pot16 ceremony (single-beacon) — regenerate with a production ceremony before mainnet.
+ *      Dev keys (single party): testnet only. Mainnet deploys ShieldIVerifierFinal (verifiers/final).
  */
 contract ShieldIVerifier is IVerifier {
     ShieldVerifier public immutable groth16;

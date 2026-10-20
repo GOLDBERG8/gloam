@@ -8,6 +8,7 @@ import {TransferVerifier} from "./TransferVerifier.sol";
  * @title TransferIVerifier
  * @notice abi.encode(a,b,c) + 4 public inputs for private transfer.
  * @dev Public: [root, nullifier, newC0, newC1]
+ *      Dev keys (single party): testnet only. Mainnet deploys TransferIVerifierFinal (verifiers/final).
  */
 contract TransferIVerifier is IVerifier {
     TransferVerifier public immutable groth16;

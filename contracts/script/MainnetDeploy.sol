@@ -3,17 +3,20 @@ pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {ShieldPoolPayments} from "../src/ShieldPoolPayments.sol";
-import {ShieldVerifier} from "../src/verifiers/ShieldVerifier.sol";
-import {ShieldIVerifier} from "../src/verifiers/ShieldIVerifier.sol";
-import {UnshieldVerifier} from "../src/verifiers/UnshieldVerifier.sol";
-import {UnshieldIVerifier} from "../src/verifiers/UnshieldIVerifier.sol";
-import {TransferVerifier} from "../src/verifiers/TransferVerifier.sol";
-import {TransferIVerifier} from "../src/verifiers/TransferIVerifier.sol";
+import {IVerifier} from "../src/interfaces/IVerifier.sol";
+import {ShieldVerifierFinal} from "../src/verifiers/final/ShieldVerifierFinal.sol";
+import {ShieldIVerifierFinal} from "../src/verifiers/final/ShieldIVerifierFinal.sol";
+import {UnshieldVerifierFinal} from "../src/verifiers/final/UnshieldVerifierFinal.sol";
+import {UnshieldIVerifierFinal} from "../src/verifiers/final/UnshieldIVerifierFinal.sol";
+import {TransferVerifierFinal} from "../src/verifiers/final/TransferVerifierFinal.sol";
+import {TransferIVerifierFinal} from "../src/verifiers/final/TransferIVerifierFinal.sol";
 import {DualProofVerifier} from "../src/verifiers/DualProofVerifier.sol";
+import {KeyCheckProofs} from "./KeyCheckProofs.sol";
 
 /**
  * The mainnet deploy every chain shares, so Tempo and Robinhood Chain get the
- * same pool wired the same way: the Groth16 verifiers and their adapters, the
+ * same pool wired the same way: the Groth16 verifiers from the trusted setup's
+ * final keys (src/verifiers/final) and their adapters, the
  * DualProofVerifier, ShieldPoolPayments (no sealed swap), the shield verifier
  * (deposits need shieldBound()), deposit limits on with each listed asset,
  * the cash-out fee, an optional handoff to a multisig owner, and endSetup() last.
@@ -29,16 +32,23 @@ import {DualProofVerifier} from "../src/verifiers/DualProofVerifier.sol";
  * it or changing the recipient takes the 3-day timelock, so if FEE_RECIPIENT is
  * left unset the pool launches with the fee off.
  *
+ * Key gate: before the pool exists, the freshly deployed verifiers must accept
+ * real proofs made with the ceremony's final keys and reject proofs made with
+ * the dev keys (script/KeyCheckProofs.sol). A verifier on dev keys can be fooled
+ * by whoever made them, so the script stops there (pre-mainnet audit GATE 2).
+ * After the broadcast every setting is checked again and any mismatch fails the
+ * run (GATE 1, F3): if it fails, do not announce the pool, deploy a fresh one.
+ *
  * Environment (read by every chain's script):
  *   DEPLOYER_PK          funded deployer
  *   POSEIDON2            PoseidonT3 deployed on this chain (circuits/scripts/deploy-poseidon.mjs)
- *   PRODUCTION_KEYS=1    required: src/verifiers/*.sol regenerated from the ceremony's final zkeys
  *   LIMIT_ASSETS         assets to list, comma separated (0x0 means the chain's native coin, where allowed)
  *   LIMIT_PER_DEPOSIT    per-deposit limit for each, raw units, same order
  *   LIMIT_TOTAL          total limit for each, raw units, same order
  *   WITHDRAW_FEE_BPS     cash-out fee in basis points, default 25 (0.25%), max 100 (1%)
  *   FEE_RECIPIENT        who collects cash-out fees; unset means the fee stays OFF
- *   NEW_OWNER            optional multisig; it must call acceptOwnership() afterwards
+ *   NEW_OWNER            the owner multisig; it must call acceptOwnership() afterwards. It must
+ *                        be a contract unless NEW_OWNER_EOA=1. Unset: the deployer keeps the pool.
  */
 abstract contract MainnetDeploy is Script {
     struct Limits {
@@ -53,20 +63,18 @@ abstract contract MainnetDeploy is Script {
      */
     function _deployMainnet(uint256 chainId, bool allowNative) internal {
         require(block.chainid == chainId, "wrong chain for this script");
-        require(
-            vm.envOr("PRODUCTION_KEYS", uint256(0)) == 1,
-            "set PRODUCTION_KEYS=1 after regenerating verifiers from the ceremony"
-        );
 
         uint256 pk = vm.envUint("DEPLOYER_PK");
         address poseidon2 = vm.envAddress("POSEIDON2");
         require(poseidon2.code.length > 0, "POSEIDON2 has no code on this chain");
-        address newOwner = vm.envOr("NEW_OWNER", address(0));
+        address newOwner = _readNewOwner();
         Limits memory lim = _readLimits(allowNative);
         (uint16 feeBps, address feeRecipient) = _readWithdrawFee();
 
         vm.startBroadcast(pk);
         (address dual, address shieldI) = _deployVerifiers();
+        // GATE 2: no pool until the verifiers on chain prove they hold the ceremony keys
+        _requireCeremonyKeys(dual, shieldI);
         ShieldPoolPayments pool = new ShieldPoolPayments(poseidon2, dual);
         pool.setShieldVerifier(shieldI);
         pool.turnOnDepositLimits();
@@ -118,12 +126,42 @@ abstract contract MainnetDeploy is Script {
         }
     }
 
+    /// @dev NEW_OWNER must be a contract (a multisig) unless NEW_OWNER_EOA=1 (audit F2).
+    function _readNewOwner() internal view returns (address newOwner) {
+        newOwner = vm.envOr("NEW_OWNER", address(0));
+        if (newOwner == address(0)) {
+            console2.log("NEW_OWNER unset: the deployer key keeps the pool. A multisig owner is recommended.");
+            return newOwner;
+        }
+        require(
+            newOwner.code.length > 0 || vm.envOr("NEW_OWNER_EOA", uint256(0)) == 1,
+            "NEW_OWNER has no code: use a multisig, or set NEW_OWNER_EOA=1 to hand it to a plain key"
+        );
+    }
+
     function _deployVerifiers() internal returns (address dual, address shieldI) {
-        ShieldIVerifier s = new ShieldIVerifier(new ShieldVerifier());
-        UnshieldIVerifier u = new UnshieldIVerifier(new UnshieldVerifier());
-        TransferIVerifier t = new TransferIVerifier(new TransferVerifier());
+        ShieldIVerifierFinal s = new ShieldIVerifierFinal(new ShieldVerifierFinal());
+        UnshieldIVerifierFinal u = new UnshieldIVerifierFinal(new UnshieldVerifierFinal());
+        TransferIVerifierFinal t = new TransferIVerifierFinal(new TransferVerifierFinal());
         dual = address(new DualProofVerifier(u, t));
         shieldI = address(s);
+    }
+
+    /// @dev Each verifier accepts a real proof made with the final keys and
+    ///      rejects one made with the dev keys. Reads only, no transactions.
+    function _requireCeremonyKeys(address dual, address shieldI) internal view {
+        (bytes memory p, uint256[] memory pub) = KeyCheckProofs.shieldFinal();
+        require(IVerifier(shieldI).verify(p, pub), "shield verifier rejects a final-key proof");
+        (p, pub) = KeyCheckProofs.shieldDev();
+        require(!IVerifier(shieldI).verify(p, pub), "shield verifier accepts a DEV-key proof");
+        (p, pub) = KeyCheckProofs.unshieldFinal();
+        require(IVerifier(dual).verify(p, pub), "unshield verifier rejects a final-key proof");
+        (p, pub) = KeyCheckProofs.unshieldDev();
+        require(!IVerifier(dual).verify(p, pub), "unshield verifier accepts a DEV-key proof");
+        (p, pub) = KeyCheckProofs.transferFinal();
+        require(IVerifier(dual).verify(p, pub), "transfer verifier rejects a final-key proof");
+        (p, pub) = KeyCheckProofs.transferDev();
+        require(!IVerifier(dual).verify(p, pub), "transfer verifier accepts a DEV-key proof");
     }
 
     function _report(
@@ -151,6 +189,14 @@ abstract contract MainnetDeploy is Script {
         if (pool.pendingOwner() != address(0)) {
             console2.log("pendingOwner (must call acceptOwnership)", pool.pendingOwner());
         }
-        console2.log("Next: pool + deploy block in app/src/lib/networks.ts");
+        // GATE 1 / F3: the pool as deployed, read back from the chain. Any mismatch
+        // fails the run; do not announce a pool that fails here.
+        require(pool.depositLimitsOn(), "deposit limits not on");
+        require(!pool.setupMode(), "setup not ended");
+        require(address(pool.shieldVerifier()) == shieldI, "shield verifier mismatch");
+        require(address(pool.verifier()) == dual, "spend verifier mismatch");
+        require(pool.withdrawFeeBps() <= 100, "cash-out fee above 1%");
+        _requireCeremonyKeys(address(pool.verifier()), address(pool.shieldVerifier()));
+        console2.log("All checks passed. Next: pool + deploy block in app/src/lib/networks.ts");
     }
 }

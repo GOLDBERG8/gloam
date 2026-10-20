@@ -11,15 +11,14 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  * The USER runs this. It is NOT executed by CI or by any agent.
  *
  * Before running:
- *   1. Production keys. src/verifiers/*.sol must be regenerated from the
- *      multi-party ceremony's final zkeys (the repo's are the dev ceremony).
- *      Then set PRODUCTION_KEYS=1; the script refuses to run without it.
+ *   1. Keys: the script deploys the ceremony-final verifiers (src/verifiers/final)
+ *      and refuses to create the pool unless they accept final-key proofs and
+ *      reject dev-key ones (MainnetDeploy._requireCeremonyKeys).
  *   2. Deploy Poseidon on mainnet:  node circuits/scripts/deploy-poseidon.mjs
  *
  *   export DEPLOYER_PK=0x...            # funded mainnet deployer (gas is paid in ETH)
  *   export RPC_URL=https://rpc.mainnet.chain.robinhood.com
  *   export POSEIDON2=0x...              # PoseidonT3 from step 2
- *   export PRODUCTION_KEYS=1
  *   # USDG (Paxos Global Dollar, 6 decimals) is 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168,
  *   # per docs.paxos.com and checked on-chain. 0x0 lists native ETH (18 decimals).
  *   # GLOAM (Gloam's token, 18 decimals, 500,000 fixed supply) is
@@ -34,7 +33,7 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *   # Leave FEE_RECIPIENT unset to launch with the fee off; turning it on later takes the 3-day timelock.
  *   export WITHDRAW_FEE_BPS=25          # 0.25%; this is the default when unset
  *   export FEE_RECIPIENT=0x...          # fee collector (e.g. the treasury multisig)
- *   export NEW_OWNER=0x...              # optional: multisig; it must call acceptOwnership()
+ *   export NEW_OWNER=0x...              # the owner multisig; it must call acceptOwnership()
  *
  * Run (Robinhood Chain is an Arbitrum chain with no special gas cap; the pool
  * is about 11.9 KB of code, well under the 24 KB limit):
