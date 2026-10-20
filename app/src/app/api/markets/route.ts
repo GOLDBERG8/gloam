@@ -51,7 +51,8 @@ export async function GET(req: Request) {
   try {
     return NextResponse.json(await fresh(), {
       headers: {
-        "Cache-Control": "no-store, max-age=0",
+        // public quotes: the CDN answers most polls, so a launch-day crowd costs one upstream fan-out per 20 s
+        "Cache-Control": "public, s-maxage=20, stale-while-revalidate=120",
       },
     });
   } catch (e) {

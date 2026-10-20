@@ -29,6 +29,12 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // proving files: a day in the browser and on the CDN. The integrity check
+        // revalidates each one (lib/circuitArtifacts), so a regenerated file is still caught.
+        source: "/circuits/:file*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }],
+      },
+      {
         source: "/((?!pitch).*)",
         headers: [
           { key: "X-Frame-Options", value: "DENY" },

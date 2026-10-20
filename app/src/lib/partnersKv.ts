@@ -46,7 +46,7 @@ export function k(...parts: (string | number)[]): string {
 // ---------------------------------------------------------------- redis
 
 /** A slow store fails the request instead of holding the function open. */
-const KV_TIMEOUT_MS = 8_000;
+const KV_TIMEOUT_MS = 3_000;
 
 async function redisPipeline(cmds: KvCommand[]): Promise<unknown[]> {
   const url = process.env.UPSTASH_REDIS_REST_URL!.trim().replace(/\/$/, "");

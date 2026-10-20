@@ -5,6 +5,7 @@ import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const NO_STORE = { "Cache-Control": "no-store" };
 /** Requests per IP per minute that reach the function (the CDN answers most). */

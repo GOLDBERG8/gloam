@@ -118,17 +118,21 @@ async function redisCall(cmds: (string | number)[][]): Promise<{ result?: unknow
   return (await res.json()) as { result?: unknown; error?: string }[];
 }
 
-/** One command per hit: the window's first hit also sets the expiry. */
+/** One round trip per hit: the count, and the expiry when the key has none yet. */
 async function redisIncr(key: string, windowSec: number): Promise<number> {
-  const json = await redisCall([["INCR", key]]);
+  const json = await redisCall([
+    ["INCR", key],
+    ["EXPIRE", key, windowSec * 2, "NX"],
+  ]);
   const n = Number(json?.[0]?.result);
   if (!Number.isFinite(n) || n < 1) {
     // Upstash puts the reason (a spent quota, say) in the command's error
     const why = typeof json?.[0]?.error === "string" ? `: ${json[0].error.slice(0, 160)}` : "";
     throw new Error(`redis: bad INCR result${why}`);
   }
-  // if this fails the key only lingers in storage; the next window counts under a new key
-  if (n === 1) await redisCall([["EXPIRE", key, windowSec * 2]]).catch(() => {});
+  // a Redis without EXPIRE NX (before 7.0) refuses it: set the expiry the old way on the first hit.
+  // If that fails too the key only lingers in storage; the next window counts under a new key.
+  if (n === 1 && json?.[1]?.error) await redisCall([["EXPIRE", key, windowSec * 2]]).catch(() => {});
   return n;
 }
 

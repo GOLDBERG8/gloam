@@ -46,7 +46,6 @@ import {
   TimeoutError,
   createPublicClient,
   createWalletClient,
-  http,
   type Address,
   type Hex,
   type PublicClient,
@@ -63,6 +62,7 @@ import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenAddresses } from "@/lib/screeningServer";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
 import { forgetNonce, inSendLane, inflightKey, takeInflight } from "@/lib/relay/inflight";
+import { serverTransport } from "@/lib/serverRpc";
 
 const POOL_ERRORS = [
   "ZeroCommitment",
@@ -200,7 +200,7 @@ export function relayPublicClient(net: GloamNetwork): PublicClient {
   if (hit) return hit;
   const c = createPublicClient({
     chain: net.chain,
-    transport: http(net.chain.rpcUrls.default.http[0], { timeout: 20_000, retryCount: 1 }),
+    transport: serverTransport(net, { timeout: 20_000, retryCount: 1 }),
   });
   publicClients.set(net.chainId, c);
   return c;
@@ -210,7 +210,7 @@ function walletFor(net: GloamNetwork, account: PrivateKeyAccount) {
   return createWalletClient({
     account,
     chain: net.chain,
-    transport: http(net.chain.rpcUrls.default.http[0], { timeout: 30_000, retryCount: 1 }),
+    transport: serverTransport(net, { timeout: 30_000, retryCount: 1 }),
   });
 }
 
@@ -557,7 +557,11 @@ async function relayEmpty(net: GloamNetwork, account: PrivateKeyAccount): Promis
   if (hit && Date.now() - hit.at < BALANCE_TTL_MS) return hit.empty;
   try {
     const client = relayPublicClient(net);
-    const [balance, gasPrice] = await Promise.all([client.getBalance({ address: account.address }), client.getGasPrice()]);
+    // a slow RPC must not hold up the status the app checks before every relayed send
+    const [balance, gasPrice] = await Promise.race([
+      Promise.all([client.getBalance({ address: account.address }), client.getGasPrice()]),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("relay status: slow rpc")), 3_000)),
+    ]);
     // empty = can't pay for a couple more private transfers (about 1.8M gas each)
     const empty = balance < gasPrice * RELAY_RESERVE_GAS;
     balances.set(net.chainId, { at: Date.now(), empty });

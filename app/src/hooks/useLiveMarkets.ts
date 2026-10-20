@@ -14,9 +14,8 @@ type ApiResponse = {
 };
 
 async function fetchMarkets(): Promise<ApiResponse> {
-  const res = await fetch(`/api/markets?t=${Date.now()}`, {
-    cache: "no-store",
-  });
+  // no cache-buster: the CDN keeps it for 20 s (api/markets), which is fresher than the 30 s poll
+  const res = await fetch("/api/markets", { cache: "no-store" });
   if (!res.ok) throw new Error("markets_failed");
   return res.json() as Promise<ApiResponse>;
 }

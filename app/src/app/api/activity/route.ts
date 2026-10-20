@@ -58,7 +58,8 @@ export async function GET(req: NextRequest) {
       ok: t.isError === "0",
     }));
 
-    return NextResponse.json({ txs, address });
+    // public explorer data per address: the CDN answers the 30 s polls
+    return NextResponse.json({ txs, address }, { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } });
   } catch {
     return NextResponse.json(
       { txs: [], error: "fetch_failed" },

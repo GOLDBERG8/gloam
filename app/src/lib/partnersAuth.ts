@@ -17,11 +17,12 @@
  * in, and neither works without a configured secret.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
-import { createPublicClient, getAddress, http, isAddress, verifyMessage, type Address, type Hex } from "viem";
+import { createPublicClient, getAddress, isAddress, verifyMessage, type Address, type Hex } from "viem";
 import { parseSiweMessage, validateSiweMessage } from "viem/siwe";
 import { apiKeyPepper } from "./apiKeys";
 import { getNetwork, NETWORK_KEYS } from "./networks";
 import { k, kv1 } from "./partnersKv";
+import { serverTransport } from "@/lib/serverRpc";
 
 export const SIWE_STATEMENT =
   "Sign in to the Gloam Partner Portal. This proves you own this wallet. It costs nothing and moves no money.";
@@ -116,7 +117,7 @@ async function signatureValid(address: Address, message: string, signature: Hex,
   const net = NETWORK_KEYS.map(getNetwork).find((n) => n.chainId === chainId);
   if (!net) return false;
   try {
-    const client = createPublicClient({ chain: net.chain, transport: http(net.chain.rpcUrls.default.http[0], { timeout: 15_000 }) });
+    const client = createPublicClient({ chain: net.chain, transport: serverTransport(net, { timeout: 15_000 }) });
     return await client.verifyMessage({ address, message, signature });
   } catch {
     return false;

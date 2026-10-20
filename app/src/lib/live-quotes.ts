@@ -43,6 +43,7 @@ async function fetchYahoo(symbol: string): Promise<LiveQuote | null> {
       Accept: "application/json",
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(5_000),
   });
   if (!res.ok) return null;
   const data = (await res.json()) as YahooChart;
@@ -83,6 +84,7 @@ async function fetchCoinGeckoSimple(
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
     cache: "no-store",
+    signal: AbortSignal.timeout(5_000),
   });
   if (!res.ok) return map;
   const data = (await res.json()) as CgSimple;
@@ -105,6 +107,7 @@ async function fetchCoinGeckoSpark(id: string): Promise<number[]> {
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
     cache: "no-store",
+    signal: AbortSignal.timeout(5_000),
   });
   if (!res.ok) return [];
   const data = (await res.json()) as { prices?: [number, number][] };

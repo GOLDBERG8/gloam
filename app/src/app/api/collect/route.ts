@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { recordTractionEvent } from "@/lib/tractionStore";
 
@@ -114,43 +114,47 @@ export async function POST(req: Request) {
     };
 
     console.info("gloam_traction", JSON.stringify(event));
-    await recordTractionEvent(event);
+    // stored and forwarded after the response: a pageview never waits on Redis or the webhook
+    after(async () => {
+      await recordTractionEvent(event).catch(() => {});
 
-    const webhook = process.env.TRACTION_WEBHOOK_URL?.trim();
-    if (webhook) {
-      try {
-        await fetch(webhook, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: `**${event.t}** \`${event.path ?? ""}\``,
-            embeds: [
-              {
-                title: event.t,
-                description: event.path ?? "",
-                fields: [
-                  {
-                    name: "ref",
-                    value: (event.ref ?? ", ").slice(0, 200),
-                    inline: false,
-                  },
-                  {
-                    name: "meta",
-                    value: event.meta
-                      ? JSON.stringify(event.meta).slice(0, 500)
-                      : ", ",
-                    inline: false,
-                  },
-                ],
-                timestamp: new Date(event.ts).toISOString(),
-              },
-            ],
-          }),
-        });
-      } catch {
-        /* non-fatal */
+      const webhook = process.env.TRACTION_WEBHOOK_URL?.trim();
+      if (webhook) {
+        try {
+          await fetch(webhook, {
+            method: "POST",
+            signal: AbortSignal.timeout(3_000),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: `**${event.t}** \`${event.path ?? ""}\``,
+              embeds: [
+                {
+                  title: event.t,
+                  description: event.path ?? "",
+                  fields: [
+                    {
+                      name: "ref",
+                      value: (event.ref ?? ", ").slice(0, 200),
+                      inline: false,
+                    },
+                    {
+                      name: "meta",
+                      value: event.meta
+                        ? JSON.stringify(event.meta).slice(0, 500)
+                        : ", ",
+                      inline: false,
+                    },
+                  ],
+                  timestamp: new Date(event.ts).toISOString(),
+                },
+              ],
+            }),
+          });
+        } catch {
+          /* non-fatal */
+        }
       }
-    }
+    });
 
     return NextResponse.json({ ok: true });
   } catch {

@@ -22,7 +22,6 @@
 import {
   createPublicClient,
   formatUnits,
-  http,
   parseAbi,
   parseEventLogs,
   toEventSelector,
@@ -34,6 +33,7 @@ import { getNetwork, NETWORK_KEYS, type GloamNetwork, type NetworkKey } from "./
 import { erc20BalanceOfAbi, shieldTokensFor, supportsNativeShield } from "./tokens";
 import { loadEthUsd, loadLiveMarkets } from "./live-quotes";
 import { cacheGetJson, cacheSetJson, lastDays, utcDay } from "./tractionStore";
+import { serverTransport } from "@/lib/serverRpc";
 
 export type ActivityKind = "deposit" | "transfer" | "cashout" | "trade";
 
@@ -241,7 +241,7 @@ function clientFor(n: GloamNetwork): PublicClient {
   const c = createPublicClient({
     chain: n.chain,
     // viem retries 429s, 5xx and timeouts with backoff (0.5s, 1s, 2s, 4s).
-    transport: http(n.chain.rpcUrls.default.http[0], { timeout: 20_000, retryCount: 4, retryDelay: 500 }),
+    transport: serverTransport(n, { timeout: 20_000, retryCount: 4, retryDelay: 500 }),
   });
   clients.set(n.chainId, c);
   return c;

@@ -6,6 +6,7 @@ import { networkForChain, relayPublicClient } from "@/lib/relay/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 /** Deposits can be attributed for this long after they land. */
 const CLAIM_WINDOW_SEC = 24 * 60 * 60;

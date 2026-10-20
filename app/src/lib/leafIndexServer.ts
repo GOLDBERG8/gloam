@@ -22,7 +22,7 @@
  * note; the list is the same public data for everyone.
  */
 
-import { createPublicClient, http, parseAbi, type PublicClient } from "viem";
+import { createPublicClient, parseAbi, type PublicClient } from "viem";
 import { getNetwork, isNetworkWritable, type GloamNetwork, type NetworkKey } from "./networks";
 import { cacheGetJson, cacheSetJson } from "./tractionStore";
 import {
@@ -35,6 +35,7 @@ import {
   type LeafSnapshot,
   type RawInsert,
 } from "./leafIndex";
+import { serverTransport } from "@/lib/serverRpc";
 
 const FRESH_MS = 2_000;
 /**
@@ -48,6 +49,8 @@ const REDIS_PREFIX = "gloam:leaves:v1";
 const REDIS_TTL_SEC = 30 * 86_400;
 /** Redis write at most this often when nothing new was inserted. */
 const SAVE_EVERY_MS = 60_000;
+/** The shortest gap between two writes of the shared copy; another instance reads at most this far behind and walks the rest. */
+const MIN_SAVE_GAP_MS = 15_000;
 
 const POOL_COUNT_ABI = parseAbi(["function nextIndex() view returns (uint256)"]);
 
@@ -69,7 +72,7 @@ function clientFor(n: GloamNetwork): PublicClient {
   const c = createPublicClient({
     chain: n.chain,
     // viem retries 429s, 5xx and timeouts with backoff.
-    transport: http(n.chain.rpcUrls.default.http[0], { timeout: 15_000, retryCount: 3, retryDelay: 400 }),
+    transport: serverTransport(n, { timeout: 15_000, retryCount: 3, retryDelay: 400 }),
   });
   clients.set(n.chainId, c);
   return c;
@@ -159,7 +162,9 @@ async function refresh(n: GloamNetwork): Promise<State> {
     savedTip: prev?.savedTip ?? "",
   };
   const tip = tipOf(items);
-  if (tip !== st.savedTip || Date.now() - st.savedAt > SAVE_EVERY_MS) {
+  // a busy pool changes its tip every block: write the shared copy at most every MIN_SAVE_GAP_MS
+  const sinceSave = Date.now() - st.savedAt;
+  if ((tip !== st.savedTip && sinceSave > MIN_SAVE_GAP_MS) || sinceSave > SAVE_EVERY_MS) {
     await cacheSetJson(`${REDIS_PREFIX}:${id}`, toSnapshot(n, st), REDIS_TTL_SEC);
     st.savedAt = Date.now();
     st.savedTip = tip;

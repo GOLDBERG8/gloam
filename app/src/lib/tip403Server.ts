@@ -7,7 +7,7 @@
  * fails, screening fails open: the token enforces its policy on-chain anyway,
  * so a missed early check costs a reverted transaction, never a compliance gap.
  */
-import { createPublicClient, http, type Address } from "viem";
+import { createPublicClient, type Address } from "viem";
 import { NETWORK_KEYS, getNetwork, isNetworkWritable, type GloamNetwork } from "./networks";
 import {
   checkTip403,
@@ -19,6 +19,7 @@ import {
   type Tip403Reader,
   type Tip403Verdict,
 } from "./tip403";
+import { serverTransport } from "@/lib/serverRpc";
 
 const STATUS_TTL_MS = 30_000;
 const STATUS_MAX = 500;
@@ -45,7 +46,7 @@ function readerFor(net: GloamNetwork): Tip403Reader | null {
   if (hit) return hit;
   const client = createPublicClient({
     chain: net.chain,
-    transport: http(net.chain.rpcUrls.default.http[0], { timeout: 8_000, retryCount: 1 }),
+    transport: serverTransport(net, { timeout: 8_000, retryCount: 1 }),
   });
   const reader: Tip403Reader = {
     readContract: (call) => client.readContract(call as Parameters<typeof client.readContract>[0]),

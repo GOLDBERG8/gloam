@@ -5,6 +5,7 @@ import { RecoveryError, backupExists, deleteBackup, isHex64, readBackup, writeBa
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 /** Requests per IP per minute. */
 const RATE_LIMIT = 60;
@@ -12,7 +13,8 @@ const RATE_LIMIT = 60;
  * New backups per IP per day. A person makes one per sign-in method; each can
  * hold about 500 KB, so this keeps the store from being filled with junk.
  */
-const NEW_BACKUPS_PER_DAY = 10;
+// per IP, and mobile carriers put many people behind one address
+const NEW_BACKUPS_PER_DAY = 50;
 const MAX_BODY = 600_000;
 
 function fail(status: number, message: string, headers?: HeadersInit) {

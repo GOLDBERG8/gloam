@@ -4,10 +4,11 @@
  * chain. Pool events are matched here because a payment note can come from a
  * deposit (Shielded), a private send (Transferred) or a trade (SealedSwapped).
  */
-import { createPublicClient, http, parseEventLogs, type Address, type Hex, type PublicClient } from "viem";
+import { createPublicClient, parseEventLogs, type Address, type Hex, type PublicClient } from "viem";
 import { getNetwork, NETWORK_KEYS, type GloamNetwork } from "@/lib/networks";
 import { classifyPaymentLogs, type PaymentLookup, type PoolEventLog } from "./payrollCheck";
 import type { PayrollPayment } from "./types";
+import { serverTransport } from "@/lib/serverRpc";
 
 const POOL_ABI = [
   {
@@ -85,7 +86,7 @@ export function clientFor(net: GloamNetwork): PublicClient {
   if (existing) return existing;
   const client = createPublicClient({
     chain: net.chain,
-    transport: http(net.chain.rpcUrls.default.http[0], { timeout: 25_000, retryCount: 2 }),
+    transport: serverTransport(net, { timeout: 25_000, retryCount: 2 }),
   });
   clients.set(net.chainId, client);
   return client;

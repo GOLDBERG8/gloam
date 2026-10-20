@@ -18,7 +18,8 @@ export const dynamic = "force-dynamic";
 /** Which networks the relay can submit on right now (no secrets). */
 export async function GET() {
   const networks = await relayStatus();
-  return NextResponse.json({ ok: true, networks }, { headers: { "Cache-Control": "no-store" } });
+  // public and the same for everyone: the CDN answers the app's checks, the relay's balance reads stay rare
+  return NextResponse.json({ ok: true, networks }, { headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60" } });
 }
 
 /**
