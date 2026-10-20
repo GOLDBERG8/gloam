@@ -14,7 +14,7 @@ const EXPLORER_URL = `${robinhood.blockExplorers.default.url}/token/${GLOAM_TOKE
 export const metadata: Metadata = {
   title: "$GLOAM",
   description:
-    "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, a share of Gloam's fees buys it back, and from mainnet you can hold it privately.",
+    "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, half of Gloam's fees buy it back, and from mainnet you can hold it privately.",
   alternates: { canonical: "/token" },
   openGraph: {
     title: "$GLOAM, the Gloam token",
@@ -44,7 +44,7 @@ const USES = [
   {
     n: "02",
     title: "Buybacks",
-    body: "At mainnet, deposits and private payments are free and cash-outs carry a 0.25% fee. A share of those fees buys $GLOAM from the market.",
+    body: "At mainnet, deposits and private payments are free and cash-outs carry a 0.25% fee. Half of Gloam's fees buy $GLOAM from the market: half of that is burned, half goes to the Gloam treasury.",
     when: "Starts when fees go live",
   },
   {
@@ -58,6 +58,35 @@ const USES = [
     title: "First access",
     body: "Holders get new Gloam features first, from agent tools to payroll upgrades.",
     when: "After mainnet",
+  },
+];
+
+/* ---------- what holders ask ---------- */
+
+const QUESTIONS = [
+  {
+    q: "What is it for, besides governance?",
+    a: "Buybacks tie it to how much Gloam gets used, you can hold it privately in the vault from mainnet, and holders get new features first.",
+  },
+  {
+    q: "How much does the team hold?",
+    a: "None. There was no team allocation and no presale, so there is nothing to vest or unlock. Every token started in the pool, and the launch liquidity is locked.",
+  },
+  {
+    q: "Then how is the team paid?",
+    a: "By the product, not the token. From mainnet a cash-out carries a 0.25% fee: half of Gloam's fees run the team and the service, half buy back $GLOAM. Orynth also pays a small creator fee on trades. Payroll and API fees come later.",
+  },
+  {
+    q: "Burned or kept?",
+    a: "Half of every buyback is burned, so the supply only goes down. The other half goes to the Gloam treasury.",
+  },
+  {
+    q: "Is there staking?",
+    a: "Not for yield. Later, relayers that help run Gloam will stake $GLOAM to take part.",
+  },
+  {
+    q: "Is there an airdrop for testnet users?",
+    a: "Nothing is decided. If that changes, you will hear it from @gloamtrade on X first.",
   },
 ];
 
@@ -83,7 +112,7 @@ const PHASES: Phase[] = [
     items: [
       "Gloam goes live on Tempo and Robinhood Chain mainnet",
       "Shield $GLOAM in the Robinhood Chain pool: 25,000 per deposit, 250,000 in total during beta",
-      "Fees switch on, and a share starts buying back $GLOAM",
+      "Fees switch on, and half of them start buying back $GLOAM",
       "The first holder vote, held in the open",
     ],
   },
@@ -196,6 +225,24 @@ export default function TokenPage() {
           </div>
         </section>
 
+        {/* what holders ask */}
+        <section id="questions" className="mx-auto max-w-[1240px] scroll-mt-20 px-6 pt-20 sm:pt-28">
+          <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
+            <div>
+              <p className="t-label">Questions</p>
+              <h2 className="t-display-l mt-4 max-w-[12ch]">What holders ask</h2>
+            </div>
+            <dl className="divide-y divide-line border-y border-line">
+              {QUESTIONS.map((x) => (
+                <div key={x.q} className="grid grid-cols-1 gap-2 py-6 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] sm:gap-8">
+                  <dt className="text-[17px] leading-snug tracking-[-0.01em]">{x.q}</dt>
+                  <dd className="text-[14.5px] leading-relaxed text-mute">{x.a}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </section>
+
         {/* roadmap */}
         <section id="roadmap" className="mx-auto max-w-[1240px] scroll-mt-20 px-6 py-20 sm:py-28">
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
@@ -203,8 +250,8 @@ export default function TokenPage() {
               <p className="t-label">Roadmap</p>
               <h2 className="t-display-l mt-4 max-w-[12ch]">Where $GLOAM goes from here</h2>
               <p className="mt-5 max-w-[36ch] text-[15px] leading-relaxed text-mute">
-                Each step lands with the product, not before it. We will share the
-                mainnet date with holders and partners ahead of time.
+                Each step lands with the product, not before it. Mainnet goes live
+                Wednesday 21 October, 13:00 UTC.
               </p>
             </div>
             <ol className="relative">
@@ -292,8 +339,7 @@ export default function TokenPage() {
           <p className="max-w-[72ch] text-[13px] leading-relaxed text-mute">
             No promises on price. $GLOAM is a governance and utility token. It is
             not a share in Gloam and not a claim on its revenue: buybacks are
-            Gloam&apos;s choice of what to do with its fees, not a payout to
-            holders. Nothing here is financial advice. Read the{" "}
+            how Gloam uses part of its fees, not a payout to holders. Nothing here is financial advice. Read the{" "}
             <Link href="/disclosures" className="text-foreground underline underline-offset-4 hover:text-sealed">
               risk disclosures
             </Link>
