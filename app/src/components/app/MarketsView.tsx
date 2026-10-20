@@ -43,10 +43,10 @@ function changeTone(n: number) {
 export function MarketsView() {
   const { network } = useNetwork();
   const router = useRouter();
-  // Tokenized stock marks are a Robinhood Chain product; Tempo is stablecoin
-  // payments, with no equities to list or trade. On Tempo there is no Markets
-  // page at all, so anyone who lands here goes back to the portfolio.
-  const isTempo = network.key === "tempo";
+  // Tokenized stock marks are a Robinhood Chain testnet product; Tempo and the
+  // mainnets are payments, with no equities to list or trade. There the Markets
+  // page does not exist, so anyone who lands here goes back to the portfolio.
+  const isTempo = !network.stocks;
   useEffect(() => {
     if (isTempo) router.replace("/app");
   }, [isTempo, router]);

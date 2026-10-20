@@ -64,13 +64,13 @@ export function SendView() {
 
   function validate(): string | null {
     if (!isConnected || !onProduct) {
-      return "Connect and switch to testnet.";
+      return network.testnet ? "Connect and switch to testnet." : `Connect and switch to ${network.label}.`;
     }
     if (!isAddress(to)) return "Enter a valid address.";
     const value = safeParseEther(amount || "0");
     if (value === null) return "Invalid amount.";
     if (value <= BigInt(0)) return "Amount must be greater than zero.";
-    if (bal && value > bal.value) return "Not enough testnet ETH.";
+    if (bal && value > bal.value) return network.testnet ? "Not enough testnet ETH." : "Not enough ETH.";
     return null;
   }
 
@@ -129,7 +129,7 @@ export function SendView() {
 
   // Tempo has no native coin to send (its nodes report a placeholder balance),
   // so money there is stablecoins, which move privately from Move.
-  if (network.key === "tempo") {
+  if (network.family === "tempo") {
     return (
       <div className="gl-card p-5 sm:p-7">
         <h2 className="t-title text-foreground">Send on Tempo</h2>
@@ -408,7 +408,7 @@ export function SendView() {
                 {sentTo ? shortAddress(sentTo, 5) : ""}
               </span>
             </p>
-            <p className="mt-2">Settled on testnet.</p>
+            <p className="mt-2">{network.testnet ? "Settled on testnet." : `Settled on ${network.label}.`}</p>
           </>
         }
         primaryHref={hash ? network.explorerTx(hash) : undefined}

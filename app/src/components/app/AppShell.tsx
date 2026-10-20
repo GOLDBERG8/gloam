@@ -10,6 +10,7 @@ import { WelcomeModal } from "./WelcomeModal";
 import { PasskeyGate } from "./PasskeyGate";
 import { NetworkSelector } from "./NetworkSelector";
 import { useNetwork } from "./NetworkProvider";
+import { TestFundsNotice } from "./TestFundsNotice";
 
 type NavItem = {
   href: string;
@@ -153,10 +154,10 @@ export function AppShell({
   const { network } = useNetwork();
   const [open, setOpen] = useState(false);
 
-  // On Tempo the product is private stablecoin payments, not tokenized
-  // equities, so tokenized-stock Markets drops out of the app entirely.
-  const isTempo = network.key === "tempo";
-  const navItems = nav.filter((item) => !(isTempo && item.robinhoodOnly));
+  // Tokenized-stock Markets only exists on Robinhood Chain testnet. On Tempo
+  // and on the mainnets the product is private payments, so it drops out.
+  const isTempo = network.family === "tempo";
+  const navItems = nav.filter((item) => !(!network.stocks && item.robinhoodOnly));
   const shownSubtitle = isTempo && subtitleTempo ? subtitleTempo : subtitle;
 
   useEffect(() => {
@@ -275,6 +276,7 @@ export function AppShell({
 
       <div className="flex flex-1 flex-col lg:pl-[272px]">
         <main className="mx-auto w-full max-w-[1120px] flex-1 px-4 pb-16 pt-8 sm:px-8 sm:pt-12">
+          <TestFundsNotice />
           <div className="gl-pagehead rise mb-8 gap-4 sm:mb-10">
             <div>
               <h1 className="t-display-m text-foreground">{title}</h1>
@@ -292,9 +294,11 @@ export function AppShell({
         <footer className="mx-auto w-full max-w-[1120px] px-4 pb-8 sm:px-8">
           <div className="flex flex-col gap-3 border-t border-line pt-5 text-[12.5px] text-mute sm:flex-row sm:items-center sm:justify-between">
             <p>
-              {isTempo
-                ? "Gloam on Tempo testnet. Private stablecoin payments for people and agents. Play money only."
-                : "Gloam on Robinhood Chain testnet. Play money only. Not investment, legal or tax advice."}
+              {!network.testnet
+                ? `Gloam on ${network.label} mainnet. Real money. Not investment, legal or tax advice.`
+                : isTempo
+                  ? "Gloam on Tempo testnet. Private stablecoin payments for people and agents. Play money only."
+                  : "Gloam on Robinhood Chain testnet. Play money only. Not investment, legal or tax advice."}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <Link href="/docs/testnet" className="hover:text-foreground">

@@ -12,7 +12,7 @@ import {
 import { Logo } from "@/components/Logo";
 import { SealedField } from "@/components/ui/SealedField";
 import { shortAddress } from "@/lib/chain";
-import { getNetwork, isNetworkKey } from "@/lib/networks";
+import { MAINNET_ENABLED, NETWORK_KEYS, getNetwork, isNetworkKey, networkName, type GloamNetwork } from "@/lib/networks";
 import type { DayRow, NetworkMetrics, OnchainMetrics } from "@/lib/onchainMetrics";
 import type { DailyCounters, StoredEvent } from "@/lib/tractionStore";
 import type { FunnelDay } from "@/lib/funnelStore";
@@ -1165,13 +1165,18 @@ function BugsPanel() {
   );
 }
 
+/** A network's name; "testnet" is added once a mainnet sits beside it. */
+function adminName(n: GloamNetwork): string {
+  return MAINNET_ENABLED ? networkName(n) : n.label;
+}
+
 /** Chain ids read as network names in the breakdowns. */
 function dimValue(field: string, value: string): string {
   if (field === "chainId") {
-    const net = [getNetwork("robinhood"), getNetwork("tempo")].find((x) => String(x.chainId) === value);
-    return net ? `${net.label} (${value})` : value;
+    const net = NETWORK_KEYS.map(getNetwork).find((x) => String(x.chainId) === value);
+    return net ? `${adminName(net)} (${value})` : value;
   }
-  if (field === "network" && isNetworkKey(value)) return getNetwork(value).label;
+  if (field === "network" && isNetworkKey(value)) return adminName(getNetwork(value));
   return value;
 }
 

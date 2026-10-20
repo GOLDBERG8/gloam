@@ -76,6 +76,9 @@ export default function ClaimPage() {
     }
   }
 
+  // A link made on a mainnet is real money; anything else reads as before.
+  const realNet = view.kind === "ready" && !getNetwork(view.net).testnet ? getNetwork(view.net) : null;
+
   return (
     <div className="relative flex min-h-[100svh] flex-col bg-surface text-foreground">
       <header className="mx-auto flex w-full max-w-[560px] items-center justify-between px-5 pt-6">
@@ -86,7 +89,7 @@ export default function ClaimPage() {
           </svg>
           Gloam
         </Link>
-        <span className="text-[12.5px] text-mute">Testnet</span>
+        <span className="text-[12.5px] text-mute">{realNet ? "Mainnet" : "Testnet"}</span>
       </header>
 
       <main className="mx-auto flex w-full max-w-[560px] flex-1 flex-col px-5 pb-10 pt-8">
@@ -157,7 +160,7 @@ export default function ClaimPage() {
                       ? "Connect your wallet on the next screen, then tap Claim."
                       : WALLETCONNECT_ENABLED
                         ? "Connect a wallet app such as MetaMask on the next screen, then tap Claim."
-                        : "You'll need a wallet app such as MetaMask or Rabby to claim on Robinhood Chain."}
+                        : `You'll need a wallet app such as MetaMask or Rabby to claim on ${getNetwork(view.net).label}.`}
                 </p>
               </div>
             </div>
@@ -174,7 +177,7 @@ export default function ClaimPage() {
 
             <ol className="mt-8 grid gap-4 px-1">
               {[
-                ["Sign in or connect a wallet", "It takes a few seconds and costs nothing on testnet."],
+                ["Sign in or connect a wallet", realNet ? "It takes a few seconds." : "It takes a few seconds and costs nothing on testnet."],
                 ["Tap Claim", "The money moves into your private balance on this device."],
                 ["It stays private", "The explorer never shows how much you hold or who paid you."],
               ].map(([t, s], i) => (
@@ -198,7 +201,9 @@ export default function ClaimPage() {
         )}
 
         <p className="mt-auto pt-10 text-center text-[12.5px] leading-relaxed text-mute">
-          Gloam runs on testnet: this is play money with no real value.{" "}
+          {realNet
+            ? `This is real money on ${realNet.label}.`
+            : "Gloam runs on testnet: this is play money with no real value."}{" "}
           <Link href="/docs/private-pay" className="underline underline-offset-4">
             How private payments work
           </Link>

@@ -24,7 +24,7 @@ import {
 } from "@/lib/proofs";
 import { ProofVerdict, amountOf, symbolOf } from "@/components/verify/ProofVerdict";
 import { networkForChain } from "@/lib/proofs/chain";
-import { getNetwork, type GloamNetwork } from "@/lib/networks";
+import { NETWORK_KEYS, getNetwork, type ChainFamily, type GloamNetwork, type NetworkKey } from "@/lib/networks";
 import { track } from "@/lib/track";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 
@@ -149,12 +149,26 @@ function chainRows(n: GloamNetwork): Row[] {
   return rows;
 }
 
-const CHAINS: { key: "robinhood" | "tempo"; logo: string; testnet: string }[] = [
-  { key: "robinhood", logo: "/brand/logos/robinhood.png", testnet: "Robinhood Chain testnet" },
-  { key: "tempo", logo: "/brand/logos/tempo.svg", testnet: "Tempo Moderato testnet" },
-];
+const CHAIN_LOGOS: Record<ChainFamily, string> = {
+  robinhood: "/brand/logos/robinhood.png",
+  tempo: "/brand/logos/tempo.svg",
+};
 
-function ChainCard({ chainKey, logo, testnet }: { chainKey: "robinhood" | "tempo"; logo: string; testnet: string }) {
+const NETWORK_LINES: Record<NetworkKey, string> = {
+  robinhood: "Robinhood Chain testnet",
+  tempo: "Tempo Moderato testnet",
+  "robinhood-mainnet": "Robinhood Chain mainnet",
+  "tempo-mainnet": "Tempo mainnet",
+};
+
+/** Every network Gloam runs on: each mainnet once its pool is in, then the two testnets. */
+const CHAINS: { key: NetworkKey; logo: string; testnet: string }[] = NETWORK_KEYS.map((key) => ({
+  key,
+  logo: CHAIN_LOGOS[getNetwork(key).family],
+  testnet: NETWORK_LINES[key],
+}));
+
+function ChainCard({ chainKey, logo, testnet }: { chainKey: NetworkKey; logo: string; testnet: string }) {
   const n = getNetwork(chainKey);
   const rows = chainRows(n);
   return (

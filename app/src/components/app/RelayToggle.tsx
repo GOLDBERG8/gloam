@@ -1,5 +1,7 @@
 "use client";
 
+import { useNetwork } from "./NetworkProvider";
+
 /** "Hide my wallet" switch for relayed submission. */
 export function RelayToggle({
   available,
@@ -12,6 +14,7 @@ export function RelayToggle({
   onChange: (v: boolean) => void;
   compact?: boolean;
 }) {
+  const { network } = useNetwork();
   if (!available) {
     return (
       <p
@@ -38,7 +41,7 @@ export function RelayToggle({
         </span>
         <span className="mt-0.5 block text-[12.5px] leading-relaxed text-mute">
           {on
-            ? "Gloam sends it for you, so your wallet never shows up next to it. Free on testnet."
+            ? `Gloam sends it for you, so your wallet never shows up next to it.${network.testnet ? " Free on testnet." : ""}`
             : "Off. Your wallet will show as the sender of each payment."}
         </span>
       </span>

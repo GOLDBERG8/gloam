@@ -10,7 +10,7 @@
  * the sheet on mobile (where it drops down).
  */
 import { useEffect, useRef, useState } from "react";
-import { allNetworks, isNetworkWritable } from "@/lib/networks";
+import { MAINNET_ENABLED, allNetworks, isNetworkWritable } from "@/lib/networks";
 import { useNetwork } from "./NetworkProvider";
 import { TokenLogo } from "./TokenLogo";
 
@@ -50,13 +50,13 @@ export function NetworkSelector() {
           open ? "bg-surface-2" : "bg-surface"
         }`}
       >
-        <TokenLogo id={network.key} symbol={network.label} size={34} />
+        <TokenLogo id={network.family} symbol={network.label} size={34} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-medium leading-tight">
             {network.label}
           </span>
           <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">
-            Testnet
+            {network.testnet ? (MAINNET_ENABLED ? "Testnet · test funds" : "Testnet") : "Mainnet · real money"}
           </span>
         </span>
         <svg
@@ -103,7 +103,7 @@ export function NetworkSelector() {
                   writable ? "hover:bg-surface" : "cursor-not-allowed opacity-60"
                 } ${active ? "bg-surface" : ""}`}
               >
-                <TokenLogo id={n.key} symbol={n.label} size={30} />
+                <TokenLogo id={n.family} symbol={n.label} size={30} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="text-[14px] font-medium text-foreground">
@@ -114,6 +114,17 @@ export function NetworkSelector() {
                         Soon
                       </span>
                     )}
+                    {/* Once a mainnet is listed, every row says which money it is. */}
+                    {MAINNET_ENABLED &&
+                      (n.testnet ? (
+                        <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-mute">
+                          Testnet
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-sealed-soft px-2 py-0.5 text-[11px] font-medium text-sealed">
+                          Mainnet
+                        </span>
+                      ))}
                   </span>
                   <span className="mt-0.5 block text-[12px] leading-snug text-mute">
                     {n.note}

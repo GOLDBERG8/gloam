@@ -36,6 +36,8 @@ export function OnboardingCard() {
   const [open, setOpen] = useState(false);
   const { network } = useNetwork();
   const isTempo = network.key === "tempo";
+  // A mainnet holds real money: no test funds to fetch, so no faucet step.
+  const steps = network.testnet ? ONBOARDING_STEPS : ONBOARDING_STEPS.filter((s) => s.id !== "faucet");
   const tempoFaucet = useTempoFaucet();
 
   const refresh = useCallback(() => setState(loadOnboarding()), []);
@@ -75,9 +77,9 @@ export function OnboardingCard() {
 
   if (!state || !open || typeof document === "undefined") return null;
 
-  const remaining = ONBOARDING_STEPS.filter((s) => !state.done.includes(s.id));
+  const remaining = steps.filter((s) => !state.done.includes(s.id));
   const next = remaining[0] ?? null;
-  const doneCount = ONBOARDING_STEPS.length - remaining.length;
+  const doneCount = steps.length - remaining.length;
 
   const allDone = remaining.length === 0;
 
@@ -115,7 +117,7 @@ export function OnboardingCard() {
             <p className="t-label">
               {allDone
                 ? "Setup complete"
-                : `${doneCount} of ${ONBOARDING_STEPS.length} done`}
+                : `${doneCount} of ${steps.length} done`}
             </p>
             <h2
               id="onboarding-title"
@@ -134,14 +136,14 @@ export function OnboardingCard() {
               className="relative z-[1] mt-5 h-1 w-full overflow-hidden rounded-full bg-surface-2"
               role="progressbar"
               aria-valuemin={0}
-              aria-valuemax={ONBOARDING_STEPS.length}
+              aria-valuemax={steps.length}
               aria-valuenow={doneCount}
               aria-label="Setup progress"
             >
               <span
                 className="block h-full rounded-full bg-ink transition-[width] duration-500"
                 style={{
-                  width: `${(doneCount / ONBOARDING_STEPS.length) * 100}%`,
+                  width: `${(doneCount / steps.length) * 100}%`,
                 }}
               />
             </div>
@@ -150,7 +152,7 @@ export function OnboardingCard() {
 
         {!allDone && (
           <ol className="border-t border-line px-7">
-            {ONBOARDING_STEPS.map((step, i) => {
+            {steps.map((step, i) => {
               const done = state.done.includes(step.id);
               const isNext = next?.id === step.id;
               return (

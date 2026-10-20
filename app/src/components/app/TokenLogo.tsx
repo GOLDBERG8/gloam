@@ -34,7 +34,7 @@ const PNG_LOGO_IDS = new Set([
   "cost", "jpm", "v", "ma", "mstr", "gme", "rblx", "rddt", "snap", "f",
   "rivn", "baba", "spot",
   // stablecoins
-  "usdg",
+  "usdg", "usdce", "usdt0",
   // networks
   "robinhood",
 ]);
@@ -46,6 +46,8 @@ const SPECIAL_LOGOS: Record<string, string> = {
   alphausd: "/brand/logos/alphausd.svg",
   betausd: "/brand/logos/betausd.svg",
   thetausd: "/brand/logos/thetausd.svg",
+  // $GLOAM: the Gloam mark
+  gloam: "/brand/kit/gloam-avatar-ink.png",
 };
 
 function resolveLogo(id: string): string | undefined {

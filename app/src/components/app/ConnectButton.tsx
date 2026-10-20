@@ -8,7 +8,7 @@ import {
   useSwitchChain,
   useChainId,
 } from "wagmi";
-import { ensureRhTestnetWallet, shortAddress } from "@/lib/chain";
+import { ensureRhTestnetWallet, ensureWalletOnChain, shortAddress } from "@/lib/chain";
 import { isTempoWallet } from "@/lib/tempoWallet";
 import { useNetwork } from "./NetworkProvider";
 
@@ -40,7 +40,8 @@ export function ConnectButton({ className = "" }: { className?: string }) {
       try {
         await switchChain({ chainId: network.chainId });
       } catch {
-        await ensureRhTestnetWallet();
+        // testnets keep their old fallback; a mainnet adds its own chain
+        await (network.testnet ? ensureRhTestnetWallet() : ensureWalletOnChain(network.chain));
         await switchChain({ chainId: network.chainId });
       }
     } catch (e) {

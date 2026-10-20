@@ -434,7 +434,7 @@ export function ShieldView() {
 
   function validate(): string | null {
     if (!deployed) return "Pool not configured.";
-    if (!isConnected || !onProduct) return "Connect and switch to testnet.";
+    if (!isConnected || !onProduct) return network.testnet ? "Connect and switch to testnet." : `Connect and switch to ${network.label}.`;
     const value = parseAmount();
     if (value === null) return "Invalid amount.";
     if (value <= BigInt(0)) return "Amount must be greater than zero.";
@@ -700,7 +700,8 @@ export function ShieldView() {
 
   const hasActiveShield = openNotes.length > 0;
   const connectedOk = isConnected && onProduct;
-  const isTempo = network.key === "tempo";
+  // Private stock trade only exists on Robinhood Chain testnet.
+  const stocks = network.stocks;
 
   const maxDisplay =
     selectedToken && walletBalance !== undefined
@@ -1007,7 +1008,7 @@ export function ShieldView() {
           <>
             {successBody}
             {/* Private trade is not live yet, so a recording never points at it. */}
-            {successTitle === "Added privately" && !isTempo && !demo && (
+            {successTitle === "Added privately" && stocks && !demo && (
               <p className="mt-2">
                 For a private stock trade, add ETH, then open{" "}
                 <a

@@ -21,7 +21,7 @@ const TABS = [
     id: "trade",
     label: "Trade",
     hint: "Trade with the size kept private",
-    robinhoodOnly: true,
+    stocksOnly: true,
   },
   {
     id: "send",
@@ -54,10 +54,16 @@ export function VaultHub() {
   // browser. Render them once hydrated so server and client HTML always match.
   const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
 
-  // Tokenized-stock trading and native-coin sends only exist on Robinhood
-  // Chain, so those tabs drop out on Tempo (same rule as Markets in the shell).
-  const isTempo = hydrated && network.key === "tempo";
-  const tabs = TABS.filter((t) => !(isTempo && "robinhoodOnly" in t && t.robinhoodOnly));
+  // Tokenized-stock trading only exists on Robinhood Chain testnet (the mainnet
+  // pools take payments only), and native-coin sends only on Robinhood Chain,
+  // so those tabs drop out elsewhere (same rule as Markets in the shell).
+  const isTempo = hydrated && network.family === "tempo";
+  const noStocks = hydrated && !network.stocks;
+  const tabs = TABS.filter(
+    (t) =>
+      !("robinhoodOnly" in t && t.robinhoodOnly && isTempo) &&
+      !("stocksOnly" in t && t.stocksOnly && noStocks)
+  );
 
   const raw = sp.get("tab");
   const tab: TabId = (tabs.some((t) => t.id === raw) ? raw : "shield") as TabId;
