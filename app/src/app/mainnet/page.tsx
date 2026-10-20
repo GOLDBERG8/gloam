@@ -3,9 +3,16 @@ import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
-import { CountdownDigits, LocalLaunchTime } from "@/components/MainnetCountdown";
+import {
+  CountdownDigits,
+  LocalLaunchTime,
+  MainnetHeadline,
+  MainnetHeroActions,
+  MainnetLiveNote,
+  MainnetTestnetLine,
+} from "@/components/MainnetCountdown";
 import { FlowField } from "@/components/ui/FlowField";
-import { MAINNET_LAUNCH_LABEL, calendarUrl } from "@/lib/mainnet";
+import { MAINNET_LAUNCH_LABEL } from "@/lib/mainnet";
 
 export const metadata: Metadata = {
   title: "Mainnet countdown",
@@ -34,7 +41,7 @@ export default function MainnetPage() {
             <FlowField />
             <div className="relative z-10 mx-auto w-full max-w-[1040px]">
               <p className="t-label">Mainnet</p>
-              <h1 className="t-display-xl mt-5 max-w-[16ch]">Gloam goes live on mainnet</h1>
+              <MainnetHeadline />
 
               <div className="mt-10 sm:mt-12">
                 <CountdownDigits
@@ -43,6 +50,7 @@ export default function MainnetPage() {
                       It&apos;s time. Mainnet is rolling out now.
                     </p>
                   }
+                  onLive={<MainnetLiveNote />}
                 />
               </div>
 
@@ -53,14 +61,7 @@ export default function MainnetPage() {
                 </p>
               </div>
 
-              <div className="mt-6 flex flex-wrap gap-2">
-                <a href={calendarUrl()} target="_blank" rel="noopener noreferrer" className="btn btn-ink btn-lg">
-                  Add to calendar
-                </a>
-                <a href="https://x.com/gloamtrade" target="_blank" rel="noopener noreferrer" className="btn btn-quiet btn-lg">
-                  Follow on X <span aria-hidden>→</span>
-                </a>
-              </div>
+              <MainnetHeroActions />
             </div>
           </div>
         </section>
@@ -86,9 +87,7 @@ export default function MainnetPage() {
 
         <section className="mx-auto max-w-[1240px] px-6 pb-8">
           <div className="flex flex-col items-start gap-4 border-t border-line pt-10 sm:flex-row sm:items-center sm:justify-between">
-            <p className="max-w-[46ch] text-[15px] leading-relaxed text-soft">
-              Until then, everything works on testnet with play money.
-            </p>
+            <MainnetTestnetLine />
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <AppLink href="/app" className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed">
                 Try the testnet <span aria-hidden>→</span>

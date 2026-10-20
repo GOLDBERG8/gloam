@@ -4,8 +4,7 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { SealedField } from "@/components/ui/SealedField";
 import { FlowField } from "@/components/ui/FlowField";
-import { CountdownCompact } from "@/components/MainnetCountdown";
-import { MAINNET_LAUNCH_SHORT, MAINNET_PAGE } from "@/lib/mainnet";
+import { MainnetPill } from "@/components/MainnetCountdown";
 import { CursorReveal } from "@/components/ui/CursorReveal";
 import { SealStream } from "@/components/landing/SealStream";
 import { PayrollLive } from "@/components/landing/PayrollLive";
@@ -197,17 +196,7 @@ export function Landing() {
             <FlowField />
             <CursorReveal />
             <div className="relative z-10 max-w-[720px]">
-              <Link
-                href={MAINNET_PAGE}
-                className="gl-glass mb-6 inline-flex h-9 items-center gap-2 rounded-full px-4 text-[13.5px] text-foreground transition-colors hover:bg-panel/70"
-              >
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-sealed" />
-                Mainnet {MAINNET_LAUNCH_SHORT}
-                <span className="text-mute">
-                  <CountdownCompact />
-                </span>
-                <span aria-hidden>→</span>
-              </Link>
+              <MainnetPill />
               <h1 className="t-display-xl">Private money on public chains</h1>
               <p className="mt-6 max-w-[46ch] text-[18px] leading-[1.55] text-soft sm:text-[18px]">
                 For people and teams paid in stablecoins, and the agents that

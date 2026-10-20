@@ -48,6 +48,17 @@ export function isMainnetLive(now: number = Date.now()): boolean {
 }
 
 /**
+ * The chains whose mainnet pool is in, as words: "Robinhood Chain and Tempo",
+ * or one of them. Both, as announced, when neither is in (only a test asks then).
+ */
+export function liveMainnetNames(): string {
+  const names: string[] = [];
+  if (mainnetPool(4663)) names.push("Robinhood Chain");
+  if (mainnetPool(4217)) names.push("Tempo");
+  return names.length ? names.join(" and ") : "Robinhood Chain and Tempo";
+}
+
+/**
  * Launch time, shared by the countdown page, the site banner, the homepage
  * link and Glim. Wednesday 21 October 2026, 13:00 UTC (14:00 WAT).
  */

@@ -1,7 +1,19 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { MAINNET_LAUNCH_MS, compactRemaining, remainingUntil, type Remaining } from "@/lib/mainnet";
+import {
+  MAINNET_CONFIGURED,
+  MAINNET_LAUNCH_MS,
+  MAINNET_LAUNCH_SHORT,
+  MAINNET_PAGE,
+  calendarUrl,
+  compactRemaining,
+  liveMainnetNames,
+  remainingUntil,
+  type Remaining,
+} from "@/lib/mainnet";
+import { AppLink } from "@/components/AppLink";
 
 /** The time left to mainnet, ticking once a second. Null until mounted, so the server and the first render agree. */
 export function useMainnetRemaining(): Remaining | null {
@@ -20,11 +32,22 @@ export function useMainnetRemaining(): Remaining | null {
   return r;
 }
 
+/**
+ * Whether mainnet is live: the launch time has passed and a mainnet pool is
+ * filled in (lib/mainnet.ts). False until mounted, and false after the launch
+ * time for as long as no pool is in, so the countdown copy stays as it was.
+ */
+export function useMainnetLive(): boolean {
+  const r = useMainnetRemaining();
+  return Boolean(r?.done) && MAINNET_CONFIGURED;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** The big countdown: days, hours, minutes, seconds. */
-export function CountdownDigits({ onDone }: { onDone?: React.ReactNode }) {
+export function CountdownDigits({ onDone, onLive }: { onDone?: React.ReactNode; onLive?: React.ReactNode }) {
   const r = useMainnetRemaining();
+  if (r?.done && MAINNET_CONFIGURED && onLive) return <>{onLive}</>;
   if (r?.done && onDone) return <>{onDone}</>;
   const units: [string, string][] = [
     ["Days", r ? pad(r.days) : "--"],
@@ -78,4 +101,85 @@ export function LocalLaunchTime() {
   }, []);
   if (!text) return null;
   return <>Your time: {text}</>;
+}
+
+/* ---------- the parts of the page that flip to live ---------- */
+
+/** The countdown page headline. */
+export function MainnetHeadline() {
+  const live = useMainnetLive();
+  return (
+    <h1 className="t-display-xl mt-5 max-w-[16ch]">
+      {live ? "Gloam is live on mainnet" : "Gloam goes live on mainnet"}
+    </h1>
+  );
+}
+
+/** What replaces the digits once mainnet is live. */
+export function MainnetLiveNote() {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="t-display-l max-w-[22ch]">Mainnet is live.</p>
+      <p className="max-w-[46ch] text-[16px] leading-relaxed text-soft">
+        Private payments with real money on {liveMainnetNames()}.
+      </p>
+    </div>
+  );
+}
+
+/** Calendar and X before launch; the app and X once live. */
+export function MainnetHeroActions() {
+  const live = useMainnetLive();
+  return (
+    <div className="mt-6 flex flex-wrap gap-2">
+      {live ? (
+        <AppLink href="/app" className="btn btn-ink btn-lg">
+          Open the app
+        </AppLink>
+      ) : (
+        <a href={calendarUrl()} target="_blank" rel="noopener noreferrer" className="btn btn-ink btn-lg">
+          Add to calendar
+        </a>
+      )}
+      <a href="https://x.com/gloamtrade" target="_blank" rel="noopener noreferrer" className="btn btn-quiet btn-lg">
+        Follow on X <span aria-hidden>→</span>
+      </a>
+    </div>
+  );
+}
+
+/** The line about the testnet at the foot of the countdown page. */
+export function MainnetTestnetLine() {
+  const live = useMainnetLive();
+  return (
+    <p className="max-w-[46ch] text-[15px] leading-relaxed text-soft">
+      {live
+        ? "The testnet stays open with play money, for trying things first."
+        : "Until then, everything works on testnet with play money."}
+    </p>
+  );
+}
+
+/** The homepage hero link: the launch time and countdown, then that mainnet is live. */
+export function MainnetPill() {
+  const live = useMainnetLive();
+  return (
+    <Link
+      href={MAINNET_PAGE}
+      className="gl-glass mb-6 inline-flex h-9 items-center gap-2 rounded-full px-4 text-[13.5px] text-foreground transition-colors hover:bg-panel/70"
+    >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-sealed" />
+      {live ? (
+        "Mainnet is live"
+      ) : (
+        <>
+          Mainnet {MAINNET_LAUNCH_SHORT}
+          <span className="text-mute">
+            <CountdownCompact />
+          </span>
+        </>
+      )}
+      <span aria-hidden>→</span>
+    </Link>
+  );
 }
