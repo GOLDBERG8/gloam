@@ -598,8 +598,8 @@ export default function VerifyPage() {
               <p className="mt-5 max-w-[34ch] text-[15px] leading-relaxed text-mute">
                 Testnet with play money, so testnet proofs still use development
                 keys. The production trusted setup closed on 17 October with 13
-                contributors, and mainnet uses its final keys. An external audit
-                comes before mainnet.
+                contributors, and mainnet uses its final keys. It was reviewed
+                internally before launch, and an external audit is planned.
               </p>
             </div>
             <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">

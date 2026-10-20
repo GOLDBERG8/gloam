@@ -155,7 +155,7 @@ export default function DocsNetworksPage() {
         Both deployments are testnet with play money, and testnet proving keys
         come from a development ceremony. The production multi-party ceremony
         closed on 17 October with 13 contributors, and mainnet on both chains
-        uses its keys. An external audit is the remaining gate. The contracts
+        uses its keys. An external audit is planned. The contracts
         were self-reviewed across two multi-agent audit passes, the findings
         fixed, and the hardened pools redeployed on both chains.
       </p>

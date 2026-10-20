@@ -166,8 +166,8 @@ export default function DocsProofsPage() {
           <strong>Testnet only.</strong> Proofs run on Robinhood Chain and Tempo
           testnets with play money, using proving keys from a development
           ceremony. The production ceremony closed on 17 October with 13
-          contributors, and mainnet uses its keys. An external audit comes
-          before mainnet. See the <Link href="/docs/production">production gate</Link>.
+          contributors, and mainnet uses its keys. The code was reviewed
+          internally before launch, and an external audit is planned. See the <Link href="/docs/production">production gate</Link>.
         </li>
         <li>
           <strong>At least publishes spend markers.</strong> A proof of funds

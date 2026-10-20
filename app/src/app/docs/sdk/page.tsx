@@ -266,8 +266,8 @@ const { proofBytes, publicSignals } = await prover(circomInput);`}</code>
       <p>
         Robinhood Chain testnet <code>46630</code> only, with dev-ceremony keys.
         Real privacy only, never a mock success. Note secrets are the sole spend
-        authority: persist and protect them. Mainnet waits for a production
-        ceremony and an external audit; see{" "}
+        authority: persist and protect them. Mainnet runs on the production
+        ceremony&apos;s keys after an internal review; an external audit is planned. See{" "}
         <Link href="/docs/production">the production gate</Link>.
       </p>
     </DocsLayout>

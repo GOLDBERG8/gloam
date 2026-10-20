@@ -313,8 +313,8 @@ export default function DocsPrivacyPage() {
 
       <h2>Before mainnet</h2>
       <p>
-        Gloam is testnet only today, and there are honest gaps we will not ship to
-        real value without closing:
+        Gloam is testnet only today, and there are honest gaps to know about before
+        you put real money in:
       </p>
       <ul>
         <li>
@@ -325,7 +325,8 @@ export default function DocsPrivacyPage() {
         </li>
         <li>
           <strong>Internal audits only.</strong> Several rounds, with fixes
-          deployed. An external audit comes before mainnet.
+          deployed, and a full review before launch. An external audit is planned;
+          until then, beta deposit limits cap how much the vault can hold.
         </li>
         <li>
           <strong>A payer can take back a payment until it is claimed.</strong>{" "}

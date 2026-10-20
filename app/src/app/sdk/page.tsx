@@ -552,7 +552,7 @@ export default function SdkPage() {
                 },
                 {
                   title: "Keys",
-                  body: "Testnet proofs use development keys. The production ceremony is done, with 13 contributors, and mainnet uses its final keys. An external audit comes before mainnet.",
+                  body: "Testnet proofs use development keys. The production ceremony is done, with 13 contributors, and mainnet uses its final keys. It was reviewed internally before launch, and an external audit is planned.",
                 },
                 {
                   title: "Nothing faked",

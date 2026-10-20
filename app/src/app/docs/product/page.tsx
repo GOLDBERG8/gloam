@@ -109,7 +109,7 @@ export default function DocsProductPage() {
           {
             n: "○",
             title: "Mainnet path",
-            body: "A multi-party key ceremony and an external audit. Mainnet waits until the production gate is green.",
+            body: "The multi-party key ceremony is done and the code was reviewed internally before launch. An external audit is planned.",
           },
           {
             n: "○",

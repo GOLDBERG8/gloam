@@ -248,8 +248,8 @@ export default function DocsComparePage() {
           is done, with 13 contributors, and mainnet deploys its final keys.
         </li>
         <li>
-          <strong>Internal audits only.</strong> Two rounds, with fixes
-          deployed. An external audit comes before mainnet.
+          <strong>Internal audits only.</strong> Several rounds, with fixes
+          deployed, and a full review before launch. An external audit is planned.
         </li>
         <li>
           <strong>Small crowd.</strong> The testnet anonymity set is small, so

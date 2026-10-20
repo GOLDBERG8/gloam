@@ -225,8 +225,8 @@ await wallet.writeContract({
       <p>
         Robinhood Chain testnet only, with dev-ceremony proving keys. Everything
         here is real: real proofs, real on-chain state, no mocks. Sealed swaps
-        are disabled pending the H1 solvency work. Mainnet waits for a production
-        ceremony and an external audit; see{" "}
+        are disabled pending the H1 solvency work. Mainnet runs on the production
+        ceremony&apos;s keys after an internal review; an external audit is planned. See{" "}
         <Link href="/docs/production">the production gate</Link>.
       </p>
     </DocsLayout>

@@ -13,12 +13,12 @@ export default function DocsProductionPage() {
   return (
     <DocsLayout
       title="Production gate"
-      lede="Testnet is live. Mainnet and real money wait on this checklist, we will not skip it."
+      lede="The checklist mainnet clears before real money goes in, and what is still ahead."
       glance={[
         { label: "Today", value: "Testnet + dev keys" },
         { label: "Ceremony", value: "Done, 13 people" },
-        { label: "Audit", value: "Required" },
-        { label: "Mainnet", value: "Blocked" },
+        { label: "Audit", value: "Internal; external planned" },
+        { label: "Mainnet", value: "21 Oct, 13:00 UTC" },
       ]}
     >
       <h2>Why this page exists</h2>
