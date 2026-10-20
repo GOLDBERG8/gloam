@@ -12,6 +12,7 @@
  */
 import { defineChain, type Address, type Chain } from "viem";
 import { robinhoodTestnet } from "./chain";
+import type { CeremonyKind } from "./circuitArtifacts";
 import {
   TESTNET_POSEIDON_POOL,
   TESTNET_POSEIDON_DEPLOY_BLOCK,
@@ -75,6 +76,12 @@ export interface GloamNetwork {
   /** Largest eth_getLogs block range the public RPC accepts. */
   logRange: bigint;
   hashScheme: HashScheme;
+  /**
+   * The trusted-setup keys this network's verifiers hold: the single-party dev
+   * keys on the testnets, the ceremony's final keys on mainnet. Proofs for the
+   * network are made and checked with the same set (lib/circuitArtifacts).
+   */
+  ceremony: CeremonyKind;
   /** The asset the chain leads with in the product narrative. */
   primaryAsset: NetworkAsset;
   /** Stable assets shieldable on this network (empty until registered). */
@@ -107,6 +114,8 @@ export const tempoTestnet = defineChain({
       url: "https://explore.testnet.tempo.xyz",
     },
   },
+  // Multicall3 at its usual address, so batched reads go out as one call
+  contracts: { multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" } },
   testnet: true,
 });
 
@@ -118,6 +127,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     chainId: robinhoodTestnet.id,
     pool: TESTNET_POSEIDON_POOL,
     deployBlock: TESTNET_POSEIDON_DEPLOY_BLOCK,
+    ceremony: "dev",
     // Robinhood's RPC rejects topic-filtered eth_getLogs over 100k blocks.
     logRange: 100_000n,
     hashScheme: "poseidon",
@@ -148,6 +158,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     // 0xeD0b…2276 (block 35_578_268), 0x3eeE…D30b (block 34_556_677).
     pool: "0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb",
     deployBlock: 37_411_195n,
+    ceremony: "dev",
     // Tempo RPC: "query exceeds max block range 100000"
     logRange: 100_000n,
     hashScheme: "poseidon",
@@ -200,6 +211,12 @@ export function getActiveNetwork(): GloamNetwork {
 }
 
 export const NETWORK_KEYS = Object.keys(NETWORKS) as NetworkKey[];
+
+/** The key set a proof made for `chainId` was made with; the dev keys for a chain Gloam doesn't run on. */
+export function ceremonyForChain(chainId: unknown): CeremonyKind {
+  const id = Number(chainId);
+  return NETWORK_KEYS.map((k) => NETWORKS[k]).find((n) => n.chainId === id)?.ceremony ?? "dev";
+}
 
 export function getNetwork(key: NetworkKey): GloamNetwork {
   return NETWORKS[key];

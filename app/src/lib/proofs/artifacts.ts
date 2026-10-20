@@ -1,10 +1,12 @@
 /**
  * Circuit artifacts for the holder proofs, served from /public/circuits.
- * Ceremony: dev (pot16 + one single-party phase-2 contribution), same as the
- * other circuits. Rebuild with contracts/circuits/scripts/build-proof-circuits.mjs
- * and update the pins below from its output: new keys invalidate old proofs.
+ * Two key sets, like the other circuits (lib/circuitArtifacts): the testnets use
+ * the single-party dev keys below, mainnet the trusted setup's final keys
+ * (/circuits/final). A proof is made and checked with its network's set. The dev
+ * keys rebuild with contracts/circuits/scripts/build-proof-circuits.mjs; new keys
+ * invalidate old proofs.
  */
-import { assertArtifactIntegrity } from "@/lib/circuitArtifacts";
+import { activeCeremony, assertArtifactIntegrity, type CeremonyKind } from "@/lib/circuitArtifacts";
 
 type Artifact = { path: string; sha256: string };
 
@@ -56,28 +58,50 @@ export const PROOF_ARTIFACTS = {
 
 export type ProofCircuit = keyof typeof PROOF_ARTIFACTS;
 
+/** The ceremony's final keys (mainnet). The .wasm files are the same as the dev set's. */
+const FINAL_PROOF_KEYS: Record<ProofCircuit, Record<"zkey" | "vkey", Artifact>> = {
+  funds: {
+    zkey: { path: "/circuits/final/funds_final.zkey", sha256: "e3fadcf8ce4aeaf07a6a96c2b74b6774ae0a8ba3c1aa4496a033c69f81b54228" },
+    vkey: { path: "/circuits/final/funds_vkey.json", sha256: "aef4f1d41c28f9883e5c19cf40ba4cbab81af5d3abe208924afb558528f85241" },
+  },
+  receipt: {
+    zkey: { path: "/circuits/final/receipt_final.zkey", sha256: "b6b2352ecb393c7f0709177f89168d9d4fef53282fb24a98c1c08d9adb7cdd86" },
+    vkey: { path: "/circuits/final/receipt_vkey.json", sha256: "2ade74728fa4a5461a170384dae26f617af40a763175742ecd1576dcafeab299" },
+  },
+  payroll: {
+    zkey: { path: "/circuits/final/payroll_total_final.zkey", sha256: "29f72fea1a93806f9ffa0c7a563645f754d6cf88b028d6337a4aa4c0a000644c" },
+    vkey: { path: "/circuits/final/payroll_total_vkey.json", sha256: "83f3d0998ac773db5556491908480fbdb3decaefd0fd8d908973d31fe5fc7bc8" },
+  },
+};
+
+/** One circuit's files for a key set. */
+export function proofArtifactsFor(circuit: ProofCircuit, ceremony: CeremonyKind): Record<"wasm" | "zkey" | "vkey", Artifact> {
+  return ceremony === "production" ? { ...PROOF_ARTIFACTS[circuit], ...FINAL_PROOF_KEYS[circuit] } : PROOF_ARTIFACTS[circuit];
+}
+
 async function check(a: Artifact) {
   await assertArtifactIntegrity(a.path, a.sha256);
 }
 
 /** Proving files, hash-checked before use (refuses to prove on a mismatch). */
-export async function provingArtifacts(circuit: ProofCircuit) {
-  const set = PROOF_ARTIFACTS[circuit];
+export async function provingArtifacts(circuit: ProofCircuit, ceremony: CeremonyKind = activeCeremony()) {
+  const set = proofArtifactsFor(circuit, ceremony);
   await Promise.all([check(set.wasm), check(set.zkey)]);
   return { wasm: set.wasm.path, zkey: set.zkey.path };
 }
 
-const vkeys = new Map<ProofCircuit, unknown>();
+const vkeys = new Map<string, unknown>();
 
-/** Verification key, hash-checked, cached for the session. */
-export async function verificationKey(circuit: ProofCircuit): Promise<unknown> {
-  const cached = vkeys.get(circuit);
+/** Verification key for a key set, hash-checked, cached for the session. */
+export async function verificationKey(circuit: ProofCircuit, ceremony: CeremonyKind = activeCeremony()): Promise<unknown> {
+  const id = `${ceremony}:${circuit}`;
+  const cached = vkeys.get(id);
   if (cached) return cached;
-  const a = PROOF_ARTIFACTS[circuit].vkey;
+  const a = proofArtifactsFor(circuit, ceremony).vkey;
   await check(a);
   const res = await fetch(a.path, { cache: "force-cache" });
   if (!res.ok) throw new Error("Could not load the proof checking key.");
   const vkey: unknown = await res.json();
-  vkeys.set(circuit, vkey);
+  vkeys.set(id, vkey);
   return vkey;
 }

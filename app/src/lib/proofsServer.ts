@@ -29,6 +29,16 @@ import fundsVkey from "../../public/circuits/funds_vkey.json";
 import receiptVkey from "../../public/circuits/receipt_vkey.json";
 import payrollVkey from "../../public/circuits/payroll_total_vkey.json";
 import shieldVkey from "../../public/circuits/shield_vkey.json";
+import fundsVkeyFinal from "../../public/circuits/final/funds_vkey.json";
+import receiptVkeyFinal from "../../public/circuits/final/receipt_vkey.json";
+import payrollVkeyFinal from "../../public/circuits/final/payroll_total_vkey.json";
+import { ceremonyForChain } from "@/lib/networks";
+
+/** Checking keys by key set: a proof is checked with its own network's (dev on testnet, final on mainnet). */
+const VKEYS = {
+  dev: { funds: fundsVkey, receipt: receiptVkey, payroll: payrollVkey },
+  production: { funds: fundsVkeyFinal, receipt: receiptVkeyFinal, payroll: payrollVkeyFinal },
+} as const;
 
 /**
  * Input that is not a proof at all (empty, damaged, too large). Callers map it
@@ -124,7 +134,7 @@ async function verifyPayrollServer(p: Extract<AnyProof, { kind: "payroll" }>): P
   const client = net ? clientFor(net) : null;
   const blockTimes = new Map<bigint, Promise<number>>();
   return checkPayrollProof(p, {
-    verifySnark: (part) => groth16Verify(payrollVkey, part.publicSignals, part.proof),
+    verifySnark: (part) => groth16Verify(VKEYS[ceremonyForChain(p.chainId)].payroll, part.publicSignals, part.proof),
     vault: official && net ? { label: net.label } : null,
     findPayment: (x) => findPayrollPayment(client!, net!, net!.pool!, x, blockTimes),
     now: Math.floor(Date.now() / 1000),
@@ -134,7 +144,7 @@ async function verifyPayrollServer(p: Extract<AnyProof, { kind: "payroll" }>): P
 
 async function verifyHolderServer(p: Extract<AnyProof, { kind: "funds" | "payment" | "balance" }>): Promise<VerifyResult> {
   return checkHolderProof(p, {
-    verifySnark: (circuit, signals, proof) => groth16Verify(circuit === "funds" ? fundsVkey : receiptVkey, signals, proof),
+    verifySnark: (circuit, signals, proof, chainId) => groth16Verify(VKEYS[ceremonyForChain(chainId)][circuit], signals, proof),
     when,
   });
 }

@@ -12,7 +12,7 @@ import {
   assertShieldArtifacts,
   assertTransferArtifacts,
   assertUnshieldArtifacts,
-  CIRCUIT_ARTIFACTS,
+  activeCircuitArtifacts,
 } from "./circuitArtifacts";
 import { readDemo } from "./demoFlag";
 import { demoProve } from "./demo/proof";
@@ -20,14 +20,8 @@ import { demoProve } from "./demo/proof";
 export { fieldToBytes32 } from "@gloamtrade/sdk";
 export type { Groth16Proof };
 
-const UNSHIELD_WASM = CIRCUIT_ARTIFACTS.unshieldWasm.path;
-const UNSHIELD_ZKEY = CIRCUIT_ARTIFACTS.unshieldZkey.path;
-const TRANSFER_WASM = CIRCUIT_ARTIFACTS.transferWasm.path;
-const TRANSFER_ZKEY = CIRCUIT_ARTIFACTS.transferZkey.path;
-const SEALED_SWAP_WASM = CIRCUIT_ARTIFACTS.sealedSwapWasm.path;
-const SEALED_SWAP_ZKEY = CIRCUIT_ARTIFACTS.sealedSwapZkey.path;
-const SHIELD_WASM = CIRCUIT_ARTIFACTS.shieldWasm.path;
-const SHIELD_ZKEY = CIRCUIT_ARTIFACTS.shieldZkey.path;
+// The network's key set decides the files, so read them at prove time (lib/circuitArtifacts).
+const files = () => activeCircuitArtifacts();
 
 async function fullProve(
   circomInput: Record<string, string | string[]>,
@@ -53,7 +47,7 @@ export async function proveUnshieldInBrowser(
   // Recording demo: no proof is built, it only takes as long as one.
   if (readDemo()) return demoProve(circomInput);
   await assertUnshieldArtifacts();
-  return fullProve(circomInput, UNSHIELD_WASM, UNSHIELD_ZKEY);
+  return fullProve(circomInput, files().unshieldWasm.path, files().unshieldZkey.path);
 }
 
 export async function proveTransferInBrowser(
@@ -61,7 +55,7 @@ export async function proveTransferInBrowser(
 ) {
   if (readDemo()) return demoProve(circomInput);
   await assertTransferArtifacts();
-  return fullProve(circomInput, TRANSFER_WASM, TRANSFER_ZKEY);
+  return fullProve(circomInput, files().transferWasm.path, files().transferZkey.path);
 }
 
 /** Prove sealed swap (dev keys). Settlement live on the RH testnet Poseidon vault. */
@@ -70,7 +64,7 @@ export async function proveSealedSwapInBrowser(
 ) {
   if (readDemo()) return demoProve(circomInput);
   await assertSealedSwapArtifacts();
-  return fullProve(circomInput, SEALED_SWAP_WASM, SEALED_SWAP_ZKEY);
+  return fullProve(circomInput, files().sealedSwapWasm.path, files().sealedSwapZkey.path);
 }
 
 /**
@@ -83,5 +77,5 @@ export async function proveShieldInBrowser(
 ) {
   if (readDemo()) return demoProve(circomInput, ["commitment", "amount", "asset"]);
   await assertShieldArtifacts();
-  return fullProve(circomInput, SHIELD_WASM, SHIELD_ZKEY);
+  return fullProve(circomInput, files().shieldWasm.path, files().shieldZkey.path);
 }

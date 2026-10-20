@@ -20,6 +20,7 @@
  * What an exact balance shows: one note of exactly this amount is in the vault
  * and whoever made the proof knows its key. Not that it is still unspent.
  */
+import { ceremonyForChain } from "@/lib/networks";
 import { FIELD_PRIME, fieldToHex, proofContext, readFundsSignals, readReceiptSignals } from "@gloamtrade/sdk";
 import type { Hex } from "viem";
 import { demoHolderChecks, isDemoProof } from "@/lib/demo/proof";
@@ -45,8 +46,8 @@ type Check = VerifyResult["checks"][number];
 
 /** What checking a proof of funds, payment or balance needs from its host (browser page or server). */
 export type HolderCheckDeps = {
-  /** Groth16 check of the signals against the funds or receipt key. */
-  verifySnark: (circuit: "funds" | "receipt", signals: string[], proof: unknown) => Promise<boolean>;
+  /** Groth16 check of the signals against the funds or receipt key of the proof's network's key set. */
+  verifySnark: (circuit: "funds" | "receipt", signals: string[], proof: unknown, chainId: number) => Promise<boolean>;
   /** How a time reads in the result. */
   when?: (unix: number) => string;
 };
@@ -78,10 +79,10 @@ export function allPassed(checks: readonly Check[], expired: boolean): boolean {
 }
 
 /** The browser's snark check: the hash-pinned checking keys from /circuits. */
-async function browserSnark(circuit: "funds" | "receipt", signals: string[], proof: unknown): Promise<boolean> {
+async function browserSnark(circuit: "funds" | "receipt", signals: string[], proof: unknown, chainId: number): Promise<boolean> {
   try {
     const snarkjs = await import("snarkjs");
-    return await snarkjs.groth16.verify(await verificationKey(circuit), signals, proof);
+    return await snarkjs.groth16.verify(await verificationKey(circuit, ceremonyForChain(chainId)), signals, proof);
   } catch {
     return false;
   }
@@ -119,7 +120,7 @@ async function verifyPayroll(p: PayrollProof): Promise<VerifyResult> {
     verifySnark: async (part) => {
       if (demo) return true;
       const snarkjs = await import("snarkjs");
-      return snarkjs.groth16.verify(await verificationKey("payroll"), part.publicSignals, part.proof);
+      return snarkjs.groth16.verify(await verificationKey("payroll", ceremonyForChain(p.chainId)), part.publicSignals, part.proof);
     },
     vault: official && net ? { label: net.label } : null,
     findPayment,
@@ -203,7 +204,7 @@ export async function checkHolderProof(
   const demo = isDemoProof(p.proof);
 
   // 1) The zero-knowledge proof itself.
-  const valid = demo ? true : await deps.verifySnark(funds ? "funds" : "receipt", signals, p.proof).catch(() => false);
+  const valid = demo ? true : await deps.verifySnark(funds ? "funds" : "receipt", signals, p.proof, Number(p.chainId)).catch(() => false);
   add(
     "The proof checks out",
     valid ? "pass" : "fail",

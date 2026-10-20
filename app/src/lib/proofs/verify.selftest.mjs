@@ -140,6 +140,7 @@ const ALIASES = {
   "@gloamtrade/sdk": sdkDist,
   viem: url("viem-shim.mjs"),
   "@/lib/networks": url("networks-stub.mjs"),
+  "@/lib/serverRpc": url("server-rpc-stub.mjs"),
   "@/lib/demo/proof": url("demo-stub.mjs"),
   "./artifacts": url("artifacts-stub.mjs"),
 };
@@ -159,8 +160,10 @@ function load(file) {
 writeFileSync(join(tmp, "viem-shim.mjs"),
   `export { parseEventLogs } from ${JSON.stringify(viemEsm)};\n` +
   `export const http = () => null;\nexport const createPublicClient = () => globalThis.__fakeClient;\n`);
+writeFileSync(join(tmp, "server-rpc-stub.mjs"), `export const serverTransport = () => null;\n`);
 writeFileSync(join(tmp, "networks-stub.mjs"),
   `export const NETWORK_KEYS = ["tempo"];\n` +
+  `export const ceremonyForChain = () => "dev";\n` +
   `export const getNetwork = () => ({ key: "tempo", label: "Tempo", chainId: ${CHAIN}, pool: "${POOL}", deployBlock: ${DEPLOY}n, logRange: 100000n, chain: { rpcUrls: { default: { http: ["memory://"] } } } });\n`);
 writeFileSync(join(tmp, "demo-stub.mjs"), `export const isDemoProof = () => false;\nexport const demoHolderChecks = async () => ({ paidAt: 0 });\n`);
 writeFileSync(join(tmp, "artifacts-stub.mjs"),

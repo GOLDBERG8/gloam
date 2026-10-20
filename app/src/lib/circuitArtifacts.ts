@@ -1,11 +1,23 @@
 /**
- * Circuit artifacts in /public/circuits.
- * Ceremony: **dev** (Powers of Tau + single-party contribution), not production.
- * SHA-256 fingerprints for tamper detection at prove time.
+ * Circuit artifacts in /public/circuits, with SHA-256 fingerprints checked
+ * before every proof (tamper detection).
+ *
+ * Two key sets. The testnet pools verify the single-party **dev** keys
+ * (/circuits/*_final.zkey). Mainnet verifies the trusted setup's **final** keys
+ * (/circuits/final/*, release ceremony-final: 13 contributors, drand round
+ * 6561386). The circuits, and so the .wasm files, are the same for both. Each
+ * network says which set it uses (GloamNetwork.ceremony).
  */
+import { getActiveNetwork } from "./networks";
 
 export type CeremonyKind = "dev" | "production";
 
+/** The key set of the network the app is on. */
+export function activeCeremony(): CeremonyKind {
+  return getActiveNetwork().ceremony;
+}
+
+/** @deprecated the key set depends on the network; use activeCeremony(). */
 export const PROVING_CEREMONY: CeremonyKind = "dev";
 
 export const CIRCUIT_ARTIFACTS = {
@@ -93,49 +105,61 @@ export async function assertArtifactIntegrity(
 }
 
 export async function assertUnshieldArtifacts(): Promise<void> {
-  await assertArtifactIntegrity(
-    CIRCUIT_ARTIFACTS.unshieldWasm.path,
-    CIRCUIT_ARTIFACTS.unshieldWasm.sha256
-  );
-  await assertArtifactIntegrity(
-    CIRCUIT_ARTIFACTS.unshieldZkey.path,
-    CIRCUIT_ARTIFACTS.unshieldZkey.sha256
-  );
+  const a = activeCircuitArtifacts();
+  await assertArtifactIntegrity(a.unshieldWasm.path, a.unshieldWasm.sha256);
+  await assertArtifactIntegrity(a.unshieldZkey.path, a.unshieldZkey.sha256);
 }
 
 export async function assertTransferArtifacts(): Promise<void> {
-  await assertArtifactIntegrity(
-    CIRCUIT_ARTIFACTS.transferWasm.path,
-    CIRCUIT_ARTIFACTS.transferWasm.sha256
-  );
-  await assertArtifactIntegrity(
-    CIRCUIT_ARTIFACTS.transferZkey.path,
-    CIRCUIT_ARTIFACTS.transferZkey.sha256
-  );
+  const a = activeCircuitArtifacts();
+  await assertArtifactIntegrity(a.transferWasm.path, a.transferWasm.sha256);
+  await assertArtifactIntegrity(a.transferZkey.path, a.transferZkey.sha256);
 }
 
 export async function assertSealedSwapArtifacts(): Promise<void> {
-  await assertArtifactIntegrity(
-    CIRCUIT_ARTIFACTS.sealedSwapWasm.path,
-    CIRCUIT_ARTIFACTS.sealedSwapWasm.sha256
-  );
-  await assertArtifactIntegrity(
-    CIRCUIT_ARTIFACTS.sealedSwapZkey.path,
-    CIRCUIT_ARTIFACTS.sealedSwapZkey.sha256
-  );
+  const a = activeCircuitArtifacts();
+  await assertArtifactIntegrity(a.sealedSwapWasm.path, a.sealedSwapWasm.sha256);
+  await assertArtifactIntegrity(a.sealedSwapZkey.path, a.sealedSwapZkey.sha256);
 }
 
 export async function assertShieldArtifacts(): Promise<void> {
-  await assertArtifactIntegrity(
-    CIRCUIT_ARTIFACTS.shieldWasm.path,
-    CIRCUIT_ARTIFACTS.shieldWasm.sha256
-  );
-  await assertArtifactIntegrity(
-    CIRCUIT_ARTIFACTS.shieldZkey.path,
-    CIRCUIT_ARTIFACTS.shieldZkey.sha256
-  );
+  const a = activeCircuitArtifacts();
+  await assertArtifactIntegrity(a.shieldWasm.path, a.shieldWasm.sha256);
+  await assertArtifactIntegrity(a.shieldZkey.path, a.shieldZkey.sha256);
 }
 
 export function isDevCeremony(): boolean {
-  return PROVING_CEREMONY === "dev";
+  return activeCeremony() === "dev";
+}
+
+/** The ceremony's final proving keys (mainnet). The .wasm files are shared. */
+const FINAL_ZKEYS = {
+  unshieldZkey: {
+    path: "/circuits/final/unshield_final.zkey",
+    sha256: "5a12073f3f84b52f794feaf862fb1d48301124319db95a9c6d0dc58277fa54ed",
+  },
+  transferZkey: {
+    path: "/circuits/final/transfer_final.zkey",
+    sha256: "bdbae966705bc85e76571b4945da74a43fc4503a955fd4e3799358bcff749cdb",
+  },
+  shieldZkey: {
+    path: "/circuits/final/shield_final.zkey",
+    sha256: "3054877c35e2e0e9f76c43aa4791ac2b3ac51b8967d51be2215e89c0a5fbb512",
+  },
+  shieldVkey: {
+    path: "/circuits/final/shield_vkey.json",
+    sha256: "b2e9571b7869b77b170d5e53a8f36bd94da2db6d30bc860b40e2db85ea328313",
+  },
+} as const;
+
+type ArtifactSet = { [K in keyof typeof CIRCUIT_ARTIFACTS]: { path: string; sha256: string } };
+
+/** The files for one key set. Sealed swap has no final keys: it stays off on mainnet. */
+export function circuitArtifactsFor(ceremony: CeremonyKind): ArtifactSet {
+  return ceremony === "production" ? { ...CIRCUIT_ARTIFACTS, ...FINAL_ZKEYS } : CIRCUIT_ARTIFACTS;
+}
+
+/** The files for the network the app is on. */
+export function activeCircuitArtifacts(): ArtifactSet {
+  return circuitArtifactsFor(activeCeremony());
 }
