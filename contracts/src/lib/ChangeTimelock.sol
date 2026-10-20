@@ -62,9 +62,13 @@ abstract contract ChangeTimelock {
     function endSetup() external {
         _checkOwner();
         if (!setupMode) revert SetupAlreadyEnded();
+        _checkReadyToEndSetup();
         setupMode = false;
         emit SetupEnded(msg.sender);
     }
+
+    /// @dev A pool that must be fully wired before it goes live reverts here.
+    function _checkReadyToEndSetup() internal view virtual {}
 
     /// @notice Announce a setter call. It can run between eta and eta + CHANGE_GRACE.
     function queueChange(bytes calldata call) external returns (bytes32 id, uint256 eta) {

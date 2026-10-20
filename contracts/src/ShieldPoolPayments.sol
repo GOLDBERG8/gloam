@@ -19,6 +19,21 @@ contract ShieldPoolPayments is ShieldPoolCore {
      */
     constructor(address poseidon2_, address verifier_) ShieldPoolCore(poseidon2_, verifier_) {}
 
+    /// @notice Deposits take shieldBound() only: its proof binds the commitment to
+    ///         the amount sent, so this pool never takes an unbound deposit, not
+    ///         even in the deploy window before the shield verifier is wired
+    ///         (pre-mainnet audit F1).
+    function shield(address, uint256, bytes32) external payable override {
+        revert ShieldProofRequired();
+    }
+
+    /// @dev Setup can only end on a pool that is ready to go live: both proof
+    ///      verifiers wired and deposit limits on (pre-mainnet audit F1, GATE 1).
+    function _checkReadyToEndSetup() internal view override {
+        if (address(verifier) == address(0) || address(shieldVerifier) == address(0)) revert VerifierNotSet();
+        if (!depositLimitsOn) revert DepositLimitsOff();
+    }
+
     /// @notice Always zero: this pool has no sealed swap. The app reads it the
     ///         same way it reads ShieldPoolPoseidon's to keep trading off.
     function sealedSwapVerifier() external pure returns (address) {

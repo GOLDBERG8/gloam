@@ -49,6 +49,8 @@ contract DepositLimitsTest is Test {
         vm.warp(1_900_000_000);
         acceptV = new LimitMockVerifier(true);
         pool = new ShieldPoolPayments(_deployPoseidon(), address(acceptV));
+        // the payments pool takes shieldBound() only; the mock accepts every proof
+        pool.setShieldVerifier(address(acceptV));
         usd = new MockERC20();
         other = new MockERC20();
         usd.mint(user, 1_000_000e6);
@@ -107,7 +109,7 @@ contract DepositLimitsTest is Test {
         _live();
         vm.prank(user);
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        pool.shield(address(other), 1, bytes32(uint256(9)));
+        pool.shieldBound(address(other), 1, bytes32(uint256(9)), "");
     }
 
     function test_per_deposit_limit() public {
@@ -115,7 +117,7 @@ contract DepositLimitsTest is Test {
         _deposit(address(usd), PER, 1); // exactly the limit is fine
         vm.prank(user);
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        pool.shield(address(usd), uint256(PER) + 1, bytes32(uint256(2)));
+        pool.shieldBound(address(usd), uint256(PER) + 1, bytes32(uint256(2)), "");
     }
 
     function test_total_limit_and_withdrawal_frees_room() public {
@@ -127,7 +129,7 @@ contract DepositLimitsTest is Test {
 
         vm.prank(user);
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        pool.shield(address(usd), 1, bytes32(uint256(4)));
+        pool.shieldBound(address(usd), 1, bytes32(uint256(4)), "");
 
         // A withdrawal is never limited, and it makes room again.
         _withdraw(address(usd), 300e6, 0xAA);
@@ -140,7 +142,7 @@ contract DepositLimitsTest is Test {
         uint256 before = usd.balanceOf(user);
         vm.prank(user);
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        pool.shield(address(usd), uint256(PER) + 1, bytes32(uint256(7)));
+        pool.shieldBound(address(usd), uint256(PER) + 1, bytes32(uint256(7)), "");
         assertEq(usd.balanceOf(user), before);
         assertEq(pool.deposited(address(usd)), 0);
         assertFalse(pool.commitmentSeen(bytes32(uint256(7))));
@@ -152,10 +154,10 @@ contract DepositLimitsTest is Test {
         pool.endSetup();
         vm.deal(user, 10 ether);
         vm.prank(user);
-        pool.shield{value: 1 ether}(address(0), 1 ether, bytes32(uint256(11)));
+        pool.shieldBound{value: 1 ether}(address(0), 1 ether, bytes32(uint256(11)), "");
         vm.prank(user);
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        pool.shield{value: 1.5 ether}(address(0), 1.5 ether, bytes32(uint256(12)));
+        pool.shieldBound{value: 1.5 ether}(address(0), 1.5 ether, bytes32(uint256(12)), "");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -172,7 +174,7 @@ contract DepositLimitsTest is Test {
         assertEq(total, 1_000e6);
         vm.prank(user);
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        pool.shield(address(usd), 101e6, bytes32(uint256(1)));
+        pool.shieldBound(address(usd), 101e6, bytes32(uint256(1)), "");
     }
 
     function test_lower_cannot_raise_either_value() public {
@@ -192,7 +194,7 @@ contract DepositLimitsTest is Test {
 
         vm.prank(user);
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        pool.shield(address(usd), 1, bytes32(uint256(2)));
+        pool.shieldBound(address(usd), 1, bytes32(uint256(2)), "");
 
         _withdraw(address(usd), PER, 0xBB);
         assertEq(pool.deposited(address(usd)), 0);
@@ -279,8 +281,8 @@ contract DepositLimitsTest is Test {
         for (uint256 i = 0; i < amounts.length; i++) {
             uint256 a = uint256(amounts[i]) % (uint256(PER) * 2) + 1;
             vm.prank(user);
-            try pool.shield(address(usd), a, bytes32(uint256(100 + i))) {} catch {}
-            assertLe(pool.deposited(address(usd)), TOTAL);
+            try pool.shieldBound(address(usd), a, bytes32(uint256(100 + i)), "") {} catch {}
+            assertLe(pool.deposited(address(usd)), TOTAL, "");
         }
     }
 
@@ -312,6 +314,7 @@ contract DepositLimitsTest is Test {
     }
 
     function test_payments_pool_timelock_rejects_swap_setters() public {
+        pool.turnOnDepositLimits();
         pool.endSetup();
         vm.expectRevert(ChangeTimelock.UnknownChange.selector);
         pool.queueChange(abi.encodeCall(ShieldPoolPoseidon.setSealedSwapVerifier, (address(acceptV))));
@@ -320,12 +323,53 @@ contract DepositLimitsTest is Test {
     }
 
     function test_payments_pool_keeps_core_timelock_setters() public {
+        pool.turnOnDepositLimits();
         pool.endSetup();
         bytes memory call = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xBEEF)));
         pool.queueChange(call);
         vm.warp(block.timestamp + 3 days);
         pool.executeChange(call);
         assertEq(address(pool.verifier()), address(0xBEEF));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Pre-mainnet audit F1: no unbound deposit, no going live half-wired
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function test_payments_pool_never_takes_plain_shield() public {
+        ShieldPoolPayments fresh = new ShieldPoolPayments(_deployPoseidon(), address(acceptV));
+        vm.prank(user);
+        usd.approve(address(fresh), type(uint256).max);
+        // born with no shield verifier: still no unbound deposit
+        vm.prank(user);
+        vm.expectRevert(ShieldPoolCore.ShieldProofRequired.selector);
+        fresh.shield(address(usd), 1e6, bytes32(uint256(1)));
+        // and none after it is wired either
+        fresh.setShieldVerifier(address(acceptV));
+        vm.prank(user);
+        vm.expectRevert(ShieldPoolCore.ShieldProofRequired.selector);
+        fresh.shield(address(usd), 1e6, bytes32(uint256(1)));
+        assertEq(fresh.deposited(address(usd)), 0);
+    }
+
+    function test_setup_cannot_end_until_the_pool_is_wired() public {
+        ShieldPoolPayments fresh = new ShieldPoolPayments(_deployPoseidon(), address(acceptV));
+        vm.expectRevert(ShieldPoolCore.VerifierNotSet.selector);
+        fresh.endSetup();
+        fresh.setShieldVerifier(address(acceptV));
+        vm.expectRevert(ShieldPoolCore.DepositLimitsOff.selector);
+        fresh.endSetup();
+        fresh.turnOnDepositLimits();
+        fresh.endSetup();
+        assertFalse(fresh.setupMode());
+    }
+
+    function test_setup_cannot_end_without_the_spend_verifier() public {
+        ShieldPoolPayments fresh = new ShieldPoolPayments(_deployPoseidon(), address(0));
+        fresh.setShieldVerifier(address(acceptV));
+        fresh.turnOnDepositLimits();
+        vm.expectRevert(ShieldPoolCore.VerifierNotSet.selector);
+        fresh.endSetup();
     }
 
     function test_swap_pool_gets_limits_too() public {
@@ -355,7 +399,7 @@ contract DepositLimitsTest is Test {
 
     function _deposit(address asset, uint256 amount, uint256 salt) internal {
         vm.prank(user);
-        pool.shield(asset, amount, bytes32(uint256(keccak256(abi.encode(asset, amount, salt)))));
+        pool.shieldBound(asset, amount, bytes32(uint256(keccak256(abi.encode(asset, amount, salt)))), "");
     }
 
     function _withdraw(address asset, uint256 amount, uint256 nullifier) internal {

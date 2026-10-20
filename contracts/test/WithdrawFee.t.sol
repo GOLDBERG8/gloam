@@ -139,6 +139,8 @@ contract WithdrawFeeTest is Test {
         poseidon2 = _deployPoseidon();
         acceptV = new FeeMockVerifier();
         pool = new ShieldPoolPayments(poseidon2, address(acceptV));
+        // the payments pool takes shieldBound() only (audit F1); the mock accepts every proof
+        pool.setShieldVerifier(address(acceptV));
         usd = new MockERC20();
         usd.mint(user, 1_000_000e6);
         vm.prank(user);
@@ -361,6 +363,7 @@ contract WithdrawFeeTest is Test {
     }
 
     function test_cap_enforced_through_timelock_too() public {
+        _ready();
         pool.endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setWithdrawFee, (uint16(101), recipient));
         (, uint256 eta) = pool.queueChange(call_);
@@ -371,6 +374,7 @@ contract WithdrawFeeTest is Test {
     }
 
     function test_timelock_rejects_dirty_uint16() public {
+        _ready();
         pool.endSetup();
         // bps word with bits above uint16: abi.decode rejects it at execution.
         bytes memory call_ = abi.encodePacked(
@@ -425,6 +429,7 @@ contract WithdrawFeeTest is Test {
     }
 
     function test_raise_only_after_three_days() public {
+        _ready();
         pool.endSetup(); // fee off, the testnet shape
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setWithdrawFee, (uint16(25), recipient));
         (, uint256 eta) = pool.queueChange(call_);
@@ -463,6 +468,7 @@ contract WithdrawFeeTest is Test {
     }
 
     function test_bad_length_fee_change_rejected() public {
+        _ready();
         pool.endSetup();
         bytes memory bad = abi.encodePacked(ShieldPoolCore.setWithdrawFee.selector, uint256(25));
         vm.expectRevert(ChangeTimelock.BadChangeLength.selector);
@@ -522,6 +528,8 @@ contract WithdrawFeeTest is Test {
         stable.mint(user, 10_000e6);
         vm.prank(user);
         stable.approve(address(pool), type(uint256).max);
+        _ready();
+        pool.setDepositLimit(address(stable), type(uint128).max, type(uint128).max);
         _live(25);
         stable.setFrozen(recipient, true); // the issuer freezes the fee recipient
 
@@ -555,6 +563,7 @@ contract WithdrawFeeTest is Test {
     function test_reverting_native_recipient_does_not_block_unshield() public {
         RejectingRecipient bad = new RejectingRecipient();
         pool.setWithdrawFee(25, address(bad));
+        _ready();
         pool.endSetup();
         _deposit(address(0), 4 ether, 1);
         _withdraw(address(0), 4 ether, 0x53);
@@ -615,6 +624,7 @@ contract WithdrawFeeTest is Test {
     function test_collectFees_reentrancy_blocked() public {
         ReentrantReceiver r = new ReentrantReceiver(pool);
         pool.setWithdrawFee(25, address(r));
+        _ready();
         pool.endSetup();
         _deposit(address(0), 10 ether, 1);
         _deposit(address(0), 5 ether, 2); // a live note the re-entrant unshield would try to spend
@@ -725,9 +735,12 @@ contract WithdrawFeeTest is Test {
         TransferIVerifier t = new TransferIVerifier(new TransferVerifier());
         ShieldPoolPayments real = new ShieldPoolPayments(poseidon2, address(new DualProofVerifier(u, t)));
         real.setWithdrawFee(25, recipient);
+        real.setShieldVerifier(address(acceptV));
+        real.turnOnDepositLimits();
+        real.setDepositLimit(address(0), type(uint128).max, type(uint128).max);
         real.endSetup();
         vm.deal(address(this), 1 ether);
-        real.shield{value: AMOUNT}(address(0), AMOUNT, bytes32(uint256(777)));
+        real.shieldBound{value: AMOUNT}(address(0), AMOUNT, bytes32(uint256(777)), "");
         vm.store(address(real), keccak256(abi.encode(ROOT, KNOWN_ROOTS_SLOT)), bytes32(uint256(1)));
         assertTrue(real.isKnownRoot(bytes32(ROOT)));
 
@@ -753,6 +766,7 @@ contract WithdrawFeeTest is Test {
     /// Fee set in setup, then setup ended: the mainnet shape.
     function _live(uint16 bps) internal {
         pool.setWithdrawFee(bps, bps == 0 ? address(0) : recipient);
+        _ready();
         pool.endSetup();
     }
 
@@ -760,10 +774,19 @@ contract WithdrawFeeTest is Test {
         bytes32 c = bytes32(uint256(keccak256(abi.encode(asset, amount, salt))));
         vm.prank(user);
         if (asset == address(0)) {
-            pool.shield{value: amount}(asset, amount, c);
+            pool.shieldBound{value: amount}(asset, amount, c, "");
         } else {
-            pool.shield(asset, amount, c);
+            pool.shieldBound(asset, amount, c, "");
         }
+    }
+
+    /// Deposit limits on before setup ends (the payments pool requires it), with
+    /// room for every test's deposits unless a test already set its own.
+    function _ready() internal {
+        if (pool.depositLimitsOn()) return;
+        pool.turnOnDepositLimits();
+        pool.setDepositLimit(address(usd), type(uint128).max, type(uint128).max);
+        pool.setDepositLimit(address(0), type(uint128).max, type(uint128).max);
     }
 
     function _withdraw(address asset, uint256 amount, uint256 nullifier) internal {
@@ -841,6 +864,10 @@ contract FeeHandler is Test {
         pool = new ShieldPoolPayments(poseidon2, verifier);
         usd = new MockERC20();
         pool.setWithdrawFee(25, RECIPIENT);
+        pool.setShieldVerifier(verifier);
+        pool.turnOnDepositLimits();
+        pool.setDepositLimit(address(usd), type(uint128).max, type(uint128).max);
+        pool.setDepositLimit(address(0), type(uint128).max, type(uint128).max);
         pool.endSetup();
         usd.mint(USER, type(uint128).max);
         vm.prank(USER);
@@ -858,7 +885,7 @@ contract FeeHandler is Test {
         address asset = _asset(native);
         if (native) vm.deal(USER, amount);
         vm.prank(USER);
-        pool.shield{value: native ? amount : 0}(asset, amount, bytes32(++salt));
+        pool.shieldBound{value: native ? amount : 0}(asset, amount, bytes32(++salt), "");
         ghostIn[asset] += amount;
     }
 

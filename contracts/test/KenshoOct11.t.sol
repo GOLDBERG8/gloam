@@ -74,7 +74,9 @@ contract KenshoOct11Test is Test {
         pool.unshield(_proof(), bytes32(ROOT), bytes32(NULLIFIER), address(0), TO, AMOUNT);
     }
 
-    function test_R2_duplicate_spend_pays_full_verification_before_AlreadySpent() public {
+    /// Fixed for mainnet (pre-mainnet audit R-1): `spent` is read before the proof,
+    /// so a duplicate stops at one storage read instead of a pairing check.
+    function test_R2_duplicate_spend_stops_before_verification() public {
         uint256 g0 = gasleft();
         _unshield();
         uint256 firstGas = g0 - gasleft();
@@ -100,8 +102,8 @@ contract KenshoOct11Test is Test {
         console.log("duplicate (reverts) gas ", dupGas);
         console.log("spent-first check gas   ", precheckGas);
         assertEq(TO.balance, AMOUNT, "no double payout");
-        assertGt(dupGas, 150_000, "duplicate burns the pairing check before reverting");
-        assertGt(dupGas, precheckGas * 20, "a spent-first check would be far cheaper");
+        assertLt(dupGas, 150_000, "a duplicate no longer pays for the pairing check");
+        assertLt(dupGas, firstGas / 3, "a duplicate costs a fraction of a real cash-out");
     }
 
     /// Informational: gas for one leaf insert (plain shield in a fresh test pool),

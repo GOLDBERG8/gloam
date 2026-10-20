@@ -136,6 +136,7 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
     error FeeTooHigh();
     error FeeNotLower();
     error NothingToCollect();
+    error DepositLimitsOff();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -355,7 +356,7 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
         address asset,
         uint256 amount,
         bytes32 commitment
-    ) external payable override nonReentrant {
+    ) external payable virtual override nonReentrant {
         if (address(shieldVerifier) != address(0)) revert ShieldProofRequired();
         _shield(asset, amount, commitment);
     }
@@ -423,8 +424,9 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
         bytes32 nullifier,
         bytes32[2] calldata newCommitments
     ) external override nonReentrant {
-        _requireTransferProof(proof, root, nullifier, newCommitments);
+        // spent first: a duplicate spend stops before the ~300k gas proof check (audit R-1)
         if (spent[nullifier]) revert AlreadySpent();
+        _requireTransferProof(proof, root, nullifier, newCommitments);
         spent[nullifier] = true;
 
         for (uint256 i = 0; i < 2; i++) {
@@ -447,8 +449,8 @@ abstract contract ShieldPoolCore is IShieldPool, ChangeTimelock {
     ) external override nonReentrant {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert InvalidAmount();
-        _requireUnshieldProof(proof, root, nullifier, asset, to, amount);
         if (spent[nullifier]) revert AlreadySpent();
+        _requireUnshieldProof(proof, root, nullifier, asset, to, amount);
         spent[nullifier] = true;
 
         if (deposited[asset] < amount) revert InsufficientPoolBalance();
