@@ -14,7 +14,7 @@ import {
 } from "wagmi";
 import { exitDemo, useAppAccount } from "@/lib/demo";
 import { ensureRhTestnetWallet, ensureWalletOnChain, shortAddress } from "@/lib/chain";
-import { networkName, type GloamChainId } from "@/lib/networks";
+import type { GloamChainId } from "@/lib/networks";
 import {
   FEE_MANAGER,
   OUSD,
@@ -414,7 +414,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
                 {shortAddress(address, 6)}
               </p>
               <p className="mt-0.5 truncate text-[12px] text-mute">
-                {network.testnet ? networkName(network) : `${network.label} mainnet`}
+                {network.label}{network.testnet ? " testnet" : " mainnet"}
               </p>
             </div>
             <button

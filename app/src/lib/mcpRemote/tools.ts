@@ -115,6 +115,9 @@ const WHAT_IS_PUBLIC =
 const ANONYMITY =
   "Privacy is only as strong as the crowd of notes in the vault. The testnet vaults are young, so do not treat a cash out as unlinkable yet.";
 
+const MAINNET_ANONYMITY =
+  "Privacy is only as strong as the crowd of notes in the vault. The mainnet vaults are new, so do not treat a cash out as unlinkable yet.";
+
 function appLinks(origin: string) {
   return {
     app: `${origin}/app`,
@@ -466,14 +469,16 @@ function planDeposit(args: Args, ctx: ToolContext): CallToolResult {
     faucetUrl
       ? `Get test funds: ${faucetUrl}${network === "robinhood" && asset.symbol === "USDG" ? " (test USDG: https://faucet.paxos.com/)" : ""}.`
       : `Have the ${asset.symbol} in your own wallet on ${n.label}. This is mainnet: real money, with beta deposit limits the app shows before you sign.`,
-    `Open ${ctx.origin}/app/vault?tab=shield, connect a wallet (or sign in with a passkey), and choose ${n.label} in the network menu.`,
+    n.testnet
+      ? `Open ${ctx.origin}/app/vault?tab=shield, connect a wallet (or sign in with a passkey), and choose ${n.label} in the network menu.`
+      : `Open ${ctx.origin}/app/vault?tab=shield, connect a wallet, and choose ${n.label} mainnet in the network menu.`,
     `Pick ${asset.symbol} and enter ${amount.value ? amount.value : "the amount"}.`,
     ...(asset.native ? [] : [`Approve ${asset.symbol} for the Gloam vault: one signature in your wallet.`]),
     `Your browser makes a zero-knowledge proof that the deposit matches a new private note, then you sign one transaction to the vault (${n.pool}).`,
     `The note's secret is made in your browser and kept there, encrypted. Back it up from Settings (${ctx.origin}/app/settings): Gloam cannot recover it for you.`,
   ];
   return ok({
-    plan: `Deposit ${how} into a private balance on ${n.label}`,
+    plan: `Deposit ${how} into a private balance on ${n.label}${n.testnet ? "" : " mainnet"}`,
     network,
     chainId: n.chainId,
     asset: { symbol: asset.symbol, address: asset.native ? null : asset.address, decimals: asset.decimals },
@@ -484,7 +489,7 @@ function planDeposit(args: Args, ctx: ToolContext): CallToolResult {
     steps: steps.map((s, i) => `${i + 1}. ${s}`),
     appLink: `${ctx.origin}/app/vault?tab=shield`,
     whatIsPublic: WHAT_IS_PUBLIC,
-    anonymity: ANONYMITY,
+    anonymity: n.testnet ? ANONYMITY : MAINNET_ANONYMITY,
     checks:
       n.family === "tempo"
         ? "Before you sign, the app checks the depositing wallet against the OFAC sanctions list and the stablecoin's TIP-403 transfer policy."

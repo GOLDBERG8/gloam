@@ -6,7 +6,6 @@ import { walletParamsForChain } from "@/lib/chain";
 import { exitDemo, useAppAccount } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { faucetFor } from "@/lib/faucet";
-import { networkName } from "@/lib/networks";
 import { shieldTokensFor } from "@/lib/tokens";
 import {
   exportNotesBackup,
@@ -516,11 +515,15 @@ export function SettingsView() {
         <div className="py-4">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
             <div className="min-w-0">
-              <p className="text-[14px] text-foreground">{networkName(network)}</p>
+              <p className="text-[14px] text-foreground">
+                {network.label}{network.testnet ? " testnet" : " mainnet"}
+              </p>
               <p className="mt-0.5 text-[13px] text-mute">
-                {faucet
-                  ? `Test funds: ${faucet.assets}`
-                  : `Real money: ${shieldTokensFor(network.chainId).map((t) => t.symbol).join(" · ")}`}
+                {faucet ? (
+                  <>Test funds: {faucet.assets}</>
+                ) : (
+                  <>Real money: {shieldTokensFor(network.chainId).map((t) => t.symbol).join(" · ")}</>
+                )}
               </p>
             </div>
             <button type="button" onClick={addNetwork} className="btn btn-ghost btn-sm h-10">
