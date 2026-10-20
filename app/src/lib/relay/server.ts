@@ -62,7 +62,7 @@ import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenAddresses } from "@/lib/screeningServer";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
-import { inflightKey, takeInflight } from "@/lib/relay/inflight";
+import { forgetNonce, inSendLane, inflightKey, takeInflight } from "@/lib/relay/inflight";
 
 const POOL_ERRORS = [
   "ZeroCommitment",
@@ -399,14 +399,14 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
         return pub.estimateContractGas({ address: net.payMemo!.address, abi: memoAbi, functionName: "postMemo", args: call.args, account });
     }
   };
-  const send = (gas: bigint): Promise<Hex> => {
+  const send = (gas: bigint, nonce: number): Promise<Hex> => {
     switch (call.kind) {
       case "transfer":
-        return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "transfer", args: call.args, gas, chain: net.chain, account });
+        return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "transfer", args: call.args, gas, nonce, chain: net.chain, account });
       case "unshield":
-        return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "unshield", args: call.args, gas, chain: net.chain, account });
+        return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "unshield", args: call.args, gas, nonce, chain: net.chain, account });
       case "memo":
-        return wallet.writeContract({ address: net.payMemo!.address, abi: memoAbi, functionName: "postMemo", args: call.args, gas, chain: net.chain, account });
+        return wallet.writeContract({ address: net.payMemo!.address, abi: memoAbi, functionName: "postMemo", args: call.args, gas, nonce, chain: net.chain, account });
     }
   };
 
@@ -419,13 +419,22 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
   }
   await takeNetworkSlot(net);
 
+  // one send at a time per relay account and chain, each with the next nonce (lib/relay/inflight)
+  const lane = `${net.chainId}:${account.address.toLowerCase()}`;
+  const chainNonce = () => pub.getTransactionCount({ address: account.address, blockTag: "pending" });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      return await send(padGas(gas));
+      const out = await inSendLane(lane, chainNonce, (nonce) => send(padGas(gas), nonce));
+      if (!out) throw new RelayError(RELAY_BUSY_MESSAGE, 503, "busy");
+      return out.value;
     } catch (e) {
+      if (e instanceof RelayError) throw e;
       const msg = e instanceof Error ? e.message : "";
-      // Two relays racing the same nonce: refetch and retry once.
-      if (attempt === 0 && /nonce|replacement|underpriced|already known/i.test(msg)) continue;
+      // the kept nonce and the chain disagree: start again from the chain, once
+      if (attempt === 0 && /nonce|replacement|underpriced|already known/i.test(msg)) {
+        await forgetNonce(lane);
+        continue;
+      }
       if (mayHaveSent(e)) onMaybeSent?.();
       throw explain(e, "The relay could not submit this payment. Try again or send from your wallet.");
     }
@@ -434,6 +443,7 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
 }
 
 export const IN_FLIGHT_MESSAGE = "This payment is already being sent. Wait a moment and refresh.";
+export const RELAY_BUSY_MESSAGE = "The relay is busy right now. Try again in a moment or send from your wallet.";
 
 /**
  * A send or cash out, one at a time per nullifier: take the lock, check the

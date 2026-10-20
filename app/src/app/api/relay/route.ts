@@ -11,6 +11,8 @@ import {
 } from "@/lib/relay/server";
 
 export const runtime = "nodejs";
+// a send can wait its turn in the relay's queue (lib/relay/inflight) before it goes out
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 /** Which networks the relay can submit on right now (no secrets). */

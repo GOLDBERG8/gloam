@@ -74,6 +74,7 @@ function memRelease(key: string, token: string): void {
 // ---------------------------------------------------------------- redis
 
 async function redis(args: (string | number)[]): Promise<unknown> {
+  if (!redisConfigured()) throw new Error("redis: not configured");
   const url = process.env.UPSTASH_REDIS_REST_URL!.trim().replace(/\/$/, "");
   const token = process.env.UPSTASH_REDIS_REST_TOKEN!.trim();
   const res = await fetch(url, {
@@ -132,4 +133,79 @@ export async function takeInflight(
     store: "memory",
     release: async () => memRelease(key, token),
   };
+}
+
+// ---------------------------------------------------------------- send lane
+
+const LANE_PREFIX = "gloam:relay:lane:";
+const NONCE_PREFIX = "gloam:relay:nonce:";
+/** A send holds its lane for at most this long: signing plus one RPC call, behind a 30 s timeout. */
+const LANE_TTL_SEC = 35;
+/** An idle lane forgets its nonce after this long and starts again from the chain. */
+const NONCE_TTL_SEC = 300;
+/** How long a request waits for its turn before the relay says it is busy. */
+export const LANE_WAIT_MS = 25_000;
+
+const memNonces = new Map<string, { next: number; exp: number }>();
+
+async function storedNonce(lane: string): Promise<number | null> {
+  try {
+    const raw = await redis(["GET", NONCE_PREFIX + lane]);
+    const n = Number(raw);
+    return raw !== null && Number.isSafeInteger(n) ? n : null;
+  } catch {
+    const m = memNonces.get(lane);
+    return m && m.exp > Date.now() ? m.next : null;
+  }
+}
+
+async function saveNonce(lane: string, next: number): Promise<void> {
+  memNonces.set(lane, { next, exp: Date.now() + NONCE_TTL_SEC * 1000 });
+  try {
+    await redis(["SET", NONCE_PREFIX + lane, next, "EX", NONCE_TTL_SEC]);
+  } catch {
+    /* memory keeps it for this instance */
+  }
+}
+
+/** Drops the kept nonce, so the next send reads it from the chain again. Never throws. */
+export async function forgetNonce(lane: string): Promise<void> {
+  memNonces.delete(lane);
+  try {
+    await redis(["DEL", NONCE_PREFIX + lane]);
+  } catch {
+    /* it expires on its own */
+  }
+}
+
+/**
+ * Sends from one relay account go out one at a time, each with the next nonce.
+ * Without this, sends arriving together on different instances all read the
+ * same pending nonce and knock each other out. The lane is a short shared lock;
+ * the nonce is kept beside it and is never behind the chain's pending count, so
+ * a node that is a moment behind cannot hand out a used one. A send takes a few
+ * hundred milliseconds, so a queue clears quickly. Returns null when the lane
+ * stayed busy for `waitMs`.
+ */
+export async function inSendLane<T>(
+  lane: string,
+  chainNonce: () => Promise<number>,
+  send: (nonce: number) => Promise<T>,
+  waitMs = LANE_WAIT_MS,
+): Promise<{ value: T } | null> {
+  const deadline = Date.now() + waitMs;
+  let lock: InflightLock | null;
+  while (!(lock = await takeInflight(LANE_PREFIX + lane, LANE_TTL_SEC))) {
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 80 + Math.random() * 170));
+  }
+  try {
+    const [kept, onChain] = await Promise.all([storedNonce(lane), chainNonce()]);
+    const nonce = Math.max(onChain, kept ?? 0);
+    const value = await send(nonce);
+    await saveNonce(lane, nonce + 1);
+    return { value };
+  } finally {
+    await lock.release();
+  }
 }
