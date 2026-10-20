@@ -104,7 +104,12 @@ const SNAPSHOT_TIMEOUT_MS = 6_000;
  * keeps only about ten minutes of past state (older needs a slower check), and
  * a Tempo log read spans 100k blocks (about 18 hours).
  */
-const OWN_COPY_FRESH_MS: Record<number, number> = { 46630: 8 * 60_000, 42431: 6 * 3_600_000 };
+const OWN_COPY_FRESH_MS: Record<number, number> = {
+  46630: 8 * 60_000,
+  42431: 6 * 3_600_000,
+  4663: 8 * 60_000,
+  4217: 6 * 3_600_000,
+};
 const OWN_COPY_FRESH_DEFAULT_MS = 8 * 60_000;
 
 function readPersisted(key: string): PoolLogCache | null {

@@ -30,8 +30,13 @@ import { SCREEN_BLOCKED_MESSAGE } from "./screening";
 export const TIP403_REGISTRY: Address = "0x403c000000000000000000000000000000000000";
 /** TIP-1022 address registry precompile, which resolves virtual addresses. */
 export const TEMPO_ADDRESS_REGISTRY: Address = "0xfDC0000000000000000000000000000000000000";
-/** Chains whose stablecoins carry TIP-403 policies: Tempo Moderato today. */
-export const TIP403_CHAIN_IDS: readonly number[] = [42431];
+/**
+ * Chains whose stablecoins carry TIP-403 policies: Tempo Moderato and Tempo
+ * mainnet (pathUSD, USDT0 and OUSD carry custom issuer policies there). The
+ * server only checks a chain Gloam runs on (tip403Server), so mainnet joins
+ * once its pool is filled in.
+ */
+export const TIP403_CHAIN_IDS: readonly number[] = [42431, 4217];
 
 export const ALWAYS_REJECT_POLICY_ID = 0n;
 export const ALWAYS_ALLOW_POLICY_ID = 1n;
