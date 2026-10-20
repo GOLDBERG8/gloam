@@ -10,6 +10,8 @@
  * says that the program's tasks, rewards and guides land in the Testers topic.
  */
 
+import { isMainnetLive, liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+
 /** WalletConnect is on (lib/walletConnect.ts): phones without a wallet browser can use a wallet app. */
 const WALLET_APP = Boolean(process.env.NEXT_PUBLIC_WC_PROJECT_ID?.trim());
 const RH_CONNECT = WALLET_APP
@@ -229,9 +231,70 @@ REPORTING BUGS AND WHERE TO GO
 - Questions: the Help topic. Ideas: the Feedback topic. News: Announcements and X @gloamtrade. Anything private: hello@gloam.trade. Website and docs: gloam.trade and gloam.trade/docs.
 `;
 
-/** The knowledge block for the system prompt. */
-export function knowledgeBlock(testingOpen: boolean): string {
+/**
+ * What Glim knows once mainnet is live (lib/mainnet.ts: the launch time has
+ * passed and a mainnet pool is filled in). Only the chains with a pool are named.
+ */
+function mainnetLiveFacts(): string {
+  const rh = mainnetPool(4663) !== null;
+  const tempo = mainnetPool(4217) !== null;
+  const lines = [
+    "MAINNET IS LIVE (this overrides any line below that says the app is testnet only or that mainnet is coming)",
+    `- Gloam went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on ${liveMainnetNames()}. Mainnet is real money. Say so plainly when asked, and point to gloam.trade/app.`,
+    ...(rh
+      ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG and $GLOAM. Native ETH pays gas but cannot be added privately there. Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer https://explorer.mainnet.chain.robinhood.com."]
+      : []),
+    ...(tempo
+      ? ["- Tempo mainnet (chain ID 4217): the vault takes USDC.e, pathUSD, USDT0 and OUSD, and fees are paid in stablecoins. Details, if someone adds the chain by hand: RPC https://rpc.tempo.xyz, chain ID 4217, currency USD, explorer https://explore.tempo.xyz."]
+      : []),
+    "- Beta deposit limits on mainnet: 500 per deposit and 25,000 in total for each stablecoin; $GLOAM 25,000 per deposit and 250,000 in total. The app shows the room left before you sign.",
+    "- Mainnet proofs use the trusted setup's final keys (13 contributors). Private trade and the sample stock tokens stay on Robinhood Chain testnet; the mainnet vaults are for payments.",
+    "- In the app, the network selector marks every network Mainnet or Testnet, and a testnet page says its balances are test funds. Pick the mainnet there for real money. The testnets stay open with play money for trying things first, and test funds never move to mainnet.",
+    "- Passkey sign-in (Tempo Wallet) is on Tempo testnet. On mainnet, connect a browser wallet or a wallet app.",
+    "- On mainnet, a plain payment code or claim link is real money: send it privately to the one person, or pay their Gloam address so the payment is sealed to them.",
+  ];
+  return lines.join("\n");
+}
+
+/** Lines that read differently once mainnet is live: [what the facts say before, what they say after]. */
+function liveSwaps(): [string, string][] {
+  const names = liveMainnetNames();
+  const rh = mainnetPool(4663) !== null;
   return [
+    [
+      "- The app is on testnet for now: play money and development proving keys, no real dollars. Mainnet is coming on both Tempo and Robinhood Chain. The trusted-setup ceremony for mainnet is done (13 contributors). Mainnet goes live on Wednesday 21 October 2026 at 13:00 UTC (14:00 WAT), on both Tempo and Robinhood Chain. The live countdown is at gloam.trade/mainnet: when someone asks when mainnet is, give the time in UTC and send them there. That is the only date and time you may give. Never give any other, and never say mainnet is live until the team announces it; until then the app is testnet. Launch news comes in Announcements and on X @gloamtrade.",
+      `- Mainnet is live on ${names}, since Wednesday 21 October 2026 at 13:00 UTC (14:00 WAT): real money, with the trusted setup's final keys (13 contributors). The testnets stay open with play money and development proving keys. Never give or guess any other date. Launch news comes in Announcements and on X @gloamtrade.`,
+    ],
+    [
+      "The app itself is still on testnet; the token is not a testnet token.",
+      "The app is live on mainnet too; the token is not a testnet token.",
+    ],
+    [
+      "$GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees switch on",
+      `$GLOAM listed in the mainnet pool; Gloam live on mainnet (${names}). Next: shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees switch on`,
+    ],
+    ["gloam.trade/app (the testnet app)", "gloam.trade/app (the app: mainnet and testnet)"],
+    ...(rh
+      ? ([
+          [
+            "The Gloam app is not on mainnet yet (only the $GLOAM token is). A wallet set to \"Robinhood Chain\" is often on mainnet, which is the wrong one for the app.",
+            "Gloam runs on both now, so the wallet has to be on the one the app's network selector shows: Robinhood Chain mainnet for real money, the testnet for play money.",
+          ],
+          [
+            "the wallet is on Robinhood Chain mainnet and the app needs Robinhood Chain testnet. Fix:",
+            "the wallet is on Robinhood Chain mainnet and the app is set to Robinhood Chain testnet. For real money, pick Robinhood Chain mainnet in the app's network selector instead. To keep testing on the testnet:",
+          ],
+        ] as [string, string][])
+      : []),
+  ];
+}
+
+/**
+ * The knowledge block for the system prompt. `live` defaults to whether
+ * mainnet is live now; before that the block is exactly what it always was.
+ */
+export function knowledgeBlock(testingOpen: boolean, live: boolean = isMainnetLive()): string {
+  const block = [
     ABOUT.trim(),
     TOKEN.trim(),
     CRYPTO_TALK.trim(),
@@ -242,4 +305,7 @@ export function knowledgeBlock(testingOpen: boolean): string {
     ISSUES.trim(),
     `OFFICIAL LINKS (the only ones you may share)\n${OFFICIAL_LINKS.map((l) => `- ${l}`).join("\n")}`,
   ].join("\n\n");
+  if (!live) return block;
+  const swapped = liveSwaps().reduce((text, [before, after]) => text.split(before).join(after), block);
+  return `${mainnetLiveFacts()}\n\n${swapped}`;
 }

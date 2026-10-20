@@ -6,6 +6,7 @@
  */
 import { createHash, timingSafeEqual } from "crypto";
 import { english } from "viem/accounts";
+import { isMainnetLive, mainnetPool } from "@/lib/mainnet";
 import { GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
 
@@ -786,6 +787,8 @@ export type ReplyPolicy = {
   team?: boolean;
   /** Values that must never appear in a reply: the deployment's own keys and tokens. */
   secrets?: string[];
+  /** Mainnet is live, so "mainnet is live" is true and may go out. Left out: worked out from the clock and the pools. */
+  mainnetLive?: boolean;
 };
 
 /** A link the helper may share: the website, the group, the X account, $GLOAM's page on Orynth. */
@@ -812,14 +815,16 @@ function wrongAddress(s: string, team: boolean): boolean {
 }
 
 /** One sentence breaks a rule that dropping it fixes: an off-list link, email or handle, a wrong address, a price, a mainnet claim or date, posing as a person. */
-function brokenSentence(s: string, team: boolean, okHandles: Set<string>): boolean {
+function brokenSentence(s: string, team: boolean, okHandles: Set<string>, mainnetLive = false): boolean {
   if ((s.match(LINK_RE) ?? []).some((l) => !linkAllowed(l))) return true;
   if ((s.match(EMAIL_RE) ?? []).some((e) => e.toLowerCase() !== "hello@gloam.trade")) return true;
   for (const m of s.matchAll(HANDLE_RE)) if (!okHandles.has(m[1]!.toLowerCase())) return true;
   if (wrongAddress(s, team)) return true;
   if (TOKEN_PRICE.test(s)) return true;
-  // $GLOAM really is on Robinhood Chain mainnet; the app is the part that is not
-  if (!ABOUT_TOKEN.test(s)) for (const m of s.matchAll(MAINNET_LIVE)) if (!negated(s, m.index ?? 0, m[0])) return true;
+  // $GLOAM really is on Robinhood Chain mainnet; the app is the part that is not, until mainnet is live
+  if (!mainnetLive && !ABOUT_TOKEN.test(s)) {
+    for (const m of s.matchAll(MAINNET_LIVE)) if (!negated(s, m.index ?? 0, m[0])) return true;
+  }
   if (MAINNET_DATE.test(s) && !officialLaunch(s)) return true;
   return HUMAN_CLAIM.test(s);
 }
@@ -882,9 +887,10 @@ export function tidyReply(raw: string): string {
  * The model's reply, made safe to post, or null. Anything shaped like a seed
  * phrase, key or deployment secret, or a payment code or claim link, sinks the
  * whole reply. A sentence with an off-list link, email or handle, an address
- * that is not $GLOAM's, a token price, a claim that the app is on mainnet or a
- * date for it, or claiming to be a person is dropped, and the rest goes out.
- * A group reply that lost most of its sentences is not sent at all.
+ * that is not $GLOAM's, a token price, a claim that the app is on mainnet
+ * (until it is) or a date for it other than the announced one, or claiming to
+ * be a person is dropped, and the rest goes out. A group reply that lost most
+ * of its sentences is not sent at all.
  */
 export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
   const text = clip(tidyReply(raw), policy.maxChars ?? MAX_REPLY);
@@ -894,7 +900,8 @@ export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
   // a code or claim link read off a screenshot is never repeated; an address is fine
   if ([...scanCodes(text).kinds].some((k) => k !== "address" && k !== "request_link")) return null;
   const okHandles = new Set(["gloamtrade", "gloamhq", ...policy.handles.map((h) => h.toLowerCase())]);
-  const r = dropBroken(text, (s) => brokenSentence(s, Boolean(policy.team), okHandles));
+  const live = policy.mainnetLive ?? isMainnetLive();
+  const r = dropBroken(text, (s) => brokenSentence(s, Boolean(policy.team), okHandles, live));
   if (!r.kept) return null;
   if (!policy.team && r.dropped * 2 > r.kept + r.dropped) return null;
   return r.text;
@@ -1066,13 +1073,43 @@ function escapeRe(s: string): string {
 
 // ---------------------------------------------------------------- wrong network
 
-/** Chains people's wallets end up on, by id. Gloam is on the two testnets only. */
+/** Chains people's wallets end up on, by id. Gloam is on the two testnets, and each mainnet once its pool is in. */
 const CHAIN_NAMES: Record<number, string> = {
   1: "Ethereum mainnet",
   4663: "Robinhood Chain mainnet",
   46630: "Robinhood Chain testnet",
   42431: "Tempo testnet",
+  4217: "Tempo mainnet",
 };
+
+/** Hand-add details for a chain the app can ask for. */
+const CHAIN_DETAILS: Record<number, string> = {
+  42431: "RPC https://rpc.moderato.tempo.xyz, chain ID 42431, currency USD.",
+  46630: "RPC https://rpc.testnet.chain.robinhood.com, chain ID 46630, currency ETH.",
+  4663: "RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH.",
+  4217: "RPC https://rpc.tempo.xyz, chain ID 4217, currency USD.",
+};
+
+/** The fix once mainnet is live: the wallet and the app can each be on a mainnet or a testnet. */
+function liveChainFix(name: string, m: ChainMismatch): string {
+  const mainnets = new Set([...(mainnetPool(4663) ? [4663] : []), ...(mainnetPool(4217) ? [4217] : [])]);
+  const want = `${chainLabel(m.want)} (${m.want})`;
+  const tempo = m.want === 42431 || m.want === 4217;
+  const button = tempo ? "Switch to Tempo" : "Switch to Robinhood Chain";
+  const twin: Record<number, number> = { 46630: 4663, 4663: 46630, 42431: 4217, 4217: 42431 };
+  const tap = `tap "${button}" on the wallet button at the top of the app (or Settings > Network > Add to wallet), approve it in your wallet, then try again.`;
+  // the wallet sits on the other side (mainnet or testnet) of the chain the app is set to
+  const otherSide = twin[m.want] === m.wallet && (mainnets.has(m.wallet) || mainnets.has(m.want));
+  const walletIsMain = mainnets.has(m.wallet);
+  const why = otherSide
+    ? `Your wallet is on ${chainLabel(m.wallet)} (${m.wallet}) and the app is set to ${want}. ` +
+      (walletIsMain
+        ? `For real money, pick ${chainLabel(m.wallet)} in the app's network selector. To stay on the testnet, ${tap}`
+        : `For play money, pick ${chainLabel(m.wallet)} in the app's network selector. For mainnet, ${tap}`)
+    : `Your wallet is on ${chainLabel(m.wallet)} and the app is on ${want}, so the wallet refuses the transaction. ${tap[0]!.toUpperCase()}${tap.slice(1)}`;
+  const details = CHAIN_DETAILS[m.want];
+  return `Easy one, ${name}. ${why}` + (details ? ` If your wallet won't switch, add the network by hand: ${details}` : "");
+}
 
 /** The wallet's network and the one the app wanted, from a pasted wrong-network error. */
 export type ChainMismatch = { wallet: number; want: number };
@@ -1095,8 +1132,9 @@ export function chainMismatch(text: string): ChainMismatch | null {
 
 const chainLabel = (id: number) => CHAIN_NAMES[id] ?? `chain ${id}`;
 
-/** The fix for a wrong-network error, in the helper's voice. */
-export function chainFix(name: string, m: ChainMismatch): string {
+/** The fix for a wrong-network error, in the helper's voice. Before mainnet is live, exactly as it always was. */
+export function chainFix(name: string, m: ChainMismatch, mainnetLive: boolean = isMainnetLive()): string {
+  if (mainnetLive) return liveChainFix(name, m);
   const want = m.want === 42431 ? "Tempo testnet (42431)" : m.want === 46630 ? "Robinhood Chain testnet (46630)" : chainLabel(m.want);
   const button = m.want === 42431 ? "Switch to Tempo" : "Switch to Robinhood Chain";
   const why =

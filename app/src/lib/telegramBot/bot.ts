@@ -150,6 +150,7 @@ import {
   type TgUser,
 } from "./telegram";
 import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
+import { isMainnetLive } from "@/lib/mainnet";
 
 /** t.me/gloamhq. TELEGRAM_GROUP_ID overrides it. */
 const GLOAM_GROUP_ID = -1004464028206;
@@ -316,6 +317,13 @@ function cantAnswer(c: BotConfig, name: string, topic: number, kind: Fallback): 
 }
 
 function codeTip(name: string): string {
+  // once mainnet is live a code in the group may be real money
+  if (isMainnetLive()) {
+    return (
+      `Quick heads-up, ${name}: testnet codes are fine here, but a mainnet payment code or claim link is real money and works like cash, ` +
+      `so whoever sees it can claim it. Send those privately, or pay the person's Gloam address instead so the payment is sealed to them.`
+    );
+  }
   return (
     `Quick heads-up, ${name}: fine here, it's testnet play money. On mainnet a plain payment code or claim link works like cash, ` +
     `so whoever sees it can claim it. Send those privately, or pay the person's Gloam address instead so the payment is sealed to them.`
@@ -323,6 +331,12 @@ function codeTip(name: string): string {
 }
 
 function phraseTip(name: string): string {
+  if (isMainnetLive()) {
+    return (
+      `Quick heads-up, ${name}: on testnet this is fine, but on mainnet share the phrase for a locked code privately, ` +
+      `never next to the code, because the code plus its phrase lets anyone claim real money.`
+    );
+  }
   return (
     `Quick heads-up, ${name}: fine here, it's testnet play money. On mainnet, share the phrase for a locked code privately, ` +
     `never next to the code, because the code plus its phrase lets anyone claim it.`
