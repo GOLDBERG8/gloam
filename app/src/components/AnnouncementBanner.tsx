@@ -51,7 +51,7 @@ export function AnnouncementBanner() {
           {live ? (
             <>
               <span className="font-medium">Gloam is live on mainnet.</span>{" "}
-              <span className="text-white/60">Private payments with real money on {liveMainnetNames()}.</span>
+              <span className="text-white/60 max-sm:hidden">Private payments with real money on {liveMainnetNames()}.</span>
             </>
           ) : remaining?.done ? (
             <span className="font-medium">Gloam mainnet is rolling out now.</span>

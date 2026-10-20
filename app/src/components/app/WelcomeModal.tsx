@@ -5,8 +5,20 @@ import { useEffect, useRef, useState } from "react";
 import { Mark } from "@/components/Logo";
 import { SealedField } from "@/components/ui/SealedField";
 import { readDemo } from "@/lib/demoFlag";
+import { MAINNET_CONFIGURED, MAINNET_LAUNCH_MS, isMainnetLive, liveMainnetNames } from "@/lib/mainnet";
 
 const STORAGE_KEY = "gloam_testnet_welcome_v1";
+/** Its own key, so someone who closed the testnet welcome still gets the mainnet one once. */
+const MAINNET_STORAGE_KEY = "gloam_mainnet_welcome_v1";
+
+/**
+ * Before the app's JavaScript arrives the server HTML holds the testnet
+ * welcome. Once mainnet is live (a pool is in and the launch time has passed)
+ * the head start below stands aside and React shows the mainnet welcome, so
+ * nobody reads "play money" on a page that now opens on real money. Before
+ * that this is empty and the script is exactly what it was.
+ */
+const LIVE_GUARD = MAINNET_CONFIGURED ? `if(Date.now()>=${MAINNET_LAUNCH_MS})return;` : "";
 
 /**
  * Shown once, before the app's JavaScript arrives: the modal is in the server
@@ -15,19 +27,22 @@ const STORAGE_KEY = "gloam_testnet_welcome_v1";
  * paint instead of seconds later, after the wallet code loads. Once React takes
  * over, state drives it as before (and recording demos keep it shut).
  */
-const REVEAL_SCRIPT = `(function(){try{if(localStorage.getItem('${STORAGE_KEY}')==='1')return;if(/[?&]demo=1/.test(location.search)||sessionStorage.getItem('gloam_demo')==='1')return;var el=document.getElementById('gl-welcome');if(el)el.hidden=false}catch(e){}})()`;
+const REVEAL_SCRIPT = `(function(){try{${LIVE_GUARD}if(localStorage.getItem('${STORAGE_KEY}')==='1')return;if(/[?&]demo=1/.test(location.search)||sessionStorage.getItem('gloam_demo')==='1')return;var el=document.getElementById('gl-welcome');if(el)el.hidden=false}catch(e){}})()`;
 
 export function WelcomeModal() {
   const [open, setOpen] = useState(false);
+  const [live, setLive] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const liveNow = isMainnetLive();
     let show = true;
     try {
-      if (localStorage.getItem(STORAGE_KEY) === "1" || readDemo()) show = false;
+      if (localStorage.getItem(liveNow ? MAINNET_STORAGE_KEY : STORAGE_KEY) === "1" || readDemo()) show = false;
     } catch {
       /* storage unavailable: show it */
     }
+    if (liveNow) setLive(true);
     // The head start may have unhidden it; React's own state takes over here.
     if (show) setOpen(true);
     else if (ref.current) ref.current.hidden = true;
@@ -36,6 +51,7 @@ export function WelcomeModal() {
   function dismiss() {
     try {
       localStorage.setItem(STORAGE_KEY, "1");
+      if (live) localStorage.setItem(MAINNET_STORAGE_KEY, "1");
     } catch {
       /* ignore */
     }
@@ -67,14 +83,21 @@ export function WelcomeModal() {
             <div className="mb-6 max-sm:hidden">
               <Mark size={32} />
             </div>
-            <p className="t-label">Gloam testnet</p>
+            <p className="t-label">{live ? "Gloam mainnet" : "Gloam testnet"}</p>
             <h2 id="welcome-title" className="t-display-m mt-2 text-foreground">
               Welcome to Gloam
             </h2>
-            <p className="mt-3 text-[15px] leading-relaxed text-mute">
-              Private money on Robinhood Chain and Tempo. This is a test version
-              with play money, so don&apos;t use real funds.
-            </p>
+            {live ? (
+              <p className="mt-3 text-[15px] leading-relaxed text-mute">
+                Private money on {liveMainnetNames()}. Mainnet is real money.
+                The testnet stays open with play money for trying things first.
+              </p>
+            ) : (
+              <p className="mt-3 text-[15px] leading-relaxed text-mute">
+                Private money on Robinhood Chain and Tempo. This is a test version
+                with play money, so don&apos;t use real funds.
+              </p>
+            )}
           </div>
         </div>
 
@@ -82,9 +105,13 @@ export function WelcomeModal() {
           <p className="t-label">Quick start</p>
           <ol className="mt-2">
             {[
-              <>Connect a wallet and pick a network: Robinhood Chain or Tempo.</>,
+              live ? (
+                <>Connect a wallet and pick a network. The menu marks each one Mainnet or Testnet.</>
+              ) : (
+                <>Connect a wallet and pick a network: Robinhood Chain or Tempo.</>
+              ),
               <>
-                Claim test funds if you need them. The{" "}
+                {live ? "On testnet, claim test funds if you need them. The" : "Claim test funds if you need them. The"}{" "}
                 <Link
                   href="/docs/testnet"
                   className="font-medium text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground"

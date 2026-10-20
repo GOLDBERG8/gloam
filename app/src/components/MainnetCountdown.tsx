@@ -119,10 +119,8 @@ export function MainnetHeadline() {
 export function MainnetLiveNote() {
   return (
     <div className="flex flex-col gap-3">
-      <p className="t-display-l max-w-[22ch]">Mainnet is live.</p>
-      <p className="max-w-[46ch] text-[16px] leading-relaxed text-soft">
-        Private payments with real money on {liveMainnetNames()}.
-      </p>
+      <p className="t-display-l max-w-[22ch]">Private payments, with real money.</p>
+      <p className="max-w-[46ch] text-[16px] leading-relaxed text-soft">Live on {liveMainnetNames()}.</p>
     </div>
   );
 }
