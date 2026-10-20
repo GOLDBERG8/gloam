@@ -1,6 +1,55 @@
 /**
- * Mainnet launch time, shared by the countdown page, the site banner, the
- * homepage link and Glim. Wednesday 21 October 2026, 13:00 UTC (14:00 WAT).
+ * Mainnet: the two pools, the launch time, and whether mainnet is live.
+ *
+ * MAINNET_POOLS is FILLED IN ON DEPLOY DAY: paste each pool address and the
+ * block its deploy transaction landed in (the deploy script prints both). Until
+ * a chain has both, that mainnet is hidden everywhere: the app, the API, the
+ * relay, the MCP server, Glim and proofs all act as if it does not exist.
+ *
+ * The block number can be written plain (12345678) or as a bigint (12345678n).
+ */
+export const MAINNET_POOLS: Record<MainnetChainId, MainnetPoolInput> = {
+  // Robinhood Chain mainnet (4663): USDG + GLOAM
+  4663: { pool: null, deployBlock: null },
+  // Tempo mainnet (4217): USDC.e, pathUSD, USDT0, OUSD
+  4217: { pool: null, deployBlock: null },
+};
+
+export type MainnetChainId = 4663 | 4217;
+
+type MainnetPoolInput = { pool: string | null; deployBlock: number | bigint | null };
+
+export type MainnetPool = { pool: `0x${string}`; deployBlock: bigint };
+
+/**
+ * A chain's mainnet pool, or null while it is not filled in. A pool address
+ * that is not an address fails the build instead of quietly hiding the chain.
+ */
+export function mainnetPool(chainId: MainnetChainId): MainnetPool | null {
+  const { pool, deployBlock } = MAINNET_POOLS[chainId];
+  if (pool === null || deployBlock === null) return null;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(pool) || /^0x0{40}$/.test(pool)) {
+    throw new Error(`MAINNET_POOLS[${chainId}].pool is not a pool address: ${pool}`);
+  }
+  const block = BigInt(deployBlock);
+  if (block <= 0n) throw new Error(`MAINNET_POOLS[${chainId}].deployBlock must be the deploy block, got ${deployBlock}`);
+  return { pool: pool as `0x${string}`, deployBlock: block };
+}
+
+/** At least one mainnet pool is filled in. */
+export const MAINNET_CONFIGURED = mainnetPool(4663) !== null || mainnetPool(4217) !== null;
+
+/**
+ * Mainnet is live once the launch time has passed and at least one pool is in.
+ * Before that every page, banner and Glim answer counts down exactly as before.
+ */
+export function isMainnetLive(now: number = Date.now()): boolean {
+  return MAINNET_CONFIGURED && now >= MAINNET_LAUNCH_MS;
+}
+
+/**
+ * Launch time, shared by the countdown page, the site banner, the homepage
+ * link and Glim. Wednesday 21 October 2026, 13:00 UTC (14:00 WAT).
  */
 export const MAINNET_LAUNCH_ISO = "2026-10-21T13:00:00Z";
 export const MAINNET_LAUNCH_MS = Date.parse(MAINNET_LAUNCH_ISO);

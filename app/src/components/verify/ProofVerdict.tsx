@@ -2,9 +2,9 @@
 
 import { useState, type ReactNode } from "react";
 import type { AnyProof, CheckState, VerifyResult } from "@/lib/proofs";
-import { allNetworks } from "@/lib/networks";
+import { allNetworks, networkName } from "@/lib/networks";
 import { assetDecimals, isNativeAsset } from "@/lib/shield";
-import { RH_STABLE_TOKENS, TEMPO_STABLE_TOKENS, TESTNET_STOCK_TOKENS } from "@/lib/tokens";
+import { knownTokens } from "@/lib/tokens";
 import { SealedField } from "@/components/ui/SealedField";
 import { displayLabel } from "@/lib/proofs/label";
 import { formatUnits } from "viem";
@@ -17,7 +17,6 @@ import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
  * also say what they do not prove: neither shows who was paid.
  */
 
-const TOKENS = [...RH_STABLE_TOKENS, ...TESTNET_STOCK_TOKENS, ...TEMPO_STABLE_TOKENS];
 
 function netFor(chainId: number) {
   return allNetworks().find((n) => n.chainId === chainId);
@@ -26,7 +25,7 @@ function netFor(chainId: number) {
 /** Symbol for an asset on the proof's own network (not the app's active one). */
 export function symbolOf(asset: string, chainId: number): string {
   if (isNativeAsset(asset)) return netFor(chainId)?.primaryAsset.symbol ?? "ETH";
-  const t = TOKENS.find((x) => x.address.toLowerCase() === asset.toLowerCase());
+  const t = knownTokens(chainId).find((x) => x.address.toLowerCase() === asset.toLowerCase());
   return t?.symbol ?? `${asset.slice(0, 6)}…${asset.slice(-4)}`;
 }
 
@@ -235,7 +234,7 @@ export function ProofVerdict({
         </div>
         <div className="flex flex-col gap-1 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-7">
           <dt className="shrink-0 text-mute">Network</dt>
-          <dd className="text-foreground sm:text-right">{net ? `${net.label} testnet` : `Chain ${p.chainId}`}</dd>
+          <dd className="text-foreground sm:text-right">{net ? networkName(net) : `Chain ${p.chainId}`}</dd>
         </div>
         <div className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-7">
           <dt className="shrink-0 text-mute">Vault</dt>

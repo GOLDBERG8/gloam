@@ -1,33 +1,42 @@
 /**
  * Gloam network registry: the runtime source of truth for every chain the
- * product can point at. Today Robinhood Chain testnet is the live flagship;
- * Tempo testnet (Moderato) is scaffolded for the World's Fair expansion and is
- * marked `planned` until its shielded pool + verifiers are deployed (Phase 1).
+ * product can point at. Two testnets (Robinhood Chain testnet and Tempo
+ * Moderato) and their two mainnets.
  *
  * Everything chain-specific (chain object, shielded pool, deploy block, hash
  * scheme, native + stable assets, explorer links) hangs off one `GloamNetwork`
  * record so the app can switch networks at runtime instead of at build time.
  * Robinhood values are re-exported from the existing single sources
  * (chain.ts / config.ts) so there is no second copy to drift.
+ *
+ * A mainnet only exists once its pool is filled in (MAINNET_POOLS in
+ * lib/mainnet.ts). Until then it is left out of NETWORK_KEYS, isNetworkKey,
+ * allNetworks and everything built on them (selector, API, relay, MCP, proofs),
+ * so the app is exactly the two testnets it was before.
  */
 import { defineChain, type Address, type Chain } from "viem";
-import { robinhoodTestnet } from "./chain";
+import { robinhood, robinhoodTestnet } from "./chain";
 import type { CeremonyKind } from "./circuitArtifacts";
 import {
   TESTNET_POSEIDON_POOL,
   TESTNET_POSEIDON_DEPLOY_BLOCK,
   type HashScheme,
 } from "./config";
+import { isMainnetLive, mainnetPool } from "./mainnet";
 
-export type NetworkKey = "robinhood" | "tempo";
+export type NetworkKey = "robinhood" | "tempo" | "robinhood-mainnet" | "tempo-mainnet";
+
+/** The chain a network runs on, testnet or mainnet: wallets, fees and logos follow it. */
+export type ChainFamily = "robinhood" | "tempo";
 
 /**
- * Chain ids of the networks registered in the wagmi config. Typed as the literal
- * union so `network.chainId` is accepted directly by wagmi hook options
- * (`useBalance`, `useSendTransaction`, `useWaitForTransactionReceipt`,
- * `switchChain`), which narrow `chainId` to the configured ids.
+ * Chain ids of the networks Gloam knows. Typed as the literal union so
+ * `network.chainId` is accepted directly by wagmi hook options (`useBalance`,
+ * `useSendTransaction`, `useWaitForTransactionReceipt`, `switchChain`), which
+ * narrow `chainId` to the configured ids. Mainnet ids are only registered with
+ * wagmi once their pool is filled in (lib/wagmi.ts).
  */
-export type GloamChainId = 46630 | 42431;
+export type GloamChainId = 46630 | 42431 | 4663 | 4217;
 
 /** Whether a network is deployed and safe for real shield/spend writes. */
 export type NetworkStatus = "live" | "planned";
@@ -65,7 +74,16 @@ function envBlock(v: string | undefined, fallback: bigint): bigint {
 
 export interface GloamNetwork {
   key: NetworkKey;
+  /** The chain's name, the same for its testnet and its mainnet ("Robinhood Chain", "Tempo"). */
   label: string;
+  family: ChainFamily;
+  /** Test funds (true) or real money (false). */
+  testnet: boolean;
+  /**
+   * Tokenized stocks: the Markets page, stock holdings and private trade. Only
+   * on Robinhood Chain testnet; the mainnet pools take payments only.
+   */
+  stocks: boolean;
   /** viem chain used for clients, wallet_addEthereumChain, etc. */
   chain: Chain;
   chainId: GloamChainId;
@@ -82,7 +100,7 @@ export interface GloamNetwork {
    * network are made and checked with the same set (lib/circuitArtifacts).
    */
   ceremony: CeremonyKind;
-  /** The asset the chain leads with in the product narrative. */
+  /** The chain's native gas coin (ETH on Robinhood Chain, USD on Tempo). */
   primaryAsset: NetworkAsset;
   /** Stable assets shieldable on this network (empty until registered). */
   stableAssets: NetworkAsset[];
@@ -119,10 +137,38 @@ export const tempoTestnet = defineChain({
   testnet: true,
 });
 
+/**
+ * Tempo mainnet. Same shape as Moderato: no gas coin, fees in USD stablecoins.
+ * The native currency keeps 18 decimals like the testnet entry, because wallets
+ * refuse wallet_addEthereumChain with anything else and Gloam never moves it.
+ * Multicall3 is deployed at its usual address (checked on chain 2026-10-20).
+ */
+export const tempoMainnet = defineChain({
+  id: 4217,
+  name: "Tempo",
+  nativeCurrency: { name: "US Dollar", symbol: "USD", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.tempo.xyz"] },
+  },
+  blockExplorers: {
+    default: {
+      name: "Tempo Explorer",
+      url: "https://explore.tempo.xyz",
+    },
+  },
+  contracts: { multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" } },
+});
+
+const RH_MAINNET_POOL = mainnetPool(4663);
+const TEMPO_MAINNET_POOL = mainnetPool(4217);
+
 const NETWORKS: Record<NetworkKey, GloamNetwork> = {
   robinhood: {
     key: "robinhood",
     label: "Robinhood Chain",
+    family: "robinhood",
+    testnet: true,
+    stocks: true,
     chain: robinhoodTestnet,
     chainId: robinhoodTestnet.id,
     pool: TESTNET_POSEIDON_POOL,
@@ -150,6 +196,9 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
   tempo: {
     key: "tempo",
     label: "Tempo",
+    family: "tempo",
+    testnet: true,
+    stocks: false,
     chain: tempoTestnet,
     chainId: tempoTestnet.id,
     // No-middlemen pool redeployed on Tempo Moderato 2026-09-29: no
@@ -179,9 +228,77 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     explorerAddress: (addr) =>
       `${tempoTestnet.blockExplorers.default.url}/address/${addr}`,
   },
+  // Mainnet: ShieldPoolPayments with the ceremony's final keys, payments only
+  // (no sealed swap), beta deposit limits on, no payment-memo board yet.
+  "robinhood-mainnet": {
+    key: "robinhood-mainnet",
+    label: "Robinhood Chain",
+    family: "robinhood",
+    testnet: false,
+    stocks: false,
+    chain: robinhood,
+    chainId: robinhood.id,
+    pool: RH_MAINNET_POOL?.pool ?? null,
+    deployBlock: RH_MAINNET_POOL?.deployBlock ?? null,
+    ceremony: "production",
+    logRange: 100_000n,
+    hashScheme: "poseidon",
+    primaryAsset: { symbol: "ETH", address: null, decimals: 18 },
+    stableAssets: [],
+    status: "live",
+    payMemo: null,
+    note: "Mainnet, real money: private USDG payments, and $GLOAM held privately.",
+    explorerTx: (hash) => `${robinhood.blockExplorers.default.url}/tx/${hash}`,
+    explorerAddress: (addr) => `${robinhood.blockExplorers.default.url}/address/${addr}`,
+  },
+  "tempo-mainnet": {
+    key: "tempo-mainnet",
+    label: "Tempo",
+    family: "tempo",
+    testnet: false,
+    stocks: false,
+    chain: tempoMainnet,
+    chainId: tempoMainnet.id,
+    pool: TEMPO_MAINNET_POOL?.pool ?? null,
+    deployBlock: TEMPO_MAINNET_POOL?.deployBlock ?? null,
+    ceremony: "production",
+    logRange: 100_000n,
+    hashScheme: "poseidon",
+    primaryAsset: { symbol: "USD", address: null, decimals: 18 },
+    stableAssets: [],
+    status: "live",
+    payMemo: null,
+    note: "Mainnet, real money: private stablecoin payments (USDC.e, pathUSD, USDT0, OUSD).",
+    explorerTx: (hash) => `${tempoMainnet.blockExplorers.default.url}/tx/${hash}`,
+    explorerAddress: (addr) => `${tempoMainnet.blockExplorers.default.url}/address/${addr}`,
+  },
 };
 
+/** Mainnets whose pool is filled in, Robinhood Chain first. Empty before deploy day. */
+const MAINNET_KEYS: NetworkKey[] = (["robinhood-mainnet", "tempo-mainnet"] as const).filter(
+  (k) => NETWORKS[k].pool !== null && NETWORKS[k].deployBlock !== null
+);
+
+/** True once at least one mainnet pool is filled in: the app then labels real money and test funds. */
+export const MAINNET_ENABLED = MAINNET_KEYS.length > 0;
+
+/** The network a visitor starts on before mainnet is live (and on the server, always). */
 export const DEFAULT_NETWORK_KEY: NetworkKey = "robinhood";
+
+let sessionDefault: NetworkKey | null = null;
+
+/**
+ * The network a visitor lands on when they never picked one: Robinhood Chain
+ * testnet, as always, until mainnet is live; from then a mainnet (Robinhood
+ * Chain's, or Tempo's when only Tempo has a pool). Worked out once per page
+ * load, so the selector and lib code never disagree if the launch passes while
+ * a tab is open. On the server it is always DEFAULT_NETWORK_KEY.
+ */
+export function defaultNetworkKey(): NetworkKey {
+  if (typeof window === "undefined") return DEFAULT_NETWORK_KEY;
+  sessionDefault ??= isMainnetLive() && MAINNET_KEYS[0] ? MAINNET_KEYS[0] : DEFAULT_NETWORK_KEY;
+  return sessionDefault;
+}
 
 /** localStorage key the network selector persists to (mirror of NetworkProvider). */
 const ACTIVE_NETWORK_STORAGE_KEY = "gloam.network";
@@ -189,11 +306,8 @@ const ACTIVE_NETWORK_STORAGE_KEY = "gloam.network";
 /**
  * The active network for non-React code (lib functions that cannot use the
  * useNetwork hook). Reads the same localStorage key the selector writes, and
- * defaults to Robinhood. SSR and blocked-storage safe. React components should
- * prefer useNetwork().
- *
- * Only `live` networks are selectable in the UI, so today this always resolves
- * to Robinhood; it becomes meaningful the moment Tempo is marked live.
+ * falls back to defaultNetworkKey(). SSR and blocked-storage safe. React
+ * components should prefer useNetwork().
  */
 export function getActiveNetwork(): GloamNetwork {
   if (typeof window === "undefined") return NETWORKS[DEFAULT_NETWORK_KEY];
@@ -207,33 +321,44 @@ export function getActiveNetwork(): GloamNetwork {
   } catch {
     /* private mode / blocked storage */
   }
-  return NETWORKS[DEFAULT_NETWORK_KEY];
+  return NETWORKS[defaultNetworkKey()];
 }
 
-export const NETWORK_KEYS = Object.keys(NETWORKS) as NetworkKey[];
+/** The networks Gloam runs on right now: mainnets with a pool first, then the testnets. */
+export const NETWORK_KEYS: NetworkKey[] = [...MAINNET_KEYS, "robinhood", "tempo"];
 
-/** The key set a proof made for `chainId` was made with; the dev keys for a chain Gloam doesn't run on. */
+/**
+ * The key set a proof made for `chainId` was made with; the dev keys for a
+ * chain Gloam doesn't run on. Mainnet chain ids always answer "production",
+ * pool or not, so a mainnet proof is never checked against the dev keys.
+ */
 export function ceremonyForChain(chainId: unknown): CeremonyKind {
   const id = Number(chainId);
-  return NETWORK_KEYS.map((k) => NETWORKS[k]).find((n) => n.chainId === id)?.ceremony ?? "dev";
+  return Object.values(NETWORKS).find((n) => n.chainId === id)?.ceremony ?? "dev";
 }
 
 export function getNetwork(key: NetworkKey): GloamNetwork {
   return NETWORKS[key];
 }
 
-/** All networks, live first, for rendering a selector. */
+/** All networks Gloam runs on, live first, for rendering a selector. */
 export function allNetworks(): GloamNetwork[] {
   return NETWORK_KEYS.map(getNetwork).sort((a, b) =>
     a.status === b.status ? 0 : a.status === "live" ? -1 : 1
   );
 }
 
+/** A key of a network Gloam runs on right now (a mainnet without a pool is not one). */
 export function isNetworkKey(v: string | null | undefined): v is NetworkKey {
-  return v === "robinhood" || v === "tempo";
+  return typeof v === "string" && (NETWORK_KEYS as string[]).includes(v);
 }
 
 /** A network can take real shield/spend writes only when live with a pool. */
 export function isNetworkWritable(n: GloamNetwork): boolean {
   return n.status === "live" && n.pool !== null;
+}
+
+/** "Robinhood Chain testnet", "Tempo testnet", or plain "Robinhood Chain" / "Tempo" on mainnet. */
+export function networkName(n: Pick<GloamNetwork, "label" | "testnet">): string {
+  return n.testnet ? `${n.label} testnet` : n.label;
 }

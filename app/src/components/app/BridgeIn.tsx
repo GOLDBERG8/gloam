@@ -30,7 +30,7 @@ type Stage =
  */
 export function BridgeInCard({ recipient, onArrived }: { recipient?: string; onArrived?: (amount: string) => void }) {
   const { network } = useNetwork();
-  const dest = BRIDGE_DESTINATIONS[network.key];
+  const dest = BRIDGE_DESTINATIONS[network.family];
   const [open, setOpen] = useState(false);
 
   return (
@@ -77,7 +77,7 @@ function BridgeSheet({
   onArrived: (amount: string) => void;
 }) {
   const { network } = useNetwork();
-  const dest = BRIDGE_DESTINATIONS[network.key];
+  const dest = BRIDGE_DESTINATIONS[network.family];
   const reduce = useReducedMotion();
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const [sourceKey, setSourceKey] = useState(SOURCES[0]!.key);

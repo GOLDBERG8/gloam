@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { formatUnits, isAddress, parseUnits } from "viem";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
-import { isNetworkKey } from "@/lib/networks";
+import { getNetwork, isNetworkKey } from "@/lib/networks";
 import {
   BRIDGE_DESTINATIONS,
   BRIDGE_MAX,
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
   const source = typeof body.source === "string" ? bridgeSource(body.source) : null;
   if (!source) return fail(400, "Pick where the money is coming from.");
   if (typeof body.network !== "string" || !isNetworkKey(body.network)) return fail(400, "Pick Robinhood Chain or Tempo.");
-  const dest = BRIDGE_DESTINATIONS[body.network];
+  const dest = BRIDGE_DESTINATIONS[getNetwork(body.network).family];
 
   const recipient = typeof body.recipient === "string" ? body.recipient : "";
   if (!isAddress(recipient)) return fail(400, "Connect a wallet to receive the money.");

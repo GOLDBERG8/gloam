@@ -10,7 +10,16 @@ import { FlowField } from "@/components/ui/FlowField";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { TokenLogo } from "@/components/app/TokenLogo";
-import { getNetwork, isNetworkKey, type NetworkKey } from "@/lib/networks";
+import {
+  MAINNET_ENABLED,
+  NETWORK_KEYS,
+  defaultNetworkKey,
+  getNetwork,
+  isNetworkKey,
+  networkName,
+  type ChainFamily,
+  type NetworkKey,
+} from "@/lib/networks";
 import {
   cachedLedger,
   loadLedger,
@@ -20,10 +29,22 @@ import {
 } from "./ledger";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 
-const NETS: { key: NetworkKey; logo: string; testnet: string }[] = [
-  { key: "robinhood", logo: "/brand/logos/robinhood.png", testnet: "Robinhood Chain testnet" },
-  { key: "tempo", logo: "/brand/logos/tempo.svg", testnet: "Tempo Moderato testnet" },
-];
+const LOGOS: Record<ChainFamily, string> = {
+  robinhood: "/brand/logos/robinhood.png",
+  tempo: "/brand/logos/tempo.svg",
+};
+
+/** Every network Gloam runs on: the two testnets, and each mainnet once its pool is in. */
+const NETS: { key: NetworkKey; logo: string }[] = NETWORK_KEYS.map((key) => ({
+  key,
+  logo: LOGOS[getNetwork(key).family],
+}));
+
+/** Tab name: the chain alone, until a mainnet sits next to its testnet. */
+function tabLabel(key: NetworkKey): string {
+  const n = getNetwork(key);
+  return MAINNET_ENABLED ? networkName(n) : n.label;
+}
 
 /* ---------------------------------------------------------------- data */
 
@@ -36,7 +57,9 @@ function friendlyError(key: NetworkKey): string {
 
 /** Reads the ledger for the shown network, then warms the other one. */
 function useLedger(key: NetworkKey | null) {
-  const [states, setStates] = useState<Record<NetworkKey, NetState>>({ robinhood: EMPTY, tempo: EMPTY });
+  const [states, setStates] = useState<Record<NetworkKey, NetState>>(
+    () => Object.fromEntries(NETWORK_KEYS.map((k) => [k, EMPTY])) as Record<NetworkKey, NetState>
+  );
   const [nonce, setNonce] = useState(0);
   const forceNext = useRef(false);
 
@@ -56,10 +79,13 @@ function useLedger(key: NetworkKey | null) {
     loadLedger(key, { force, onProgress: (progress) => patch({ progress }) })
       .then((ledger) => {
         patch({ ledger, error: null, refreshing: false, progress: 1 });
-        const other: NetworkKey = key === "robinhood" ? "tempo" : "robinhood";
-        void loadLedger(other).catch(() => {
-          /* read again when opened */
-        });
+        // the other chain on the same side (testnet or mainnet)
+        const other = NETWORK_KEYS.find((k) => k !== key && getNetwork(k).testnet === getNetwork(key).testnet);
+        if (other) {
+          void loadLedger(other).catch(() => {
+            /* read again when opened */
+          });
+        }
       })
       .catch(() => patch({ error: friendlyError(key), refreshing: false }));
     return () => {
@@ -67,7 +93,7 @@ function useLedger(key: NetworkKey | null) {
     };
   }, [key, nonce]);
 
-  const state = key ? states[key] : EMPTY;
+  const state = key ? (states[key] ?? EMPTY) : EMPTY;
   return {
     ...state,
     refresh: () => {
@@ -292,7 +318,9 @@ function NetworkTabs({ value, onChange }: { value: NetworkKey; onChange: (k: Net
     <div
       role="tablist"
       aria-label="Network"
-      className="inline-flex max-w-full self-start rounded-full bg-surface-2 p-1 max-sm:flex max-sm:w-full lg:self-auto dark:bg-panel dark:ring-1 dark:ring-line"
+      className={`inline-flex max-w-full self-start rounded-full bg-surface-2 p-1 max-sm:flex max-sm:w-full lg:self-auto dark:bg-panel dark:ring-1 dark:ring-line ${
+        MAINNET_ENABLED ? "overflow-x-auto" : ""
+      }`}
     >
       {NETS.map((n) => {
         const active = n.key === value;
@@ -317,7 +345,7 @@ function NetworkTabs({ value, onChange }: { value: NetworkKey; onChange: (k: Net
             }`}
           >
             <Image src={n.logo} alt="" width={24} height={24} className="h-6 w-6 rounded-md ring-1 ring-line" />
-            {getNetwork(n.key).label}
+            {tabLabel(n.key)}
           </button>
         );
       })}
@@ -628,10 +656,12 @@ export function TransparencyView() {
   const { prices, waiting } = usePrices();
 
   // ?chain=tempo opens on Tempo; read after mount so server and client match.
+  // With no ?chain it opens where the app does: Robinhood Chain testnet until
+  // mainnet is live, a mainnet after.
   useEffect(() => {
     const t = window.setTimeout(() => {
       const q = new URLSearchParams(window.location.search).get("chain");
-      const first = isNetworkKey(q) ? q : "robinhood";
+      const first = isNetworkKey(q) ? q : defaultNetworkKey();
       setActive(first);
       // A public page view: counted only with analytics consent, like pageviews.
       void import("@/lib/track").then(({ track }) => {
@@ -650,7 +680,7 @@ export function TransparencyView() {
     setActive(k);
     try {
       const url = new URL(window.location.href);
-      if (k === "robinhood") url.searchParams.delete("chain");
+      if (k === defaultNetworkKey()) url.searchParams.delete("chain");
       else url.searchParams.set("chain", k);
       window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
     } catch {

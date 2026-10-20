@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Runtime network selection. Holds the active Gloam network (Robinhood today,
- * Tempo once deployed) in React state, persisted to localStorage so a reload
- * keeps the choice. Defaults to Robinhood, the live flagship.
+ * Runtime network selection. Holds the active Gloam network in React state,
+ * persisted to localStorage so a reload keeps the choice. A visitor who never
+ * picked one starts on defaultNetworkKey(): Robinhood Chain testnet until
+ * mainnet is live, a mainnet after.
  *
  * This is the switch the app reads to know which chain to talk to. It does not
  * itself rewire the existing Robinhood write path (that stays the default);
@@ -20,6 +21,7 @@ import {
 } from "react";
 import {
   DEFAULT_NETWORK_KEY,
+  defaultNetworkKey,
   getNetwork,
   isNetworkKey,
   type GloamNetwork,
@@ -44,7 +46,7 @@ function readStored(): NetworkKey {
   } catch {
     /* private mode / blocked storage */
   }
-  return DEFAULT_NETWORK_KEY;
+  return defaultNetworkKey();
 }
 
 export function NetworkProvider({ children }: { children: ReactNode }) {

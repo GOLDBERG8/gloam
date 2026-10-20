@@ -6,6 +6,8 @@ import { walletParamsForChain } from "@/lib/chain";
 import { exitDemo, useAppAccount } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { faucetFor } from "@/lib/faucet";
+import { networkName } from "@/lib/networks";
+import { shieldTokensFor } from "@/lib/tokens";
 import {
   exportNotesBackup,
   importNotesBackup,
@@ -384,7 +386,7 @@ export function SettingsView() {
   const onProduct = chainId === network.chainId;
   const faucet = faucetFor(network.key);
   // Trading preferences only mean something where there are markets to trade.
-  const isTempo = network.key === "tempo";
+  const isTempo = !network.stocks;
 
   return (
     <div className="max-w-[880px] space-y-5">
@@ -514,8 +516,12 @@ export function SettingsView() {
         <div className="py-4">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
             <div className="min-w-0">
-              <p className="text-[14px] text-foreground">{network.label} testnet</p>
-              <p className="mt-0.5 text-[13px] text-mute">Test funds: {faucet.assets}</p>
+              <p className="text-[14px] text-foreground">{networkName(network)}</p>
+              <p className="mt-0.5 text-[13px] text-mute">
+                {faucet
+                  ? `Test funds: ${faucet.assets}`
+                  : `Real money: ${shieldTokensFor(network.chainId).map((t) => t.symbol).join(" · ")}`}
+              </p>
             </div>
             <button type="button" onClick={addNetwork} className="btn btn-ghost btn-sm h-10">
               Add to wallet
@@ -523,16 +529,18 @@ export function SettingsView() {
           </div>
           {netMsg && <Status>{netMsg}</Status>}
         </div>
-        <Row label={faucet.title} hint={faucet.blurb}>
-          <a
-            href={faucet.url}
-            target={faucet.url.startsWith("http") ? "_blank" : undefined}
-            rel={faucet.url.startsWith("http") ? "noreferrer" : undefined}
-            className="btn btn-ghost btn-sm h-10"
-          >
-            {faucet.cta.replace(/\s*→\s*$/, "")}
-          </a>
-        </Row>
+        {faucet && (
+          <Row label={faucet.title} hint={faucet.blurb}>
+            <a
+              href={faucet.url}
+              target={faucet.url.startsWith("http") ? "_blank" : undefined}
+              rel={faucet.url.startsWith("http") ? "noreferrer" : undefined}
+              className="btn btn-ghost btn-sm h-10"
+            >
+              {faucet.cta.replace(/\s*→\s*$/, "")}
+            </a>
+          </Row>
+        )}
       </Card>
 
       <RecoverySettingsCard />

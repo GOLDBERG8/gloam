@@ -8,7 +8,7 @@
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { faucetFor } from "@/lib/faucet";
-import { getNetwork, NETWORK_KEYS, isNetworkKey, type NetworkKey } from "@/lib/networks";
+import { MAINNET_ENABLED, getNetwork, NETWORK_KEYS, isNetworkKey, type NetworkKey } from "@/lib/networks";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import {
   buildPaymentRequestLink,
@@ -60,10 +60,18 @@ function optString(args: Args, key: string, max: number): string | undefined {
   return v;
 }
 
+/** The network names a caller may pass: the testnets, then each mainnet once its pool is in. */
+const NETWORK_CHOICES: NetworkKey[] = ["tempo", "robinhood", ...NETWORK_KEYS.filter((k) => !getNetwork(k).testnet)];
+
+function quotedChoices(): string {
+  const q = NETWORK_CHOICES.map((k) => `"${k}"`);
+  return q.length > 1 ? `${q.slice(0, -1).join(", ")} or ${q[q.length - 1]}` : q.join("");
+}
+
 function optNetwork(args: Args, fallback: NetworkKey | null = null): NetworkKey | null {
   const v = optString(args, "network", 32)?.trim().toLowerCase();
   if (v === undefined || v === "all") return fallback;
-  if (!isNetworkKey(v)) throw new ArgError('network must be "tempo" or "robinhood".');
+  if (!isNetworkKey(v)) throw new ArgError(`network must be ${quotedChoices()}.`);
   return v;
 }
 
@@ -74,16 +82,32 @@ function optEnum<T extends string>(args: Args, key: string, values: readonly T[]
   return v as T;
 }
 
+const TESTNET_PROP_TEXT =
+  'Gloam network: "tempo" (Tempo Moderato testnet, private stablecoin payments) or "robinhood" (Robinhood Chain testnet).';
+
+const MAINNET_PROP_TEXT: Partial<Record<NetworkKey, string>> = {
+  "tempo-mainnet": '"tempo-mainnet" (Tempo mainnet, real money: USDC.e, pathUSD, USDT0, OUSD)',
+  "robinhood-mainnet": '"robinhood-mainnet" (Robinhood Chain mainnet, real money: USDG and GLOAM)',
+};
+
 const NETWORK_PROP = {
   type: "string",
-  enum: ["tempo", "robinhood"],
-  description: 'Gloam network: "tempo" (Tempo Moderato testnet, private stablecoin payments) or "robinhood" (Robinhood Chain testnet).',
+  enum: NETWORK_CHOICES,
+  description: MAINNET_ENABLED
+    ? `Gloam network: ${NETWORK_CHOICES.filter((k) => !getNetwork(k).testnet)
+        .map((k) => MAINNET_PROP_TEXT[k])
+        .join(", ")}, or a testnet with play money: "tempo" (Tempo Moderato) or "robinhood" (Robinhood Chain testnet).`
+    : TESTNET_PROP_TEXT,
 } as const;
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true } as const;
 
-const STATUS =
-  "Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Testnet proofs use development keys; the production ceremony is done (13 contributors) and mainnet deploys its final keys. Private trade (sealed swaps) is paused until its solvency accounting lands.";
+/** Where Gloam runs, as one honest line. Testnets only until a mainnet pool is filled in. */
+const STATUS = MAINNET_ENABLED
+  ? `Mainnet, real money: ${NETWORK_KEYS.filter((k) => !getNetwork(k).testnet)
+      .map((k) => `${getNetwork(k).label} (${getNetwork(k).chainId})`)
+      .join(" and ")}, with the trusted setup's final keys (13 contributors) and beta deposit limits. Testnets, play money: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys. Private trade (sealed swaps) is paused until its solvency accounting lands.`
+  : "Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Testnet proofs use development keys; the production ceremony is done (13 contributors) and mainnet deploys its final keys. Private trade (sealed swaps) is paused until its solvency accounting lands.";
 
 const WHAT_IS_PUBLIC =
   "Deposits and cash outs are public transactions (wallet, asset and amount show on chain). What stays private is everything in between: balances inside the vault, the amounts and parties of private sends, and the link between a deposit and a later cash out.";
@@ -272,7 +296,7 @@ function networkView(key: NetworkKey, origin: string) {
     poolExplorer: n.pool ? n.explorerAddress(n.pool) : null,
     deployBlock: n.deployBlock?.toString() ?? null,
     paymentMessageBoard: n.payMemo?.address ?? null,
-    gas: key === "tempo" ? "Paid in stablecoins; Tempo has no gas coin. Deposits are tokens only." : "ETH",
+    gas: n.family === "tempo" ? "Paid in stablecoins; Tempo has no gas coin. Deposits are tokens only." : "ETH",
     mainStablecoin: assets.find((a) => a.stable)?.symbol ?? null,
     assets: assets.map((a) => ({
       symbol: a.symbol,
@@ -281,12 +305,15 @@ function networkView(key: NetworkKey, origin: string) {
       stablecoin: a.stable,
       native: a.native,
     })),
-    faucet: {
-      url: faucet.url.startsWith("/") ? `${origin}${faucet.url}` : faucet.url,
-      gives: faucet.assets,
-      how: faucet.blurb,
-      ...(key === "robinhood" ? { usdg: "Test USDG: https://faucet.paxos.com/" } : {}),
-    },
+    // a mainnet holds real money: no faucet
+    faucet: faucet
+      ? {
+          url: faucet.url.startsWith("/") ? `${origin}${faucet.url}` : faucet.url,
+          gives: faucet.assets,
+          how: faucet.blurb,
+          ...(key === "robinhood" ? { usdg: "Test USDG: https://faucet.paxos.com/" } : {}),
+        }
+      : null,
   };
 }
 
@@ -434,9 +461,11 @@ function planDeposit(args: Args, ctx: ToolContext): CallToolResult {
   if ("error" in amount) return fail(amount.error);
   const how = amount.value ? `${amount.value} ${asset.symbol}` : asset.symbol;
   const faucet = faucetFor(network);
-  const faucetUrl = faucet.url.startsWith("/") ? `${ctx.origin}${faucet.url}` : faucet.url;
+  const faucetUrl = faucet ? (faucet.url.startsWith("/") ? `${ctx.origin}${faucet.url}` : faucet.url) : null;
   const steps = [
-    `Get test funds: ${faucetUrl}${network === "robinhood" && asset.symbol === "USDG" ? " (test USDG: https://faucet.paxos.com/)" : ""}.`,
+    faucetUrl
+      ? `Get test funds: ${faucetUrl}${network === "robinhood" && asset.symbol === "USDG" ? " (test USDG: https://faucet.paxos.com/)" : ""}.`
+      : `Have the ${asset.symbol} in your own wallet on ${n.label}. This is mainnet: real money, with beta deposit limits the app shows before you sign.`,
     `Open ${ctx.origin}/app/vault?tab=shield, connect a wallet (or sign in with a passkey), and choose ${n.label} in the network menu.`,
     `Pick ${asset.symbol} and enter ${amount.value ? amount.value : "the amount"}.`,
     ...(asset.native ? [] : [`Approve ${asset.symbol} for the Gloam vault: one signature in your wallet.`]),
@@ -457,7 +486,7 @@ function planDeposit(args: Args, ctx: ToolContext): CallToolResult {
     whatIsPublic: WHAT_IS_PUBLIC,
     anonymity: ANONYMITY,
     checks:
-      network === "tempo"
+      n.family === "tempo"
         ? "Before you sign, the app checks the depositing wallet against the OFAC sanctions list and the stablecoin's TIP-403 transfer policy."
         : "Before you sign, the app checks the depositing wallet against the OFAC sanctions list.",
     fasterWay: `Rather not click through it? Add the local server (${LOCAL_SERVER}) with a capped key and the agent can make this deposit for you with gloam_execute_shield, inside limits you set. See gloam_connect_full_agent.`,
@@ -471,8 +500,11 @@ const USDG = "0x7E955252E15c84f5768B83c41a71F9eba181802F";
 function mppHowTo(args: Args): CallToolResult {
   const role = optEnum(args, "role", ["pay", "charge", "both"] as const, "both");
   const network = optNetwork(args, "tempo")!;
+  const n = getNetwork(network);
+  // The SDK's GLOAM_NETWORKS names the testnet vaults by chain ("tempo", "robinhood").
+  const family = n.family;
   const currencyLine =
-    network === "tempo"
+    family === "tempo"
       ? `      network: "tempo",                                   // PathUSD by default; for OUSD add:\n      // currency: "${OUSD}", decimals: 6,`
       : `      network: "robinhood",                               // ETH by default; for USDG:\n      currency: "${USDG}", decimals: 6,`;
   const charge = {
@@ -486,7 +518,7 @@ import { gloam } from "@gloamtrade/mppx-gloam/server";
 import { gloamChargeChainFromClient } from "@gloamtrade/mppx-gloam/core";
 import { artifactProver, relayIntent, GLOAM_NETWORKS } from "@gloamtrade/sdk";
 
-const net = GLOAM_NETWORKS.${network};
+const net = GLOAM_NETWORKS.${family};
 const mppx = Mppx.create({
   secretKey: process.env.MPP_SECRET_KEY!,
   methods: [
@@ -537,6 +569,11 @@ const res = await mppx.fetch("https://api.example.com/answer");`,
     what: "MPP (mpp.dev) is HTTP 402 for machines: a server answers WWW-Authenticate: Payment, the client pays and retries with Authorization: Payment, and gets a Payment-Receipt. Other MPP methods settle in public. The gloam method pays with a private transfer inside a Gloam vault, sealed to the payee's receive tag.",
     whatIsPublic: "The chain sees shielded transfers: a nullifier and two commitments each. No amount, asset, payer or payee.",
     network,
+    ...(n.testnet
+      ? {}
+      : {
+          mainnet: `GLOAM_NETWORKS in @gloamtrade/sdk names the testnet vaults. On ${n.label} mainnet use its vault instead: pool ${n.pool}, deploy block ${n.deployBlock}, chain ${n.chainId} (gloam_networks has the assets). Real money.`,
+        }),
     install: "npm i mppx @gloamtrade/mppx-gloam @gloamtrade/sdk",
     ...(role !== "pay" ? { charge } : {}),
     ...(role !== "charge" ? { pay } : {}),

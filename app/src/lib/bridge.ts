@@ -12,7 +12,7 @@
  *
  * Routes were checked against Relay's live quote API on 2026-10-19.
  */
-import type { GloamNetwork, NetworkKey } from "./networks";
+import type { ChainFamily, GloamNetwork } from "./networks";
 
 export type BridgeChainKind = "evm" | "svm" | "tvm";
 
@@ -53,8 +53,8 @@ export interface BridgeDestination {
   token: BridgeToken;
 }
 
-/** Where money lands for each Gloam network: the mainnet stablecoin its pool takes. */
-export const BRIDGE_DESTINATIONS: Record<NetworkKey, BridgeDestination> = {
+/** Where money lands on each chain: the mainnet stablecoin its pool takes. */
+export const BRIDGE_DESTINATIONS: Record<ChainFamily, BridgeDestination> = {
   robinhood: {
     chainId: 4663,
     chain: "Robinhood Chain",

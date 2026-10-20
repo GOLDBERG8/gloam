@@ -4,7 +4,7 @@
  */
 
 import { formatUnits, parseUnits, zeroAddress, type Address, type Hex, type PublicClient } from "viem";
-import { RH_STABLE_TOKENS, TEMPO_STABLE_TOKENS, TESTNET_STOCK_TOKENS } from "./tokens";
+import { knownTokens } from "./tokens";
 import { getActiveNetwork } from "./networks";
 import { makeBoundNote } from "./note";
 import { getAllNotes, setAllNotes } from "./noteVault";
@@ -320,7 +320,8 @@ function inActiveScope(
   return true;
 }
 
-const KNOWN_TOKENS = [...RH_STABLE_TOKENS, ...TESTNET_STOCK_TOKENS, ...TEMPO_STABLE_TOKENS];
+/** Listed tokens, the active network's first (an address can sit on two chains). */
+const knownForActive = () => knownTokens(getActiveNetwork().chainId);
 
 export function isNativeAsset(asset: string) {
   return !asset || asset.toLowerCase() === NATIVE_ASSET.toLowerCase();
@@ -328,7 +329,7 @@ export function isNativeAsset(asset: string) {
 
 export function assetLabel(asset: string): string {
   if (isNativeAsset(asset)) return getActiveNetwork().primaryAsset.symbol;
-  const t = KNOWN_TOKENS.find(
+  const t = knownForActive().find(
     (x) => x.address.toLowerCase() === asset.toLowerCase()
   );
   return t?.symbol ?? shortAsset(asset);
@@ -336,7 +337,7 @@ export function assetLabel(asset: string): string {
 
 export function assetDecimals(asset: string): number {
   if (isNativeAsset(asset)) return 18;
-  const t = KNOWN_TOKENS.find(
+  const t = knownForActive().find(
     (x) => x.address.toLowerCase() === asset.toLowerCase()
   );
   return t?.decimals ?? 18;

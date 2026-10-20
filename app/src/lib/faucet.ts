@@ -19,7 +19,8 @@ export interface FaucetInfo {
   assets: string;
 }
 
-const FAUCETS: Record<NetworkKey, FaucetInfo> = {
+/** Test funds exist on the testnets only; a mainnet has no faucet. */
+const FAUCETS: Partial<Record<NetworkKey, FaucetInfo>> = {
   robinhood: {
     title: "Free testnet ETH",
     blurb: FAUCET_BLURB,
@@ -37,6 +38,6 @@ const FAUCETS: Record<NetworkKey, FaucetInfo> = {
   },
 };
 
-export function faucetFor(key: NetworkKey): FaucetInfo {
-  return FAUCETS[key];
+export function faucetFor(key: NetworkKey): FaucetInfo | null {
+  return FAUCETS[key] ?? null;
 }

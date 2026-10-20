@@ -173,13 +173,19 @@ export function PortfolioView() {
   const { address, isConnected, chainId } = useAppAccount();
   const { network } = useNetwork();
   const onProduct = chainId === network.chainId;
+  // Test funds exist on the testnets only; a mainnet has no faucet.
   const faucet = faucetFor(network.key);
-  const faucetExternal = faucet.url.startsWith("http");
-  const isTempo = network.key === "tempo";
-  // The public, unshielded asset differs by chain: equities on Robinhood,
-  // stablecoins on Tempo.
-  const publicAssetLabel = isTempo ? "Tokens" : "Stocks";
-  const publicAssetSub = isTempo ? "Stablecoins in your wallet" : "Tokenized stocks, live prices";
+  const faucetExternal = faucet?.url.startsWith("http") ?? false;
+  // Tempo (testnet or mainnet) has no native coin worth counting.
+  const isTempo = network.family === "tempo";
+  // The public, unshielded asset differs by network: equities on Robinhood
+  // Chain testnet, stablecoins (and $GLOAM) everywhere else.
+  const publicAssetLabel = network.stocks ? "Stocks" : "Tokens";
+  const publicAssetSub = network.stocks
+    ? "Tokenized stocks, live prices"
+    : network.family === "tempo"
+      ? "Stablecoins in your wallet"
+      : "Stablecoins and tokens in your wallet";
   const { settings } = useTradingSettings();
   const { data: marketData } = useLiveMarkets();
   const ethUsd = marketData?.ethUsd ?? null;
@@ -406,9 +412,9 @@ export function PortfolioView() {
             </div>
             <div className="-mr-2 flex flex-wrap items-center gap-0.5">
               <NetworkPulse />
-              {isTempo ? (
+              {network.key === "tempo" ? (
                 <TempoFaucetButton className={quietLink} />
-              ) : (
+              ) : faucet ? (
                 <a
                   href={faucet.url}
                   target={faucetExternal ? "_blank" : undefined}
@@ -418,7 +424,7 @@ export function PortfolioView() {
                 >
                   Get test funds
                 </a>
-              )}
+              ) : null}
               <button type="button" onClick={openOnboarding} className={quietLink}>
                 Getting started
               </button>
@@ -621,7 +627,7 @@ export function PortfolioView() {
                           Receipt
                         </a>
                       )}
-                      {!isTempo && (
+                      {network.stocks && (
                         <Link
                           href={
                             isNativeAsset(n.asset)
@@ -664,27 +670,36 @@ export function PortfolioView() {
                   title={!isConnected ? "Connect a wallet" : `Switch to ${network.label}`}
                   body={
                     !isConnected
-                      ? "Your tokens from the faucet show up here once you connect."
+                      ? faucet
+                        ? "Your tokens from the faucet show up here once you connect."
+                        : "Your tokens show up here once you connect."
                       : `Your wallet is on another network. Switch it to ${network.label} to see your tokens.`
                   }
                 />
               </div>
             ) : positions.length === 0 ? (
               <div className="border-t border-line">
-                <EmptyState
-                  title="No tokens yet"
-                  body="Claim free test tokens to try paying and holding privately."
-                  action={
-                    <a
-                      href={faucet.url}
-                      target={faucetExternal ? "_blank" : undefined}
-                      rel={faucetExternal ? "noreferrer" : undefined}
-                      className="btn btn-ghost btn-sm h-10"
-                    >
-                      Claim from the faucet
-                    </a>
-                  }
-                />
+                {faucet ? (
+                  <EmptyState
+                    title="No tokens yet"
+                    body="Claim free test tokens to try paying and holding privately."
+                    action={
+                      <a
+                        href={faucet.url}
+                        target={faucetExternal ? "_blank" : undefined}
+                        rel={faucetExternal ? "noreferrer" : undefined}
+                        className="btn btn-ghost btn-sm h-10"
+                      >
+                        Claim from the faucet
+                      </a>
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    title="No tokens yet"
+                    body={`Gloam takes ${tokenSet.map((t) => t.symbol).join(", ")} on ${network.label}. Once one is in your wallet, you can add it privately.`}
+                  />
+                )}
               </div>
             ) : (
               <>
@@ -734,7 +749,7 @@ export function PortfolioView() {
                             Add privately
                           </Link>
                         )}
-                        {!isTempo && (
+                        {network.stocks && (
                           <Link href={`/app/trade?market=${p.id}`} className="btn btn-quiet btn-sm">
                             Trade
                           </Link>

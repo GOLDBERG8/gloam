@@ -952,7 +952,11 @@ export function ShieldView() {
             <BridgeInCard
               recipient={address ?? undefined}
               onArrived={(arrived) => {
-                const landed = tokens.find((t) => t.symbol === BRIDGE_DESTINATIONS[network.key].token.symbol);
+                // By address on mainnet (Tempo lists Relay's USDC as USDC.e), by symbol in a testnet preview.
+                const dest = BRIDGE_DESTINATIONS[network.family].token;
+                const landed =
+                  tokens.find((t) => t.address.toLowerCase() === dest.address.toLowerCase()) ??
+                  tokens.find((t) => t.symbol === dest.symbol);
                 if (landed) setAssetChoice(landed.id as AssetChoice);
                 setAmount(arrived);
               }}

@@ -68,7 +68,8 @@ type Seed = {
   leaves: number;
 };
 
-const SEEDS: Record<NetworkKey, Seed> = {
+/** Demo recordings run on the testnets only. */
+const SEEDS: Partial<Record<NetworkKey, Seed>> = {
   robinhood: {
     // USDG 48,250 over three notes, sized so the sample payroll is covered.
     notes: [
@@ -208,6 +209,7 @@ function seed(): DemoState {
   for (const key of Object.keys(SEEDS) as NetworkKey[]) {
     const net = getNetwork(key);
     const s = SEEDS[key];
+    if (!s) continue;
     if (!net.pool) continue;
     const pool = net.pool;
     // Spread the wallet's leaves through the recent part of the tree.
