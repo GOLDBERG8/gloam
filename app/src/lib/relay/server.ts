@@ -61,7 +61,7 @@ import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenAddresses } from "@/lib/screeningServer";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
-import { forgetNonce, inSendLane, inflightKey, takeInflight } from "@/lib/relay/inflight";
+import { forgetNonce, inSendLanes, inflightKey, takeInflight } from "@/lib/relay/inflight";
 import { serverTransport } from "@/lib/serverRpc";
 
 const POOL_ERRORS = [
@@ -169,15 +169,34 @@ export class RelayError extends Error {
 
 // ---------------------------------------------------------------- config
 
-let cachedAccount: PrivateKeyAccount | null | undefined;
+let cachedAccounts: PrivateKeyAccount[] | undefined;
 
+/**
+ * Every relay account: GLOAM_RELAYER_PRIVATE_KEY, then any extra keys in
+ * GLOAM_RELAYER_PRIVATE_KEYS (comma separated). Each sends on its own lane, so
+ * more funded keys means more payments sent at the same moment.
+ */
+export function relayerAccounts(): PrivateKeyAccount[] {
+  if (cachedAccounts) return cachedAccounts;
+  const raws = [process.env.GLOAM_RELAYER_PRIVATE_KEY, ...(process.env.GLOAM_RELAYER_PRIVATE_KEYS ?? "").split(",")]
+    .map((r) => r?.trim())
+    .filter((r): r is string => Boolean(r));
+  const seen = new Set<string>();
+  const out: PrivateKeyAccount[] = [];
+  for (const raw of raws) {
+    const key = (raw.startsWith("0x") ? raw : `0x${raw}`) as Hex;
+    if (!/^0x[0-9a-fA-F]{64}$/.test(key)) continue;
+    const account = privateKeyToAccount(key);
+    if (seen.has(account.address)) continue;
+    seen.add(account.address);
+    out.push(account);
+  }
+  return (cachedAccounts = out);
+}
+
+/** The first relay account (the one the status names). */
 export function relayerAccount(): PrivateKeyAccount | null {
-  if (cachedAccount !== undefined) return cachedAccount;
-  const raw = process.env.GLOAM_RELAYER_PRIVATE_KEY?.trim();
-  if (!raw) return (cachedAccount = null);
-  const key = (raw.startsWith("0x") ? raw : `0x${raw}`) as Hex;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(key)) return (cachedAccount = null);
-  return (cachedAccount = privateKeyToAccount(key));
+  return relayerAccounts()[0] ?? null;
 }
 
 export function relayNetworks(): GloamNetwork[] {
@@ -381,12 +400,19 @@ function mayHaveSent(err: unknown): boolean {
 async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): Promise<Hex> {
   // Screen before anything else: a blocked call never reaches the chain.
   await screenCall(call, net);
-  const account = relayerAccount();
-  if (!account) {
+  const all = relayerAccounts();
+  if (!all.length) {
     throw new RelayError("The relay is off. Send from your wallet.", 503, "relay_off");
   }
+  // only accounts that can still pay for a send take part
+  const accounts = (await Promise.all(all.map(async (a) => ((await relayEmpty(net, a)) ? null : a)))).filter(
+    (a): a is PrivateKeyAccount => a !== null
+  );
+  if (!accounts.length) {
+    throw new RelayError("The relay is out of gas. Send from your wallet for now.", 503, "relay_empty");
+  }
+  const account = accounts[0]!;
   const pub = relayPublicClient(net);
-  const wallet = walletFor(net, account);
   const pool = net.pool!;
 
   const estimate = (): Promise<bigint> => {
@@ -399,14 +425,15 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
         return pub.estimateContractGas({ address: net.payMemo!.address, abi: memoAbi, functionName: "postMemo", args: call.args, account });
     }
   };
-  const send = (gas: bigint, nonce: number): Promise<Hex> => {
+  const send = (gas: bigint, nonce: number, from: PrivateKeyAccount): Promise<Hex> => {
+    const wallet = walletFor(net, from);
     switch (call.kind) {
       case "transfer":
-        return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "transfer", args: call.args, gas, nonce, chain: net.chain, account });
+        return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "transfer", args: call.args, gas, nonce, chain: net.chain, account: from });
       case "unshield":
-        return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "unshield", args: call.args, gas, nonce, chain: net.chain, account });
+        return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "unshield", args: call.args, gas, nonce, chain: net.chain, account: from });
       case "memo":
-        return wallet.writeContract({ address: net.payMemo!.address, abi: memoAbi, functionName: "postMemo", args: call.args, gas, nonce, chain: net.chain, account });
+        return wallet.writeContract({ address: net.payMemo!.address, abi: memoAbi, functionName: "postMemo", args: call.args, gas, nonce, chain: net.chain, account: from });
     }
   };
 
@@ -419,20 +446,27 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
   }
   await takeNetworkSlot(net);
 
-  // one send at a time per relay account and chain, each with the next nonce (lib/relay/inflight)
-  const lane = `${net.chainId}:${account.address.toLowerCase()}`;
-  const chainNonce = () => pub.getTransactionCount({ address: account.address, blockTag: "pending" });
+  // one send at a time per relay account and chain, each with the next nonce; with
+  // several accounts, the first free one sends (lib/relay/inflight)
+  const lanes = accounts.map((a) => ({
+    id: `${net.chainId}:${a.address.toLowerCase()}`,
+    chainNonce: () => pub.getTransactionCount({ address: a.address, blockTag: "pending" }),
+  }));
+  let usedLane: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const out = await inSendLane(lane, chainNonce, (nonce) => send(padGas(gas), nonce));
+      const out = await inSendLanes(lanes, (i, nonce) => {
+        usedLane = lanes[i]!.id;
+        return send(padGas(gas), nonce, accounts[i]!);
+      });
       if (!out) throw new RelayError(RELAY_BUSY_MESSAGE, 503, "busy");
       return out.value;
     } catch (e) {
       if (e instanceof RelayError) throw e;
       const msg = e instanceof Error ? e.message : "";
       // the kept nonce and the chain disagree: start again from the chain, once
-      if (attempt === 0 && /nonce|replacement|underpriced|already known/i.test(msg)) {
-        await forgetNonce(lane);
+      if (attempt === 0 && usedLane && /nonce|replacement|underpriced|already known/i.test(msg)) {
+        await forgetNonce(usedLane);
         continue;
       }
       if (mayHaveSent(e)) onMaybeSent?.();
@@ -550,21 +584,44 @@ export type RelayNetworkStatus = {
 /** Relay balance reads kept briefly, so a public status poll is not an RPC call each time. */
 const BALANCE_TTL_MS = 30_000;
 const RELAY_RESERVE_GAS = 2n * 2_400_000n;
-const balances = new Map<number, { at: number; empty: boolean }>();
+const balances = new Map<string, { at: number; empty: boolean }>();
 
+/** Tempo has no native coin: fees are paid in the account's chosen stablecoin, else PathUSD. */
+const TEMPO_FEE_MANAGER = "0xfeec000000000000000000000000000000000000" as Address;
+const TEMPO_PATH_USD = "0x20c0000000000000000000000000000000000000" as Address;
+/** 0.50 in a 6-decimal USD fee token: enough for a couple more private transfers. */
+const TEMPO_FEE_RESERVE = 500_000n;
+const tempoFeeAbi = [
+  { name: "userTokens", type: "function", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "address" }] },
+  { name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+] as const;
+const isTempoChain = (chainId: number) => chainId === 42431 || chainId === 4217;
+
+/** Whether this relay account can no longer pay for a send on `net`. */
 async function relayEmpty(net: GloamNetwork, account: PrivateKeyAccount): Promise<boolean> {
-  const hit = balances.get(net.chainId);
+  const id = `${net.chainId}:${account.address}`;
+  const hit = balances.get(id);
   if (hit && Date.now() - hit.at < BALANCE_TTL_MS) return hit.empty;
   try {
     const client = relayPublicClient(net);
+    const read = async (): Promise<boolean> => {
+      if (isTempoChain(net.chainId)) {
+        const chosen = await client.readContract({ address: TEMPO_FEE_MANAGER, abi: tempoFeeAbi, functionName: "userTokens", args: [account.address] });
+        const token = chosen && chosen !== "0x0000000000000000000000000000000000000000" ? chosen : TEMPO_PATH_USD;
+        const balance = await client.readContract({ address: token, abi: tempoFeeAbi, functionName: "balanceOf", args: [account.address] });
+        return balance < TEMPO_FEE_RESERVE;
+      }
+      const [balance, gasPrice] = await Promise.all([client.getBalance({ address: account.address }), client.getGasPrice()]);
+      // can't pay for a couple more private transfers (about 1.8M gas each)
+      return balance < gasPrice * RELAY_RESERVE_GAS;
+    };
     // a slow RPC must not hold up the status the app checks before every relayed send
-    const [balance, gasPrice] = await Promise.race([
-      Promise.all([client.getBalance({ address: account.address }), client.getGasPrice()]),
+    const empty = await Promise.race([
+      read(),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("relay status: slow rpc")), 3_000)),
     ]);
-    // empty = can't pay for a couple more private transfers (about 1.8M gas each)
-    const empty = balance < gasPrice * RELAY_RESERVE_GAS;
-    balances.set(net.chainId, { at: Date.now(), empty });
+    balances.set(id, { at: Date.now(), empty });
+    if (empty) console.warn("gloam_relay_low_balance", JSON.stringify({ chainId: net.chainId, relayer: account.address }));
     return empty;
   } catch {
     /* status is best effort */
@@ -573,14 +630,17 @@ async function relayEmpty(net: GloamNetwork, account: PrivateKeyAccount): Promis
 }
 
 export async function relayStatus(): Promise<RelayNetworkStatus[]> {
-  const account = relayerAccount();
+  const accounts = relayerAccounts();
+  const account = accounts[0] ?? null;
   return Promise.all(
     relayNetworks().map(async (net) => {
-      const lowBalance = account ? await relayEmpty(net, account) : false;
+      // low = no account left that can pay for a send here
+      const empties = await Promise.all(accounts.map((a) => relayEmpty(net, a)));
+      const lowBalance = accounts.length > 0 && empties.every(Boolean);
       return {
         chainId: net.chainId,
         key: net.key,
-        enabled: Boolean(account) && !lowBalance,
+        enabled: accounts.length > 0 && !lowBalance,
         relayer: account?.address ?? null,
         memo: Boolean(net.payMemo),
         lowBalance,

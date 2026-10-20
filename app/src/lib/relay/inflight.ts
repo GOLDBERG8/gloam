@@ -193,19 +193,40 @@ export async function inSendLane<T>(
   send: (nonce: number) => Promise<T>,
   waitMs = LANE_WAIT_MS,
 ): Promise<{ value: T } | null> {
+  const out = await inSendLanes([{ id: lane, chainNonce }], (_, nonce) => send(nonce), waitMs);
+  return out && { value: out.value };
+}
+
+/**
+ * The same over several relay accounts (one lane each): the send takes the
+ * first free lane, starting at a random one, so N accounts send N at a time.
+ * Returns null when every lane stayed busy for `waitMs`.
+ */
+export async function inSendLanes<T>(
+  lanes: { id: string; chainNonce: () => Promise<number> }[],
+  send: (lane: number, nonce: number) => Promise<T>,
+  waitMs = LANE_WAIT_MS,
+): Promise<{ value: T; lane: number } | null> {
+  if (!lanes.length) return null;
   const deadline = Date.now() + waitMs;
-  let lock: InflightLock | null;
-  while (!(lock = await takeInflight(LANE_PREFIX + lane, LANE_TTL_SEC))) {
+  const start = Math.floor(Math.random() * lanes.length);
+  for (;;) {
+    for (let k = 0; k < lanes.length; k++) {
+      const i = (start + k) % lanes.length;
+      const lane = lanes[i]!;
+      const lock = await takeInflight(LANE_PREFIX + lane.id, LANE_TTL_SEC);
+      if (!lock) continue;
+      try {
+        const [kept, onChain] = await Promise.all([storedNonce(lane.id), lane.chainNonce()]);
+        const nonce = Math.max(onChain, kept ?? 0);
+        const value = await send(i, nonce);
+        await saveNonce(lane.id, nonce + 1);
+        return { value, lane: i };
+      } finally {
+        await lock.release();
+      }
+    }
     if (Date.now() > deadline) return null;
     await new Promise((r) => setTimeout(r, 80 + Math.random() * 170));
-  }
-  try {
-    const [kept, onChain] = await Promise.all([storedNonce(lane), chainNonce()]);
-    const nonce = Math.max(onChain, kept ?? 0);
-    const value = await send(nonce);
-    await saveNonce(lane, nonce + 1);
-    return { value };
-  } finally {
-    await lock.release();
   }
 }
