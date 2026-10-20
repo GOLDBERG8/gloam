@@ -7,9 +7,14 @@ import { MAINNET_LAUNCH_MS, compactRemaining, remainingUntil, type Remaining } f
 export function useMainnetRemaining(): Remaining | null {
   const [r, setR] = useState<Remaining | null>(null);
   useEffect(() => {
-    const tick = () => setR(remainingUntil(Date.now()));
+    let id = 0;
+    const tick = () => {
+      const next = remainingUntil(Date.now());
+      setR(next);
+      if (next.done) window.clearInterval(id); // nothing left to count
+    };
+    id = window.setInterval(tick, 1000);
     tick();
-    const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, []);
   return r;

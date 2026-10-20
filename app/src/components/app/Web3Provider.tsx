@@ -16,6 +16,8 @@ export function Web3Provider({ children }: { children: ReactNode }) {
           queries: {
             staleTime: 8_000,
             refetchOnWindowFocus: false,
+            // the RPC transport already retries; stacking three more turns a rate limit into a storm
+            retry: 1,
           },
         },
       })

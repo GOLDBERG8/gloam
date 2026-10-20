@@ -8,6 +8,7 @@ import { RH_STABLE_TOKENS, TEMPO_STABLE_TOKENS, TESTNET_STOCK_TOKENS } from "./t
 import { getActiveNetwork } from "./networks";
 import { makeBoundNote } from "./note";
 import { getAllNotes, setAllNotes } from "./noteVault";
+import { walkLogs, walkTuning } from "./leafIndex";
 import {
   activeHashScheme,
   activePoolAddress,
@@ -631,6 +632,16 @@ export function updateLocalNote(
   setAllNotes(next);
 }
 
+/**
+ * Drop a note saved ahead of a send that never went out (the wallet refused it).
+ * Only a note still waiting to land and with no transaction is dropped.
+ */
+export function dropUnsentNote(id: string) {
+  if (typeof window === "undefined") return;
+  const next = getAllNotes().filter((n) => !(n.id === id && n.sweepPending && !n.txHash));
+  setAllNotes(next);
+}
+
 /** Clear ghost balances after cash-out / private send when nullifier was spent. */
 export function markNoteRecovered(id: string) {
   updateLocalNote(id, { status: "recovered" });
@@ -680,7 +691,6 @@ export async function fetchChainShieldNotes(
   const deployBlock = net.deployBlock ?? SHIELD_DEPLOY_BLOCK;
   try {
     const latest = await client.getBlockNumber();
-    const CHUNK = net.logRange;
     const logs: {
       args?: {
         commitment?: Hex;
@@ -691,28 +701,23 @@ export async function fetchChainShieldNotes(
       };
       transactionHash?: Hex | null;
     }[] = [];
-    for (let start = deployBlock; start <= latest; start += CHUNK) {
-      let end = start + CHUNK - 1n;
-      if (end > latest) end = latest;
-      const chunk = await client.getLogs({
-        address: pool,
-        event: {
-          type: "event",
-          name: "Shielded",
-          inputs: [
-            { name: "commitment", type: "bytes32", indexed: true },
-            { name: "asset", type: "address", indexed: true },
-            { name: "amount", type: "uint256", indexed: false },
-            { name: "leafIndex", type: "uint256", indexed: false },
-            { name: "from", type: "address", indexed: true },
-          ],
-        },
-        args: { from },
-        fromBlock: start,
-        toBlock: end,
-      });
-      logs.push(...(chunk as typeof logs));
-    }
+    // this wallet's deposits only, in the chain's widest ranges and a few at a time
+    // (lib/leafIndex): a handful of calls on Robinhood Chain instead of one per 100k blocks
+    const found = await walkLogs(client, pool, deployBlock, latest, walkTuning(net.chainId, net.logRange), {
+      event: {
+        type: "event",
+        name: "Shielded",
+        inputs: [
+          { name: "commitment", type: "bytes32", indexed: true },
+          { name: "asset", type: "address", indexed: true },
+          { name: "amount", type: "uint256", indexed: false },
+          { name: "leafIndex", type: "uint256", indexed: false },
+          { name: "from", type: "address", indexed: true },
+        ],
+      },
+      args: { from },
+    });
+    logs.push(...(found as unknown as typeof logs));
 
     return logs.map((log, i) => {
       const args = log.args ?? {};

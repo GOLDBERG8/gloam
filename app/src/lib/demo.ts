@@ -300,16 +300,19 @@ const DEMO_RECEIPT: { logs: Log[] } = { logs: [] };
 export function useAppTxReceipt(q: { hash?: Hex; chainId: GloamChainId }): {
   isLoading: boolean;
   isSuccess: boolean;
+  /** The wait gave up (a busy RPC, a timeout). The transaction may still land. */
+  isError: boolean;
   data: { logs: Log[] } | undefined;
 } {
   const demo = useDemo();
   useDemoStore();
   const real = useWaitForTransactionReceipt({ hash: demo ? undefined : q.hash, chainId: q.chainId });
-  if (!demo) return { isLoading: real.isLoading, isSuccess: real.isSuccess, data: real.data };
+  if (!demo) return { isLoading: real.isLoading, isSuccess: real.isSuccess, isError: real.isError, data: real.data };
   const status = q.hash ? demoTxStatus(q.hash) : undefined;
   return {
     isLoading: status === "pending",
     isSuccess: status === "confirmed",
+    isError: false,
     data: status === "confirmed" ? DEMO_RECEIPT : undefined,
   };
 }

@@ -35,8 +35,18 @@ export function usePoolDeposited(asset: Address | undefined | null) {
 
   useEffect(() => {
     void refetch();
-    const t = setInterval(() => void refetch(), 12_000);
-    return () => clearInterval(t);
+    // a hidden tab skips its turn; coming back reads at once
+    const t = setInterval(() => {
+      if (!document.hidden) void refetch();
+    }, 12_000);
+    const onShow = () => {
+      if (!document.hidden) void refetch();
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onShow);
+    };
   }, [refetch]);
 
   return {

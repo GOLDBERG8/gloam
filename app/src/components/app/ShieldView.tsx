@@ -26,7 +26,7 @@ import { useEthPrice, useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { formatUsd } from "@/lib/markets";
 import { shieldTokensFor, supportsNativeShield } from "@/lib/tokens";
-import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetLabel, formatAssetAmount, isNativeAsset, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
+import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetLabel, dropUnsentNote, formatAssetAmount, isNativeAsset, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
 import { makeBoundNotePoseidon } from "@/lib/notePoseidon";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenWallets } from "@/lib/screeningClient";
@@ -262,6 +262,7 @@ export function ShieldView() {
   const {
     isLoading: confirming,
     isSuccess,
+    isError: receiptLost,
     data: receipt,
   } = useAppTxReceipt({
     hash,
@@ -345,7 +346,7 @@ export function ShieldView() {
     if (pendingKind !== "shield" || (leafIndex === undefined && !demo)) return;
 
     if (pendingNote) {
-      // Persist only after on-chain success (avoids ghost notes on reject)
+      // Landed: the note saved before sending (waiting, out of the balance) now counts
       saveLocalNote({
         ...pendingNote,
         txHash: hash,
@@ -458,7 +459,10 @@ export function ShieldView() {
     const asset = selectedToken ? selectedToken.address : NATIVE_ASSET;
     setPendingNote(note);
     setPendingKind("shield");
-    // Do not saveLocalNote until shield confirms, see receipt handler
+    // The note's secret is the money: keep it in the browser before anything is
+    // sent, out of the balance until the chain shows it (lib/claimSweep settles it
+    // if this tab never hears back). A refused wallet prompt drops it again.
+    const keepUntilLanded = () => saveLocalNote({ ...note, status: "open", sweepPending: true });
 
     // C1 (audit): a hardened pool requires a proof that commitment ==
     // Poseidon(secret, amount, asset), submitted via shieldBound(). On legacy
@@ -472,6 +476,7 @@ export function ShieldView() {
           asset: BigInt(asset).toString(),
           secret: BigInt(note.secret).toString(),
         });
+        keepUntilLanded();
         writeContract({
           address: network.pool,
           abi: shieldPoolAbi,
@@ -491,6 +496,7 @@ export function ShieldView() {
       return;
     }
 
+    keepUntilLanded();
     if (selectedToken) {
       writeContract({
         address: network.pool,
@@ -614,13 +620,28 @@ export function ShieldView() {
   // Clear in-memory pending on wallet reject / failed write
   useEffect(() => {
     if (!writeError) return;
+    if (pendingKind === "shield" && pendingNote) dropUnsentNote(pendingNote.id);
     if (pendingKind === "shield" || pendingKind === "approve") {
       setPendingNote(null);
       setPendingKind(null);
       pendingShieldArgs.current = null;
       autoShieldAfterApprove.current = false;
     }
-  }, [writeError, pendingKind]);
+  }, [writeError, pendingKind, pendingNote]);
+
+  // The receipt wait gave up (a busy network). The deposit may still land: its
+  // note is already saved and settles on its own, so stop the spinner and say so.
+  useEffect(() => {
+    if (!receiptLost || !hash || pendingKind !== "shield") return;
+    setPendingNote(null);
+    setPendingKind(null);
+    pendingShieldArgs.current = null;
+    setFormError(
+      "Your deposit was sent, but the network is slow to confirm it. It's saved in this browser and shows in your private balance as soon as it lands. Check the link below."
+    );
+    const t = window.setTimeout(() => refreshNotes(), 15_000);
+    return () => window.clearTimeout(t);
+  }, [receiptLost, hash, pendingKind, refreshNotes]);
 
   const maxLabel =
     walletBalance !== undefined

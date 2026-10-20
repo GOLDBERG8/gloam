@@ -21,6 +21,8 @@ export function getRhPublicClient(): PublicClient {
       timeout: 25_000,
       retryCount: 2,
     }),
+    // reads made together (spent checks, balances) go out as one Multicall3 call
+    batch: { multicall: true },
   });
   cache.set(net.chainId, client);
   return client;

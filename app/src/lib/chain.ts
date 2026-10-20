@@ -16,6 +16,8 @@ export const robinhood = defineChain({
       url: "https://explorer.mainnet.chain.robinhood.com",
     },
   },
+  // Multicall3 at its usual address, so batched reads go out as one call
+  contracts: { multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" } },
 });
 
 /** Robinhood Chain testnet, product default */
@@ -34,6 +36,8 @@ export const robinhoodTestnet = defineChain({
       url: "https://explorer.testnet.chain.robinhood.com",
     },
   },
+  // Multicall3 at its usual address, so batched reads go out as one call
+  contracts: { multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" } },
   testnet: true,
 });
 

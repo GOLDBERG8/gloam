@@ -17,7 +17,7 @@
  * split to the size it names (or halved) and retried.
  */
 
-import { parseAbi, parseEventLogs, type Address, type Hex, type Log, type PublicClient } from "viem";
+import { parseAbi, parseEventLogs, type AbiEvent, type Address, type Hex, type Log, type PublicClient } from "viem";
 
 export const POOL_INSERT_ABI = parseAbi([
   "event Shielded(bytes32 indexed commitment, address indexed asset, uint256 amount, uint256 leafIndex, address indexed from)",
@@ -210,25 +210,31 @@ async function mapLimit<T, R>(
   return out;
 }
 
+/** Narrow a walk to one event, optionally by its indexed arguments. */
+export type LogFilter = { event: AbiEvent; args?: Record<string, unknown> };
+
 async function logsSafe(
   client: PublicClient,
   pool: Address,
   from: bigint,
   to: bigint,
   tuning: WalkTuning,
-  depth = 0
+  depth = 0,
+  filter?: LogFilter
 ): Promise<Log[]> {
   let last: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await client.getLogs({ address: pool, fromBlock: from, toBlock: to });
+      return filter
+        ? ((await client.getLogs({ address: pool, event: filter.event, args: filter.args, fromBlock: from, toBlock: to } as never)) as Log[])
+        : await client.getLogs({ address: pool, fromBlock: from, toBlock: to });
     } catch (e) {
       last = e;
       if (!isRateLimit(e) && RANGE_ERROR.test(errText(e)) && to > from && depth < 8) {
         const named = allowedSpan(e);
         const span = named && named > 0n && named <= to - from ? named : (to - from + 2n) / 2n;
         const parts = await mapLimit(ranges(from, to, span), tuning.parallel, tuning.spacingMs, ([a, b]) =>
-          logsSafe(client, pool, a, b, tuning, depth + 1)
+          logsSafe(client, pool, a, b, tuning, depth + 1, filter)
         );
         return parts.flat();
       }
@@ -244,11 +250,12 @@ export async function walkLogs(
   address: Address,
   from: bigint,
   to: bigint,
-  tuning: WalkTuning
+  tuning: WalkTuning,
+  filter?: LogFilter
 ): Promise<Log[]> {
   if (from > to) return [];
   const parts = await mapLimit(ranges(from, to, tuning.span), tuning.parallel, tuning.spacingMs, ([a, b]) =>
-    logsSafe(client, address, a, b, tuning)
+    logsSafe(client, address, a, b, tuning, 0, filter)
   );
   return parts.flat();
 }

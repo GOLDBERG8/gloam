@@ -21,6 +21,11 @@ export class IncrementalMerkleTreePoseidon {
   nextIndex = 0;
   currentRoot = 0n;
   leaves: bigint[] = [];
+  /**
+   * Every node written so far, by level (levels[0] are the leaves). A node that
+   * is not here yet is that level's zero, so a path is 20 lookups, not a rebuild.
+   */
+  levels: bigint[][] = Array.from({ length: MERKLE_DEPTH }, () => []);
   private ready = false;
 
   async init() {
@@ -46,6 +51,7 @@ export class IncrementalMerkleTreePoseidon {
     let h = L;
 
     for (let i = 0; i < MERKLE_DEPTH; i++) {
+      this.levels[i]![Number(currentIndex)] = h;
       if (currentIndex % 2n === 0n) {
         this.filledSubtrees[i] = h;
         h = await poseidon2(h, this.zeros[i]!);
@@ -69,33 +75,14 @@ export class IncrementalMerkleTreePoseidon {
 
     const pathElements: bigint[] = [];
     const pathIndices: number[] = [];
-    let layer = this.leaves.slice();
     let idx = leafIndex;
-
     for (let level = 0; level < MERKLE_DEPTH; level++) {
       const isRight = idx % 2 === 1;
-      const siblingIdx = isRight ? idx - 1 : idx + 1;
-      const sibling =
-        siblingIdx >= 0 && siblingIdx < layer.length
-          ? layer[siblingIdx]!
-          : this.zeros[level]!;
-      pathElements.push(sibling);
+      pathElements.push(this.levels[level]![isRight ? idx - 1 : idx + 1] ?? this.zeros[level]!);
       pathIndices.push(isRight ? 1 : 0);
-
-      const next: bigint[] = [];
-      for (let i = 0; i < layer.length; i += 2) {
-        const left = layer[i]!;
-        const right = i + 1 < layer.length ? layer[i + 1]! : this.zeros[level]!;
-        next.push(await poseidon2(left, right));
-      }
-      layer = next.length ? next : [this.zeros[level]!];
       idx = Math.floor(idx / 2);
     }
-
-    const root = layer[0]!;
-    if (root !== this.currentRoot) {
-      throw new Error("path root mismatch");
-    }
+    const root = this.currentRoot;
 
     // verify
     let hash = this.leaves[leafIndex]!;

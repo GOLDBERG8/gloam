@@ -14,7 +14,7 @@ import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient } from "@/lib/rhClient";
-import { HASH_SCHEME, gasFor, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
+import { HASH_SCHEME, dropUnsentNote, gasFor, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
   claimNoteId,
   isClaimedNote,
@@ -77,6 +77,7 @@ import {
   relayPreferred,
   relayTransfer,
   relayUnshield,
+  RelaySubmitError,
   setRelayPreferred,
 } from "@/lib/relay/client";
 import { RelayToggle } from "./RelayToggle";
@@ -117,6 +118,9 @@ type PayStyle = "direct" | "bearer";
  */
 /** Testnet pools carry no cash-out fee; every other network must report its fee first. */
 const TESTNET_CHAIN_IDS = new Set<number>([46630, 42431]);
+
+/** Relay failures after which the payment may still have gone out (a timeout, a lost reply). */
+const RELAY_MAYBE_SENT = new Set(["rpc", "network", "error", "in_flight"]);
 
 export function MoveView() {
   const shieldLive = isShieldDeployed();
@@ -239,7 +243,7 @@ export function MoveView() {
   const { writeContractAsync } = useWriteContract();
 
   const txHash = relayHash ?? hash;
-  const { isLoading: confirming, isSuccess } = useAppTxReceipt({
+  const { isLoading: confirming, isSuccess, isError: receiptLost } = useAppTxReceipt({
     hash: txHash,
     chainId: network.chainId,
   });
@@ -337,6 +341,16 @@ export function MoveView() {
 
   const handledHash = useRef<string | null>(null);
   const pendingAction = useRef<"send" | "cashout" | "memo" | null>(null);
+  /** The change note and Sent link saved just before a send went out. */
+  const keptBeforeSend = useRef<{ changeId: string | null; linkId: string | null } | null>(null);
+  /** Drops what was kept ahead of a send that surely never went out. */
+  const forgetUnsent = () => {
+    const kept = keptBeforeSend.current;
+    if (!kept) return;
+    if (kept.changeId) dropUnsentNote(kept.changeId);
+    if (kept.linkId) void removeSentLink(kept.linkId).catch(() => undefined);
+    keptBeforeSend.current = null;
+  };
   const spentNoteId = useRef<string | null>(null);
   /** Change only, never store the payment note on the sender */
   const pendingChange = useRef<LocalNote | null>(null);
@@ -517,6 +531,9 @@ export function MoveView() {
   // Wallet reject / tx fail: drop ephemeral payment secrets
   useEffect(() => {
     if (!writeError) return;
+    // the wallet never sent it: drop what was kept ahead of the send
+    if (pendingAction.current === "send") forgetUnsent();
+    keptBeforeSend.current = null;
     setBusy(false);
     setStatus(null);
     // Only their heads-up failed: the payment already landed, so its code
@@ -537,6 +554,29 @@ export function MoveView() {
       );
     }
   }, [writeError]);
+
+  // The receipt wait gave up (a busy network). The payment may still land: what
+  // it creates is already saved and settles on its own, so stop and say so.
+  useEffect(() => {
+    if (!receiptLost || !txHash || !busy) return;
+    const action = pendingAction.current;
+    keptBeforeSend.current = null;
+    pendingChange.current = null;
+    pendingShare.current = null;
+    pendingMemo.current = null;
+    pendingLink.current = null;
+    pendingClaimLink.current = false;
+    spentNoteId.current = null;
+    setBusy(false);
+    setStatus(null);
+    setError(
+      action === "cashout"
+        ? "Your cash out was sent, but the network is slow to confirm it. Your balance updates once it lands. Check it with the link below."
+        : "Your payment was sent, but the network is slow to confirm it. Your change and the payment's code are saved in this browser and show up once it lands."
+    );
+    const t = window.setTimeout(() => refreshNotes(), 15_000);
+    return () => window.clearTimeout(t);
+  }, [receiptLost, txHash, busy, refreshNotes]);
 
   // Resolve leafIndex from tree when import left it missing
   const notes = useMemo(() => {
@@ -853,6 +893,17 @@ export function MoveView() {
         pendingMemo.current = null;
       }
 
+      // The change and the payment's code are money: keep them in this browser
+      // before anything is sent. The change waits out of the balance until the
+      // chain shows it (lib/claimSweep settles it if this tab never hears back);
+      // the code goes under Sent links. A send that surely never went out drops both.
+      if (pendingChange.current) saveLocalNote({ ...pendingChange.current, sweepPending: true });
+      if (pendingLink.current) await saveSentLink(pendingLink.current).catch(() => undefined);
+      keptBeforeSend.current = {
+        changeId: pendingChange.current?.id ?? null,
+        linkId: pendingLink.current?.id ?? null,
+      };
+
       if (relayOn) {
         setStatus("Sending through the Gloam relay…");
         const h = await relayTransfer({
@@ -898,7 +949,18 @@ export function MoveView() {
         track("private_send_submit");
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Private send failed");
+      // The relay may have sent it (a lost reply, a timeout): keep what was saved,
+      // it settles from the chain. Any clear refusal means nothing went out.
+      const maybeSent = e instanceof RelaySubmitError && RELAY_MAYBE_SENT.has(e.code);
+      if (maybeSent) {
+        setError(
+          "The relay may have sent this payment. Your change and the payment's code are saved in this browser: they show in your balance and under Sent links once it lands."
+        );
+      } else {
+        forgetUnsent();
+        setError(e instanceof Error ? e.message : "Private send failed");
+      }
+      keptBeforeSend.current = null;
       setBusy(false);
       setStatus(null);
       pendingChange.current = null;
@@ -920,13 +982,34 @@ export function MoveView() {
     setInboxStatus("Checking for payments to your Gloam address…");
     setInbox([]);
     try {
-      const memos = await fetchPaymentMemos(getRhPublicClient());
+      const client = getRhPublicClient();
+      const memos = await fetchPaymentMemos(client);
       const hits: { memo: ScannedMemo; label: string; ticket: string; note?: string }[] = [];
+      const seen = new Set<string>();
       for (const m of memos) {
         try {
           const pack = await decodeNotePackage(m.ticket, undefined, {
             tryTagDecrypt: true,
           });
+          // Anyone who knows your Gloam address can post a message to it, so only
+          // a real, unclaimed payment is shown: the code must open the commitment
+          // the message names, and that note must be in the vault and unspent.
+          const commitment = fieldToHex(
+            await noteCommitmentPoseidon(hexToField(pack.secret), BigInt(pack.amountWei), pack.asset)
+          ).toLowerCase();
+          if (commitment !== m.paymentCommitment.toLowerCase() || seen.has(commitment)) continue;
+          if (!network.pool || (pack.pool && pack.pool.toLowerCase() !== network.pool.toLowerCase())) continue;
+          const [inVault, spent] = await Promise.all([
+            client.readContract({ address: network.pool, abi: shieldPoolAbi, functionName: "commitmentSeen", args: [commitment as Hex] }),
+            client.readContract({
+              address: network.pool,
+              abi: shieldPoolAbi,
+              functionName: "isSpent",
+              args: [await paymentNullifier(pack.secret, commitment as Hex)],
+            }),
+          ]);
+          if (!inVault || spent) continue;
+          seen.add(commitment);
           hits.push({
             memo: m,
             ticket: m.ticket,
@@ -1815,6 +1898,18 @@ export function MoveView() {
                         "Send privately"
                       )}
                     </button>
+                  )}
+                  {treeError && !treeLoading && matchesChain !== false && (
+                    <p className="flex flex-wrap items-center justify-center gap-x-2 text-center text-[12.5px] text-warn">
+                      Couldn&apos;t read the vault right now. The network may be busy.
+                      <button
+                        type="button"
+                        onClick={() => void refreshTree()}
+                        className="font-medium underline underline-offset-4"
+                      >
+                        Try again
+                      </button>
+                    </p>
                   )}
                   {matchesChain === false && (
                     <p className="flex flex-wrap items-center justify-center gap-x-2 text-center text-[12.5px] text-warn">

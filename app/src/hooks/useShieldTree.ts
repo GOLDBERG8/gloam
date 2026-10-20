@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   assertTreeMatchesChain,
   syncShieldTree,
@@ -19,8 +19,16 @@ export function useShieldTree() {
   const [matchesChain, setMatchesChain] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // a failed sync tries again by itself a few times (1 s, 3 s, 9 s, with jitter)
+  const retries = useRef(0);
+  const retryTimer = useRef<number | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (auto = false) => {
+    if (!auto) retries.current = 0;
+    if (retryTimer.current !== null) {
+      window.clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    }
     if (!isShieldDeployed()) {
       setSynced(null);
       setMatchesChain(null);
@@ -44,6 +52,11 @@ export function useShieldTree() {
       setError(e instanceof Error ? e.message : "Tree sync failed");
       setSynced(null);
       setMatchesChain(null);
+      if (retries.current < 3) {
+        const wait = 1_000 * 3 ** retries.current + Math.random() * 500;
+        retries.current++;
+        retryTimer.current = window.setTimeout(() => void refresh(true), wait);
+      }
     } finally {
       setLoading(false);
     }
@@ -51,7 +64,10 @@ export function useShieldTree() {
 
   useEffect(() => {
     // Start on the next microtask so the effect body itself sets no state.
-    void Promise.resolve().then(refresh);
+    void Promise.resolve().then(() => refresh());
+    return () => {
+      if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
+    };
   }, [refresh]);
 
   async function pathForLeaf(

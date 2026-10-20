@@ -85,6 +85,8 @@ export type PayrollRow = {
   /** encrypted to their Gloam address, or a plain claim code for links */
   ticket?: string;
   txHash?: Hex;
+  /** When the payment was handed to the wallet or the relay. */
+  sentAt?: number;
   memoPosted?: boolean;
   // kept for the payroll total proof (sealed with the batch, never exported)
   /** The secret of the note this row paid them (the payer creates it). */
@@ -450,15 +452,20 @@ export async function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): 
       if (row.status === "paid" || row.status === "failed") continue;
       if (deps.shouldStop()) throw new PayrollStop();
 
-      // Resume: a row that was mid-flight either landed or it did not.
+      // Resume: a row that was mid-flight landed, failed, or may still land.
       if (row.spendNullifier && (row.status === "sending" || row.status === "confirming" || row.status === "notifying")) {
-        const landed = await isSpent(client, batch.pool, row.spendNullifier);
-        if (landed) {
+        const outcome = await sentOutcome(client, batch.pool, row);
+        if (outcome === "landed") {
           await finalizeTransfer(batch, row, client);
           await notify(batch, row, deps, emit);
           row.status = "paid";
           await emit();
           continue;
+        }
+        if (outcome === "unknown") {
+          row.error = STILL_CONFIRMING;
+          await emit();
+          throw new PayrollStop();
         }
         discardPending(row);
         row.status = "queued";
@@ -480,6 +487,28 @@ export async function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): 
   return batch;
 }
 
+/** Ten minutes after a send with the note still unspent, it is not going to land. */
+const LAND_WINDOW_MS = 10 * 60_000;
+const STILL_CONFIRMING = "Sent. The network hasn't confirmed it yet. Resume the run in a minute to check.";
+
+/**
+ * What became of a payment that was, or may have been, sent. "unknown" while the
+ * chain can't be read or it could still land: the row must be kept as it is,
+ * because discarding it would lose the payee's code if the payment lands later.
+ */
+async function sentOutcome(client: PublicClient, pool: Address, row: PayrollRow): Promise<"landed" | "failed" | "unknown"> {
+  if (!row.spendNullifier) return "failed";
+  const spent = await isSpent(client, pool, row.spendNullifier).catch(() => null);
+  if (spent === true) return "landed";
+  if (spent === null) return "unknown";
+  if (row.txHash) {
+    const receipt = await client.getTransactionReceipt({ hash: row.txHash }).catch(() => null);
+    if (receipt?.status === "reverted") return "failed";
+  }
+  if (!row.sentAt) return "failed"; // never handed to a wallet or the relay
+  return Date.now() - row.sentAt > LAND_WINDOW_MS ? "failed" : "unknown";
+}
+
 function discardPending(row: PayrollRow) {
   // The change note never reached the pool; hide it so it is not counted.
   if (row.changeNoteId) updateLocalNote(row.changeNoteId, { status: "recovered" });
@@ -489,6 +518,7 @@ function discardPending(row: PayrollRow) {
   row.paymentCommitment = undefined;
   row.ticket = undefined;
   row.txHash = undefined;
+  row.sentAt = undefined;
   row.paymentSecret = undefined;
   row.spendSecret = undefined;
   row.spendAmount = undefined;
@@ -575,6 +605,7 @@ async function payRow(
       row.spendSecret = note.secret;
       row.spendAmount = note.amountWei;
       row.status = "sending";
+      row.sentAt = Date.now();
       await emit();
 
       const hash = await deps.submitTransfer({
@@ -598,13 +629,20 @@ async function payRow(
     } catch (e) {
       if (e instanceof PayrollStop) throw e;
       const msg = e instanceof Error ? e.message : "Payment failed";
-      // If it actually landed despite the error (e.g. receipt timeout), keep it.
-      if (row.spendNullifier && (await isSpent(deps.client, batch.pool, row.spendNullifier).catch(() => false))) {
+      // It may have landed despite the error (a receipt timeout, a lost relay reply).
+      const outcome = await sentOutcome(deps.client, batch.pool, row);
+      if (outcome === "landed") {
         await finalizeTransfer(batch, row, deps.client);
         await notify(batch, row, deps, emit);
         row.status = "paid";
         await emit();
         return;
+      }
+      if (outcome === "unknown") {
+        // keep the row and the payee's code: resuming settles it from the chain
+        row.error = STILL_CONFIRMING;
+        await emit();
+        throw new PayrollStop();
       }
       discardPending(row);
       row.error = msg;
