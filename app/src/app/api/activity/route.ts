@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAddress } from "viem";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
+import { NETWORK_KEYS } from "@/lib/networks";
 
 const EXPLORER_API = "https://explorer.testnet.chain.robinhood.com/api";
+/** Robinhood Chain mainnet's explorer answers the same account API (checked 2026-10-20). */
+const RH_MAINNET_EXPLORER_API = "https://explorer.mainnet.chain.robinhood.com/api";
+
+/**
+ * Which explorer to ask. No chainId: the testnet, as always. A mainnet Gloam
+ * runs on: its own explorer, or null for Tempo, which has no account API (the
+ * feed then shows nothing rather than another chain's history).
+ */
+function explorerFor(chainId: string | null): string | null | "bad" {
+  if (chainId === null) return EXPLORER_API;
+  if (chainId === "4663" && NETWORK_KEYS.includes("robinhood-mainnet")) return RH_MAINNET_EXPLORER_API;
+  if (chainId === "4217" && NETWORK_KEYS.includes("tempo-mainnet")) return null;
+  return "bad";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +38,9 @@ export async function GET(req: NextRequest) {
   if (!isAddress(address)) {
     return NextResponse.json({ error: "invalid_address" }, { status: 400 });
   }
+  const explorer = explorerFor(req.nextUrl.searchParams.get("chainId"));
+  if (explorer === "bad") return NextResponse.json({ error: "unknown_chain" }, { status: 400 });
+  if (explorer === null) return NextResponse.json({ txs: [], address });
   const rate = await hitRateLimit(clientIp(req), "activity", PER_IP_PER_MIN);
   if (!rate.allowed) {
     return NextResponse.json(
@@ -33,7 +51,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // Cap server fetch; UI paginates client-side (PAGE_SIZE=5)
-    const url = `${EXPLORER_API}?module=account&action=txlist&address=${address}&page=1&offset=40&sort=desc`;
+    const url = `${explorer}?module=account&action=txlist&address=${address}&page=1&offset=40&sort=desc`;
     const res = await fetch(url, {
       cache: "no-store",
       headers: { Accept: "application/json" },

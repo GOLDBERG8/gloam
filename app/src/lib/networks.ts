@@ -358,6 +358,12 @@ export function isNetworkWritable(n: GloamNetwork): boolean {
   return n.status === "live" && n.pool !== null;
 }
 
+/** The network names an API takes, for its errors: '"robinhood" or "tempo"' until a mainnet pool is in. */
+export function networkKeyChoices(): string {
+  const q = (["robinhood", "tempo", ...MAINNET_KEYS] as NetworkKey[]).map((k) => `"${k}"`);
+  return `${q.slice(0, -1).join(", ")} or ${q[q.length - 1]}`;
+}
+
 /** "Robinhood Chain testnet", "Tempo testnet", or plain "Robinhood Chain" / "Tempo" on mainnet. */
 export function networkName(n: Pick<GloamNetwork, "label" | "testnet">): string {
   return n.testnet ? `${n.label} testnet` : n.label;

@@ -59,7 +59,7 @@ function Header() {
 export function ActivityFeed() {
   const { address, isConnected } = useAppAccount();
   const { network } = useNetwork();
-  const { data, isLoading, isError } = useActivity(address);
+  const { data, isLoading, isError } = useActivity(address, network.testnet ? undefined : network.chainId);
   const txs = useMemo(() => data?.txs ?? [], [data]);
   const pageCount = Math.max(1, Math.ceil(txs.length / PAGE_SIZE));
 

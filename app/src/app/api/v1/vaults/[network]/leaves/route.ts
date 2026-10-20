@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { ApiError, withApiKey } from "@/lib/partnersApi";
-import { isNetworkKey } from "@/lib/networks";
+import { isNetworkKey, networkKeyChoices } from "@/lib/networks";
 import { getLeafSnapshot } from "@/lib/leafIndexServer";
 
 export const runtime = "nodejs";
@@ -15,7 +15,7 @@ export const maxDuration = 60;
 export async function GET(req: Request, ctx: { params: Promise<{ network: string }> }) {
   return withApiKey(req, async () => {
     const { network } = await ctx.params;
-    if (!isNetworkKey(network)) throw new ApiError(404, "unknown_network", 'network must be "robinhood" or "tempo".');
+    if (!isNetworkKey(network)) throw new ApiError(404, "unknown_network", `network must be ${networkKeyChoices()}.`);
     let snap;
     try {
       snap = await getLeafSnapshot(network, (task) => after(task));

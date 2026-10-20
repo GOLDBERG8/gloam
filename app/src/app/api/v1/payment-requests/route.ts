@@ -1,7 +1,7 @@
 import { ApiError, jsonBody, withApiKey } from "@/lib/partnersApi";
 import { isLocalHost } from "@/lib/apiKeys";
 import { requestHost } from "@/lib/partnersAuth";
-import { isNetworkKey } from "@/lib/networks";
+import { isNetworkKey, networkKeyChoices } from "@/lib/networks";
 import {
   buildPaymentRequestLink,
   cleanRequestText,
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     }
     const network = body.network ?? "robinhood";
     if (typeof network !== "string" || !isNetworkKey(network)) {
-      throw new ApiError(400, "unknown_network", 'network must be "robinhood" or "tempo".');
+      throw new ApiError(400, "unknown_network", `network must be ${networkKeyChoices()}.`);
     }
     const asset = typeof body.asset === "string" ? findRequestAsset(network, body.asset) : null;
     if (!asset) throw new ApiError(400, "unknown_asset", "asset must be a token symbol or address Gloam supports on that network.");
