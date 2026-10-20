@@ -91,7 +91,8 @@ export function shieldTokensFor(chainId: number): OnchainToken[] {
 
 /** Tempo (42431) blocks native msg.value; shields there go through ERC-20 only. */
 export function supportsNativeShield(chainId: number): boolean {
-  return chainId !== 42431;
+  // Tempo (testnet 42431, mainnet 4217) has no native coin to shield
+  return chainId !== 42431 && chainId !== 4217;
 }
 
 export const erc20BalanceOfAbi = [

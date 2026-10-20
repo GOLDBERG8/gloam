@@ -149,8 +149,10 @@ export type WalkTuning = {
 
 /** How hard a chain's public RPC can be asked. `logRange` is the network's documented cap. */
 export function walkTuning(chainId: number, logRange: bigint): WalkTuning {
-  if (chainId === 46630) return { span: 5_000_000n, parallel: 4, spacingMs: 0 };
-  if (chainId === 42431) return { span: logRange, parallel: 3, spacingMs: 120 };
+  // Robinhood Chain (testnet 46630, mainnet 4663) answers wide ranges; a range
+  // error splits the request anyway. Tempo (testnet 42431, mainnet 4217) caps it.
+  if (chainId === 46630 || chainId === 4663) return { span: 5_000_000n, parallel: 4, spacingMs: 0 };
+  if (chainId === 42431 || chainId === 4217) return { span: logRange, parallel: 3, spacingMs: 120 };
   return { span: logRange, parallel: 2, spacingMs: 0 };
 }
 

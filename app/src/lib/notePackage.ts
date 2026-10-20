@@ -140,7 +140,15 @@ function phraseCandidates(passphrase: string): string[] {
   return [...new Set([canonicalPhrase(passphrase), passphrase.trim(), tidy, flipped])].filter(Boolean);
 }
 
-async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+/**
+ * PBKDF2 rounds. Codes locked from 20 Oct 2026 use 310,000 (OWASP's floor for
+ * PBKDF2-SHA256); older ones used 120,000 and still open. The count isn't in the
+ * code, so opening tries the current one first.
+ */
+const PBKDF2_ROUNDS = 310_000;
+const PBKDF2_ROUNDS_BEFORE = [120_000];
+
+async function deriveKey(passphrase: string, salt: Uint8Array, iterations = PBKDF2_ROUNDS): Promise<CryptoKey> {
   const base = await crypto.subtle.importKey(
     "raw",
     buf(utf8(passphrase)),
@@ -152,7 +160,7 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
     {
       name: "PBKDF2",
       salt: buf(salt),
-      iterations: 120_000,
+      iterations,
       hash: "SHA-256",
     },
     base,
@@ -256,15 +264,17 @@ export async function decodeNotePackage(
     const iv = raw.slice(16, 28);
     const cipher = raw.slice(28);
     let plain: Uint8Array | null = null;
-    for (const phrase of phraseCandidates(passphrase)) {
-      try {
-        const key = await deriveKey(phrase, salt);
-        plain = new Uint8Array(
-          await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf(iv) }, key, buf(cipher))
-        );
-        break;
-      } catch {
-        /* try the next form */
+    rounds: for (const iterations of [PBKDF2_ROUNDS, ...PBKDF2_ROUNDS_BEFORE]) {
+      for (const phrase of phraseCandidates(passphrase)) {
+        try {
+          const key = await deriveKey(phrase, salt, iterations);
+          plain = new Uint8Array(
+            await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf(iv) }, key, buf(cipher))
+          );
+          break rounds;
+        } catch {
+          /* try the next form */
+        }
       }
     }
     if (!plain) throw new Error("Wrong passphrase or corrupt payment.");
