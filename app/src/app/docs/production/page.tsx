@@ -63,9 +63,18 @@ export default function DocsProductionPage() {
           Done: phase 2, 13 contributions to shield, unshield, transfer,
           solvency, receipt and payroll_total, each round a public release
         </li>
-        <li>Export new <code>*.zkey</code> + Solidity verifiers; match public inputs layout v2</li>
-        <li>Update SHA-256 fingerprints in <code>circuitArtifacts.ts</code></li>
-        <li>Flip <code>PROVING_CEREMONY</code> to <code>production</code> only after the above</li>
+        <li>
+          Done: the final keys and their Solidity verifiers, exported byte for byte
+          (<code>contracts/src/verifiers/final</code>), same public inputs layout v2
+        </li>
+        <li>
+          Done: their SHA-256 fingerprints are pinned, and each network proves with its own
+          set: dev keys on testnet, the final keys on mainnet
+        </li>
+        <li>
+          Done: the mainnet deploy refuses to create a pool unless its verifiers accept
+          proofs made with the final keys and reject proofs made with the dev keys
+        </li>
         <li>Destroy or never re-use toxic waste from the ceremony</li>
       </ul>
 

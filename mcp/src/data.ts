@@ -47,7 +47,7 @@ export function findMarket(query: string): Market | undefined {
  */
 export const PRIVACY_STATUS = {
   network: "testnet",
-  provingKeys: "development (not a production ceremony)",
+  provingKeys: "development keys on testnet; mainnet deploys the 13-contributor ceremony's final keys",
   live: ["shield", "private send", "cash out"],
   disabled: ["sealed swaps (paused pending solvency work)"],
   notLive: ["mainnet", "production keys", "audited contracts"],

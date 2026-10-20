@@ -245,7 +245,7 @@ export default function DocsComparePage() {
         <li>
           <strong>Testnet only, for now.</strong> Testnet keys come from a
           single-contributor dev ceremony. The multi-party ceremony for mainnet
-          is done, with 13 contributors.
+          is done, with 13 contributors, and mainnet deploys its final keys.
         </li>
         <li>
           <strong>Internal audits only.</strong> Two rounds, with fixes

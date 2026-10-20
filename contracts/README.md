@@ -1,6 +1,6 @@
 # Gloam Contracts
 
-**Testnet-only** until production ceremony + audit. Robinhood Chain testnet `46630`.
+Live on testnet (Robinhood Chain `46630`, Tempo `42431`) with dev keys. The mainnet deploy (`script/DeployRobinhoodMainnet.s.sol`, `script/DeployTempoMainnet.s.sol`) uses the trusted setup's final keys in `src/verifiers/final` and checks them on chain before it creates the pool; see [`PRODUCTION.md`](./PRODUCTION.md).
 
 ## Do we need contracts?
 

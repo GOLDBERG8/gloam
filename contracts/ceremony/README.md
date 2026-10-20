@@ -70,7 +70,9 @@ node coordinator.mjs finalize --beacon <hex> --label "drand round <n>"
 - `finalize` applies the beacon, checks the final keys, and writes the final keys,
   verifying keys, browser files and Solidity verifiers to `build/final`, then prints
   their fingerprints. It leaves the app and `src/` alone, because testnet keeps its
-  own keys. The final keys move into the app and contracts with the mainnet deploy,
-  which runs with `PRODUCTION_KEYS=1`.
+  own keys. The final keys are wired for mainnet: `contracts/src/verifiers/final`
+  (exported from them, byte for byte) and `app/public/circuits/final` (hash-pinned).
+  The mainnet deploy checks on chain that its verifiers accept final-key proofs and
+  reject dev-key ones (`script/KeyCheckProofs.sol`) before it creates the pool.
 
 Round folders and keys are published as release files; they are not committed.

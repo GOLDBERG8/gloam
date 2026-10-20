@@ -40,7 +40,8 @@ Tagline: private by default, provable on demand. Hero line: private money on pub
 
 - Real privacy (shielded balances, private txs). Never fake or mock success.
 - **Public path** needs no Gloam contracts. **Private path** needs `contracts/`.
-- Product is **testnet-only** until a production ceremony and external audit. No mainnet mix-in.
+- Product is **testnet-only** until the mainnet deploy. No mainnet mix-in.
+- Two key sets: testnet verifiers hold the dev keys (`contracts/src/verifiers/*`, `app/public/circuits/*`), mainnet the ceremony's final keys (`contracts/src/verifiers/final/*`, `app/public/circuits/final/*`). Each network names its set (`GloamNetwork.ceremony`); a mainnet entry sets `"production"`. `script/KeyCheckProofs.sol` (regenerate with `node contracts/circuits/scripts/gen-key-fixtures.mjs`) proves which keys a verifier holds.
 - Brand: monochrome with a green tint (`#2e7d53` light, `#8fd3ad` dark), Aeonik, light and dark. Calm, spacious, plain-language.
 - Secrets server-side only.
 - If it does not serve private payments for people, teams and agents on Tempo and Robinhood Chain, it waits.

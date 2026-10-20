@@ -53,7 +53,7 @@ GloamPayMemo: encrypted payment memos for discovery. Holds no funds.
 | sealedSwapVerifier | `0x0` (private trade off) |
 | GloamPayMemo | `0x3ca88712e9219b5EE4c82D31cAfEaB64C9E9b4E3` (fixed source, no poster in the event) |
 
-Both: hash Poseidon, proof layout v2, Groth16 on BN254, keys from a **single-contributor dev ceremony** (not production).
+Both: hash Poseidon, proof layout v2, Groth16 on BN254, keys from a **single-contributor dev ceremony** (testnet only). Mainnet deploys `ShieldPoolPayments` with the multi-party ceremony's final keys (`src/verifiers/final`).
 
 ### Superseded pools (history only)
 

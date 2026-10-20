@@ -2,7 +2,7 @@
 
 **Proof system:** Groth16 on BN254. Circuits are written in Circom 2.1.6 (`pragma circom 2.1.6` in every file) with circomlib 2.0.5, and proved and verified with snarkjs 0.7.5, in the browser and in Node. Pool circuits are checked on-chain by snarkjs-exported Solidity verifiers; the proofs a holder shares with others are checked off-chain.
 
-**Trusted setup: dev ceremony only.** Every proving key comes from a 2^16 Powers of Tau file and a single-contributor phase-2 contribution with throwaway entropy. That is fine for testnet and not for real money: whoever held that entropy could forge proofs. A multi-party ceremony, with published transcripts and repinned artifact hashes, is required before mainnet (see [`../PRODUCTION.md`](../PRODUCTION.md), audit M-2).
+**Trusted setup: two key sets.** The testnet keys come from a 2^16 Powers of Tau file and a single-contributor phase-2 contribution with throwaway entropy: fine for testnet, never for real money, since whoever held that entropy could forge proofs. Mainnet uses the multi-party ceremony's final keys (13 contributors, beacon drand round 6561386, release `ceremony-final`; see [`../ceremony`](../ceremony)): `../src/verifiers/final` on chain and `app/public/circuits/final` in the app, hash-pinned. `scripts/gen-key-fixtures.mjs` makes real proofs with both sets (`../script/KeyCheckProofs.sol`), and the mainnet deploy refuses to create a pool unless its verifiers accept the final-key proofs and reject the dev ones (audit M-2, pre-mainnet GATE 2).
 
 **Do not deploy a mock verifier that always returns true on a funded pool.**
 

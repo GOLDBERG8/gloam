@@ -98,7 +98,7 @@ Privacy earns the mainnet gate only when it is auditable and correct.
 - **No admin withdraw, timelocked rule changes.** Redeployed 2026-09-29 on both networks without an admin withdraw: there is no function the team can call to take pooled funds, and notes leave only through an unshield proof. The owner wallet can still swap verifiers or change rates and oracles, but setup has ended, so every such change must be queued on-chain and waits a public 3-day delay before it can run (`endSetup()`, `queueChange`, 97/97 tests). Verify `setupMode() == false` on the pools listed below.
 - **Selective disclosure, not a mixer.** Prove balance or a payment to a counterparty or auditor without revealing everything. The right posture for a regulated-sponsor chain.
 - **Fast vault sync, same privacy.** The app loads the vault's public leaf list (every commitment, in order) from `/api/vault-leaves` in one request instead of walking the chain, rebuilds the Merkle tree in the browser, and uses it only if the root matches the pool's on-chain root; otherwise it reads the chain itself. The request names only the network and is the same for everyone, so the server never learns which notes are yours.
-- **Honest gates.** The trusted setup is a single-contributor dev ceremony and mainnet needs a multi-party one. Note secrets and the receive key are encrypted at rest (AES-GCM under a non-extractable device key, or wrapped by a passkey PRF), audit M-1. A payment someone sends you is moved into a fresh note only you know as you claim it, so the sender cannot spend it back. These are disclosed, not hidden. Mainnet `4663` is blocked in-product.
+- **Honest gates.** Testnet runs on single-contributor dev keys. The multi-party trusted setup is done (13 contributors, drand round 6561386), and mainnet deploys its final keys: the deploy script refuses to create a pool unless the verifiers on chain accept final-key proofs and reject dev-key ones. Note secrets and the receive key are encrypted at rest (AES-GCM under a non-extractable device key, or wrapped by a passkey PRF), audit M-1. A payment someone sends you is moved into a fresh note only you know as you claim it, so the sender cannot spend it back. These are disclosed, not hidden. Mainnet `4663` is blocked in-product.
 
 ## Using the SDK
 
@@ -164,7 +164,7 @@ Run the reference app from `app/` (`next dev`), or open [gloam.trade/app](https:
 
 ## Guardrails
 
-- Testnet only until a production ceremony + external audit. Mainnet `4663` blocked in-product.
+- Testnet only until the mainnet launch (announced for Wednesday 21 October 2026, 13:00 UTC). Mainnet `4663` stays blocked in-product until its network entry is added after the deploy.
 - Real privacy only. Never fake or mock a private success.
 - Selective disclosure over opacity. Verifiable, not just hidden.
 - Brand: monochrome with a green tint (`#2e7d53` light, `#8fd3ad` dark), Aeonik, light and dark. Calm, spacious, plain-language.

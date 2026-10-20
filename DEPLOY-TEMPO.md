@@ -2,7 +2,8 @@
 
 The runbook for bringing the Gloam shielded pool to Tempo. You run this; no agent
 and no CI deploys it, and the proving keys are the dev ceremony, so this is a
-**testnet deploy only**. Sealed swaps stay disabled (audit H1). Design and
+**testnet deploy only**. The mainnet deploy is `contracts/script/DeployTempoMainnet.s.sol`,
+on the ceremony's final keys (see `contracts/PRODUCTION.md`). Sealed swaps stay disabled (audit H1). Design and
 rationale: [`TEMPO_EXPANSION.md`](./TEMPO_EXPANSION.md).
 
 ## What this deploys
