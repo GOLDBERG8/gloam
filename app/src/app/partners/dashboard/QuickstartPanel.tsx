@@ -4,9 +4,25 @@ import Link from "next/link";
 import { CodeBlock } from "@/components/ui/CodeBlock";
 import { Card } from "./ui";
 
-export function QuickstartPanel({ origin, hasKey, onKeys }: { origin: string; hasKey: boolean; onKeys: () => void }) {
+export function QuickstartPanel({
+  origin,
+  hasKey,
+  liveKeys = false,
+  onKeys,
+}: {
+  origin: string;
+  hasKey: boolean;
+  /** Gloam runs on a mainnet: live keys exist, and the examples say which key goes where. */
+  liveKeys?: boolean;
+  onKeys: () => void;
+}) {
   const base = origin || "https://gloam.trade";
-  const env = `# .env on your server, never in a browser bundle
+  const env = liveKeys
+    ? `# .env on your server, never in a browser bundle
+# These examples use Robinhood Chain testnet (46630) and a test key.
+# On mainnet, use a gloam_live_ key and the mainnet's chain id (4663 or 4217).
+GLOAM_API_KEY=gloam_test_…`
+    : `# .env on your server, never in a browser bundle
 GLOAM_API_KEY=gloam_test_…`;
   const check = `curl ${base}/api/v1/me \\
   -H "Authorization: Bearer $GLOAM_API_KEY"`;

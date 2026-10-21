@@ -4,7 +4,7 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { SealedField } from "@/components/ui/SealedField";
 import { FlowField } from "@/components/ui/FlowField";
-import { MainnetPill } from "@/components/MainnetCountdown";
+import { MainnetCopy, MainnetPill } from "@/components/MainnetCountdown";
 import { CursorReveal } from "@/components/ui/CursorReveal";
 import { SealStream } from "@/components/landing/SealStream";
 import { PayrollLive } from "@/components/landing/PayrollLive";
@@ -107,7 +107,12 @@ const USES = [
   {
     icon: <IconStocks />,
     title: "Stocks on Robinhood Chain",
-    body: "Hold tokenized stocks with the size of your position off the public record.",
+    body: (
+      <MainnetCopy
+        live="Hold tokenized stocks with the size of your position off the public record. On the testnet for now: the mainnet pools take payments."
+        before="Hold tokenized stocks with the size of your position off the public record."
+      />
+    ),
     href: "/docs/product",
   },
 ];
@@ -138,7 +143,12 @@ const WHAT = [
   {
     label: "The protocol",
     title: "Open vault contracts",
-    body: "Private balances on Tempo and Robinhood Chain testnet. Settlement stays public, the amounts and the people stay private.",
+    body: (
+      <MainnetCopy
+        live="Private balances on Robinhood Chain and Tempo mainnet, with a free testnet to practice on. Settlement stays public, the amounts and the people stay private."
+        before="Private balances on Tempo and Robinhood Chain testnet. Settlement stays public, the amounts and the people stay private."
+      />
+    ),
     href: "/verify#contracts",
     cta: "Verify the contracts",
   },
@@ -271,10 +281,16 @@ export function Landing() {
           <div className="gl-panel overflow-clip bg-surface px-5 py-12 sm:px-10 sm:py-16">
             <SealedField tone="soft" />
             <div className="relative mx-auto max-w-[720px] text-center">
-              <h2 className="t-display-l">Private money, live on testnet</h2>
+              <h2 className="t-display-l">
+                <MainnetCopy live="Private money, live on mainnet" before="Private money, live on testnet" />
+              </h2>
               <p className="mx-auto mt-4 max-w-[52ch] text-[17px] leading-[1.6] text-mute sm:text-[19px]">
                 Add money privately, pay anyone, and prove what you hold without
-                showing the number. On testnet today, with real contracts.
+                showing the number.{" "}
+                <MainnetCopy
+                  live="Real money on mainnet, and a free testnet to practice on first."
+                  before="On testnet today, with real contracts."
+                />
               </p>
             </div>
             <LiveProduct />
@@ -357,9 +373,11 @@ export function Landing() {
             })}
           </div>
           <p className="mt-8 max-w-[68ch] text-[15px] leading-relaxed text-mute">
-            <span className="text-foreground">Coming next.</span> Stock tokens on
-            Robinhood Chain can be held and sent privately today. Private trading
-            is underway, with a new engine built for it.{" "}
+            <span className="text-foreground">Coming next.</span>{" "}
+            <MainnetCopy
+              live="Stock tokens can be held and sent privately on Robinhood Chain testnet today. Private trading is underway, with a new engine built for it."
+              before="Stock tokens on Robinhood Chain can be held and sent privately today. Private trading is underway, with a new engine built for it."
+            />{" "}
             <Link href="/docs/sealed-trade" className="text-foreground underline-offset-4 hover:underline">
               About private trade <span aria-hidden>→</span>
             </Link>
@@ -395,7 +413,7 @@ export function Landing() {
                 </ul>
                 <div className="mt-8 flex flex-wrap gap-2">
                   <AppLink href="/app/payroll" className="btn btn-ink">
-                    Run a test payroll
+                    <MainnetCopy live="Run payroll" before="Run a test payroll" />
                   </AppLink>
                   <Link href="/docs/payroll" className="btn btn-quiet">
                     How payroll works

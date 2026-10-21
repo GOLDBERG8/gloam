@@ -252,6 +252,10 @@ function mainnetLiveFacts(): string {
     "- In the app, the network selector marks every network Mainnet or Testnet, and a testnet page says its balances are test funds. Pick the mainnet there for real money. The testnets stay open with play money for trying things first, and test funds never move to mainnet.",
     "- Passkey sign-in (Tempo Wallet) is on Tempo testnet. On mainnet, connect a browser wallet or a wallet app.",
     "- On mainnet, a plain payment code or claim link is real money: send it privately to the one person, or pay their Gloam address so the payment is sealed to them.",
+    "- Fees on mainnet: adding money and private payments are free; a cash out costs 0.25% of its amount, shown before you confirm. Partner API fees are not charged yet. Cash outs and private payments are never limited.",
+    "- Security: Gloam had an internal review before launch, finished on 20 October 2026 with no Critical or High findings open. An external audit is planned and has not been done, so never say Gloam is audited. Mainnet is beta software handling real money: say so plainly when someone asks if it is safe.",
+    "- At launch the owner and treasury is one wallet (a multisig is planned), and the Gloam team runs the relay. The relay only submits payments already proven in the browser and pays their network fee; it cannot move or redirect money. Raising limits or adding assets waits a public three-day timelock; the owner can lower limits or close deposits at once.",
+    "- The mainnet vaults are new, so their crowd is still small: treat privacy there as weaker for now too.",
   ];
   return lines.join("\n");
 }
@@ -270,10 +274,42 @@ function liveSwaps(): [string, string][] {
       "The app is live on mainnet too; the token is not a testnet token.",
     ],
     [
-      "$GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees switch on",
-      `$GLOAM listed in the mainnet pool; Gloam live on mainnet (${names}). Next: shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees switch on`,
+      "$GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees switch on and half of them start buying back $GLOAM; the first holder vote, in the open.",
+      rh
+        ? `$GLOAM listed in the mainnet pool; Gloam live on mainnet (${names}); shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees on, and half of them buy back $GLOAM. Next: the first holder vote, in the open.`
+        : `$GLOAM listed in the mainnet pool; Gloam live on mainnet (${names}); fees on, and half of them buy back $GLOAM. Next: shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); the first holder vote, in the open.`,
     ],
     ["gloam.trade/app (the testnet app)", "gloam.trade/app (the app: mainnet and testnet)"],
+    // fees, the relay and what you can do read as now, not as "at mainnet"
+    ["- Fees at mainnet:", "- Fees on mainnet:"],
+    ["Half of Gloam's fees buy back $GLOAM once fees switch on at mainnet", "Half of Gloam's fees buy back $GLOAM"],
+    ["half of Gloam's fees buy $GLOAM from the market once fees switch on at mainnet.", "half of Gloam's fees buy $GLOAM from the market."],
+    ["From mainnet a cash out carries a 0.25% fee", "On mainnet a cash out carries a 0.25% fee"],
+    ["(2) Buybacks: at mainnet, adding money", "(2) Buybacks: on mainnet, adding money"],
+    [
+      "It is on by default in Payroll and Vault and free on testnet.",
+      "It is on by default in Payroll and Vault, and it costs nothing extra on mainnet or testnet: the relay pays the network fee.",
+    ],
+    ["WHAT YOU CAN DO (LIVE ON TESTNET)", "WHAT YOU CAN DO (ON MAINNET AND TESTNET; STOCKS AND TEST FUNDS ARE TESTNET ONLY)"],
+    ["At mainnet it shows \"You receive\"", "On mainnet it shows \"You receive\""],
+    // the testnets become the practice network; stocks and test funds stay there
+    ["- It runs on two testnets:", "- Its two testnets, free practice with play money:"],
+    ["Markets (Robinhood Chain only)", "Markets (only on Robinhood Chain testnet)"],
+    ["Trade (Robinhood Chain only, switched off", "Trade (only on Robinhood Chain testnet, switched off"],
+    ["the test funds button (\"Get testnet funds\"", "the test funds button on a testnet (\"Get testnet funds\""],
+    ["2. Claim test funds from Get test funds on Portfolio.", "2. On a testnet, claim test funds from Get test funds on Portfolio (mainnet has none: you add your own money)."],
+    [
+      "The app is public on testnet and anyone can use it right now at gloam.trade/app.",
+      "The app is public on mainnet and testnet, and anyone can use it right now at gloam.trade/app.",
+    ],
+    ["- Quick start: open gloam.trade/app, get test funds", "- Quick start on the testnet: open gloam.trade/app, pick a testnet in the network selector, get test funds"],
+    [
+      "- Add privately on Robinhood Chain supports ETH, USDG and the sample stock tokens TSLA, AMZN, PLTR, NFLX and AMD.",
+      rh
+        ? "- Add privately on Robinhood Chain testnet supports ETH, USDG and the sample stock tokens TSLA, AMZN, PLTR, NFLX and AMD. On Robinhood Chain mainnet it takes USDG and $GLOAM only."
+        : "- Add privately on Robinhood Chain testnet supports ETH, USDG and the sample stock tokens TSLA, AMZN, PLTR, NFLX and AMD.",
+    ],
+    ["- On Tempo the vault takes test stablecoins:", "- On Tempo testnet the vault takes test stablecoins:"],
     ...(rh
       ? ([
           [

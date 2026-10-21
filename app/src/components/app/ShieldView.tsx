@@ -20,6 +20,7 @@ import {
   useAppWriteContract,
 } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
+import { MAINNET_ENABLED } from "@/lib/networks";
 import { safeParseEther, safeParseUnits } from "@/lib/amount";
 import { erc20Abi } from "@/lib/dex";
 import { useEthPrice, useLiveMarkets } from "@/hooks/useLiveMarkets";
@@ -864,7 +865,10 @@ export function ShieldView() {
             </div>
             <div className="flex h-11 items-center justify-between gap-3">
               <dt className="text-mute">Network</dt>
-              <dd className="text-foreground">{network.label}</dd>
+              {/* Once a mainnet sits next to the testnets, say which side this deposit lands on. */}
+              <dd className="text-foreground">
+                {MAINNET_ENABLED ? `${network.label} ${network.testnet ? "testnet" : "mainnet"}` : network.label}
+              </dd>
             </div>
             {limitsOn && limitPer !== null && limitPer > BigInt(0) && (
               <div className="flex h-11 items-center justify-between gap-3">

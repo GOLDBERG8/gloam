@@ -79,7 +79,7 @@ function mainnetRule(live: boolean, drafts: boolean): string {
       ? "The Gloam app is on testnet until mainnet launches. Never say or hint that the app is live on mainnet. The one timing you may use, drafts included, is the announced launch: Wednesday 21 October, 13:00 UTC, with the countdown at gloam.trade/mainnet. Never give or guess any other date or time."
       : "The Gloam app is on testnet until mainnet launches. Never say or hint that the app is live on mainnet. The one timing you may give is the announced launch: Wednesday 21 October, 13:00 UTC, with the countdown at gloam.trade/mainnet. Never give or guess any other date or time.";
   }
-  return `Gloam is live on mainnet on ${liveMainnetNames()}, since Wednesday 21 October, 13:00 UTC: real money, with beta deposit limits. Say so plainly when asked${drafts ? ", drafts included" : ""}, and keep mainnet and testnet apart: testnet is play money, mainnet is real money. Never give or guess any other date or time.`;
+  return `Gloam is live on mainnet on ${liveMainnetNames()}, since Wednesday 21 October, 13:00 UTC: real money, with beta deposit limits. Say so plainly when asked${drafts ? ", drafts included" : ""}, and keep mainnet and testnet apart: testnet is play money, mainnet is real money. Never give or guess any other date or time. Mainnet is beta software: never call Gloam audited (it was reviewed internally; an external audit is planned), and never say private trading is live.`;
 }
 
 export function botModel(): string {
@@ -275,14 +275,18 @@ type ApiResponse = {
 export type ModelImage = { mediaType: "image/jpeg" | "image/png" | "image/webp"; data: string };
 
 const CLASSIFIER_MODEL = "claude-haiku-5-5";
-const CLASSIFIER_SYSTEM = `You decide whether Glim, the helper bot in Gloam's Telegram group, should reply to a member's message. Gloam is private stablecoin payments on testnet. Answer with exactly YES or NO.
+/** Where Gloam runs, for the classifier: testnet until mainnet is live, then both. */
+function classifierSystem(): string {
+  const where = isMainnetLive() ? "on mainnet, with a testnet for practice" : "on testnet";
+  return `You decide whether Glim, the helper bot in Gloam's Telegram group, should reply to a member's message. Gloam is private stablecoin payments ${where}. Answer with exactly YES or NO.
 YES when the message asks for help (even without a question mark), describes a problem or an error, states something about how Gloam works that may be wrong, or gives product feedback the helper can usefully respond to.
 NO for greetings, hype, jokes, thanks, chat between members that needs no help, someone sharing a payment code, claim link or their Gloam address for others to use, or anything not about Gloam or wallets.`;
+}
 
 /** For a message not phrased as a question: should the helper answer it anyway? */
 export async function wantsHelper(text: string, followUp = false): Promise<boolean> {
   const lead = followUp ? "This message comes right after Glim answered the same person, so it may be a follow-up to Glim.\n" : "";
-  const out = await askModel(CLASSIFIER_SYSTEM, `${lead}Message: ${text.slice(0, 600)}`, null, CLASSIFIER_MODEL, "check");
+  const out = await askModel(classifierSystem(), `${lead}Message: ${text.slice(0, 600)}`, null, CLASSIFIER_MODEL, "check");
   return /^\s*yes\b/i.test(out ?? "");
 }
 

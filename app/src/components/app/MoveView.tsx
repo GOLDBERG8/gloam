@@ -2494,7 +2494,7 @@ export function MoveView() {
         secondaryLabel="Done"
         footer={
           paidPrivately ? (
-            <PrivatePayShare chainId={network.chainId} networkLabel={network.label} />
+            <PrivatePayShare chainId={network.chainId} networkLabel={network.label} testnet={network.testnet} />
           ) : undefined
         }
         onClose={() => {

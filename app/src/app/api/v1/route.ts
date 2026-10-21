@@ -1,4 +1,5 @@
 import { apiOk, newRequestId, API_VERSION } from "@/lib/partnersApi";
+import { MAINNET_ENABLED } from "@/lib/networks";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +10,12 @@ export async function GET() {
       name: "Gloam API",
       version: API_VERSION,
       docs: "https://gloam.trade/docs/partners",
-      auth: "Authorization: Bearer gloam_test_... (keys from https://gloam.trade/partners)",
-      testnet: true,
+      // Mainnet takes live keys, the testnets test keys; until a mainnet pool is in, it is the testnets alone.
+      auth: MAINNET_ENABLED
+        ? "Authorization: Bearer gloam_live_... on mainnet, gloam_test_... on testnet (keys from https://gloam.trade/partners)"
+        : "Authorization: Bearer gloam_test_... (keys from https://gloam.trade/partners)",
+      testnet: !MAINNET_ENABLED,
+      // Partner fees are counted, not collected, on every network (mainnet included).
       charged: false,
       endpoints: [
         { method: "GET", path: "/api/v1/me", what: "The partner and key behind your key" },

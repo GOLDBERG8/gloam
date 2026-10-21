@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Logo } from "@/components/Logo";
+import { useMainnetLive } from "@/components/MainnetCountdown";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SealedField } from "@/components/ui/SealedField";
 import {
@@ -60,6 +61,7 @@ function SignIn({ onSignedIn, initialError }: { onSignedIn: () => void; initialE
   const [wallets, setWallets] = useState<WalletChoice[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(initialError);
+  const mainnetLive = useMainnetLive();
 
   useEffect(() => {
     let live = true;
@@ -128,7 +130,7 @@ function SignIn({ onSignedIn, initialError }: { onSignedIn: () => void; initialE
         </div>
       </div>
       <p className="mt-5 text-center text-[12.5px] leading-relaxed text-mute">
-        Testnet program. Nothing is charged.{" "}
+        {mainnetLive ? "Partner fees are not charged yet, on mainnet or testnet." : "Testnet program. Nothing is charged."}{" "}
         <Link href="/docs/partners" className="text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground">
           How it works
         </Link>
@@ -210,6 +212,7 @@ function Dashboard({ session, onSignOut, onPartner }: { session: Session & { par
   const [keyMeta, setKeyMeta] = useState({ maxActive: 10, liveKeys: false });
   const [err, setErr] = useState<string | null>(null);
   const [origin, setOrigin] = useState("");
+  const mainnetLive = useMainnetLive();
   const partner = session.partner;
 
   const loadStats = useCallback(async () => {
@@ -294,7 +297,9 @@ function Dashboard({ session, onSignOut, onPartner }: { session: Session & { par
           <div className="min-w-0">
             <h1 className="t-display-m truncate">{partner.name}</h1>
             <p className="mt-2 text-[14px] text-mute">
-              Testnet. Nothing is charged. Fees show what your setting would have earned.
+              {mainnetLive
+                ? "Nothing is charged yet, on mainnet or testnet. Fees show what your setting would have earned."
+                : "Testnet. Nothing is charged. Fees show what your setting would have earned."}
             </p>
           </div>
           <div
@@ -338,7 +343,9 @@ function Dashboard({ session, onSignOut, onPartner }: { session: Session & { par
               }}
             />
           )}
-          {tab === "quickstart" && <QuickstartPanel origin={origin} hasKey={activeKeys > 0} onKeys={() => choose("keys")} />}
+          {tab === "quickstart" && (
+            <QuickstartPanel origin={origin} hasKey={activeKeys > 0} liveKeys={keyMeta.liveKeys} onKeys={() => choose("keys")} />
+          )}
         </div>
       </main>
     </div>

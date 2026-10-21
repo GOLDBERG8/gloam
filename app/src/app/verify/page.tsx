@@ -27,6 +27,7 @@ import { networkForChain } from "@/lib/proofs/chain";
 import { NETWORK_KEYS, getNetwork, type ChainFamily, type GloamNetwork, type NetworkKey } from "@/lib/networks";
 import { track } from "@/lib/track";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
+import { useMainnetLive } from "@/components/MainnetCountdown";
 
 type Result =
   | { kind: "idle" }
@@ -235,11 +236,21 @@ const FACTS = [
   },
 ];
 
+/** Once mainnet is live: the beta deposit limits sit next to the facts above. */
+const LIVE_FACTS = [
+  ...FACTS,
+  {
+    title: "Beta deposit limits",
+    body: "On mainnet each stablecoin takes up to 500 per deposit and 25,000 in total, and $GLOAM 25,000 and 250,000. Cash outs and private payments are never limited. Raising a limit waits the same three days; lowering one is instant.",
+  },
+];
+
 /**
  * After a proof is checked: the person who opened it can make one of their
  * own. Shown under every finished result, shared link or pasted.
  */
 function MakeYourOwn({ from }: { from: "link" | "page" }) {
+  const live = useMainnetLive();
   return (
     <div className="gl-card mt-4 p-5 sm:p-7">
       <p className="text-[18px] leading-snug tracking-[-0.01em] text-foreground">Make your own proof</p>
@@ -255,7 +266,9 @@ function MakeYourOwn({ from }: { from: "link" | "page" }) {
         Make your own proof
       </AppLink>
       <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
-        Free on testnet: add some test money privately, then prove only what you choose.
+        {live
+          ? "Add money privately, then prove only what you choose. The testnet is free for practice."
+          : "Free on testnet: add some test money privately, then prove only what you choose."}
       </p>
     </div>
   );
@@ -306,6 +319,7 @@ export default function VerifyPage() {
   // Opened from a shared link (and not swapped for another proof): the result
   // leads the page, phone first, instead of the hero.
   const shared = Boolean(urlProof) && typed === null;
+  const live = useMainnetLive();
 
   // Opened from a shared link: check the proof straight away.
   useEffect(() => {
@@ -581,9 +595,20 @@ export default function VerifyPage() {
                 <div className="max-w-[640px]">
                   <h2 className="t-display-l">The contracts</h2>
                   <p className="mt-5 max-w-[54ch] text-[16px] leading-relaxed text-mute">
-                    The same contracts run on two chains. Every address links to
-                    the public explorer, and the source behind each one is on
-                    GitHub.
+                    {live ? (
+                      <>
+                        Gloam runs on Robinhood Chain and Tempo, on mainnet and on
+                        testnet. The mainnet vaults are for payments only. Every address
+                        links to the public explorer, and the source behind each one
+                        is on GitHub.
+                      </>
+                    ) : (
+                      <>
+                        The same contracts run on two chains. Every address links to
+                        the public explorer, and the source behind each one is on
+                        GitHub.
+                      </>
+                    )}
                   </p>
                 </div>
                 <a
@@ -610,14 +635,26 @@ export default function VerifyPage() {
             <div>
               <h2 className="t-display-l max-w-[10ch]">No middlemen</h2>
               <p className="mt-5 max-w-[34ch] text-[15px] leading-relaxed text-mute">
-                Testnet with play money, so testnet proofs still use development
-                keys. The production trusted setup closed on 17 October with 13
-                contributors, and mainnet uses its final keys. It was reviewed
-                internally before launch, and an external audit is planned.
+                {live ? (
+                  <>
+                    Mainnet proofs use the final keys from the trusted setup, which
+                    closed on 17 October with 13 contributors. The testnet keeps
+                    development keys and play money. Gloam was reviewed internally
+                    before launch, and an external audit is planned. It is beta
+                    software handling real money.
+                  </>
+                ) : (
+                  <>
+                    Testnet with play money, so testnet proofs still use development
+                    keys. The production trusted setup closed on 17 October with 13
+                    contributors, and mainnet uses its final keys. It was reviewed
+                    internally before launch, and an external audit is planned.
+                  </>
+                )}
               </p>
             </div>
             <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">
-              {FACTS.map((f) => (
+              {(live ? LIVE_FACTS : FACTS).map((f) => (
                 <div key={f.title} className="border-t border-foreground pt-5">
                   <p className="flex items-center gap-2.5 text-[18px] leading-snug tracking-[-0.01em]">
                     <span className="shrink-0 text-sealed">

@@ -42,6 +42,15 @@ export function useMainnetLive(): boolean {
   return Boolean(r?.done) && MAINNET_CONFIGURED;
 }
 
+/**
+ * Copy that depends on whether mainnet is live, for server pages: `before`
+ * until mainnet is live (and on the server, so the first render matches),
+ * `live` from then on. Before a mainnet pool is filled in it is always `before`.
+ */
+export function MainnetCopy({ live, before }: { live: React.ReactNode; before: React.ReactNode }) {
+  return <>{useMainnetLive() ? live : before}</>;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** The big countdown: days, hours, minutes, seconds. */

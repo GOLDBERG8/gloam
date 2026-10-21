@@ -295,7 +295,7 @@ export function AppShell({
           <div className="flex flex-col gap-3 border-t border-line pt-5 text-[12.5px] text-mute sm:flex-row sm:items-center sm:justify-between">
             <p>
               {!network.testnet
-                ? `Gloam on ${network.label} mainnet. Real money. Not investment, legal or tax advice.`
+                ? `Gloam on ${network.label} mainnet. Beta software with real money. Not investment, legal or tax advice.`
                 : isTempo
                   ? "Gloam on Tempo testnet. Private stablecoin payments for people and agents. Play money only."
                   : "Gloam on Robinhood Chain testnet. Play money only. Not investment, legal or tax advice."}

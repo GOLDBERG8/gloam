@@ -32,8 +32,10 @@
  *     network cap counts only transactions actually sent), and a few relayed
  *     payment messages per payment
  *
- * Testnet: submission is free. Mainnet needs a relay fee carved out inside the
- * circuit (an extra public output), otherwise the relay pays everyone's gas.
+ * Submission is free for the user on every network, mainnet included: the relay
+ * pays the gas. A relay fee would need its own public output inside the circuit,
+ * which the mainnet pools do not have, so at launch the Gloam team pays mainnet
+ * gas from the relay account. The only fee on mainnet is the pool's 0.25% on a cash out.
  *
  * Key: GLOAM_RELAYER_PRIVATE_KEY (server env only, never NEXT_PUBLIC_). With no
  * key set the relay reports itself disabled and the app falls back to wallet

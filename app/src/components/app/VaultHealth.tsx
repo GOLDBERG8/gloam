@@ -32,6 +32,9 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
     useShieldTree();
   const [sealed, setSealed] = useState<"checking" | "ready" | "off">("checking");
   const env = useMemo(() => vaultEnvDiagnostics(), []);
+  // A mainnet vault is for payments only (no private trade there), so its
+  // status never hangs on the private-trade verifier.
+  const paymentsOnly = !network.testnet;
 
   useEffect(() => {
     let cancelled = false;
@@ -74,8 +77,8 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
           {syncText}
         </span>
         <span className="flex items-center gap-1">
-          <StatusPill tone={sealed === "ready" ? "lime" : "mute"} dot>
-            {sealed === "ready" ? "Private trade on" : "Vault"}
+          <StatusPill tone={paymentsOnly || sealed === "ready" ? "lime" : "mute"} dot>
+            {paymentsOnly ? "Payments" : sealed === "ready" ? "Private trade on" : "Vault"}
           </StatusPill>
           <button
             type="button"
@@ -103,8 +106,8 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
           </p>
         </div>
         <div className="flex items-center gap-1">
-          <StatusPill tone={sealed === "ready" ? "lime" : sealed === "checking" ? "mute" : "warn"} dot>
-            {sealed === "ready" ? "Ready" : sealed === "checking" ? "Checking" : "Limited"}
+          <StatusPill tone={paymentsOnly || sealed === "ready" ? "lime" : sealed === "checking" ? "mute" : "warn"} dot>
+            {paymentsOnly ? "Ready" : sealed === "ready" ? "Ready" : sealed === "checking" ? "Checking" : "Limited"}
           </StatusPill>
           <button
             type="button"
@@ -117,14 +120,24 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
         </div>
       </div>
       <p className="mt-3 max-w-[64ch] text-[13px] leading-relaxed text-mute">
-        Money stays private while it stays in the vault. Adding, sending and
-        trading from it keep amounts hidden. Cashing out shows the amount.
+        {paymentsOnly ? (
+          <>
+            Money stays private while it stays in the vault. Adding to it and
+            sending from it keep amounts hidden. Cashing out shows the amount.
+          </>
+        ) : (
+          <>
+            Money stays private while it stays in the vault. Adding, sending and
+            trading from it keep amounts hidden. Cashing out shows the amount.
+          </>
+        )}
       </p>
       {network.pool && (
         <p className="tnum mt-3 break-all border-t border-line pt-3 text-[12px] leading-relaxed text-faint">
           {network.pool}
           {" · block "}
-          {env.deployBlock.toString()}
+          {/* the env block is Robinhood Chain testnet's; a mainnet carries its own */}
+          {(paymentsOnly && network.deployBlock !== null ? network.deployBlock : env.deployBlock).toString()}
           {env.remappedFromLegacy || env.deployBlockRemapped
             ? " · remapped from legacy env"
             : ""}

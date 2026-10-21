@@ -2,7 +2,8 @@
  * The "Paid privately" share image, drawn in the browser on a canvas. It holds
  * no amount, no recipient and no address: the Gloam mark, one headline, one
  * line, the sealed row the brand posts use, and a small footer naming the
- * testnet. 1200 x 675 (X's 16:9), drawn at 2x so it stays sharp.
+ * network (with "testnet" on a testnet). 1200 x 675 (X's 16:9), drawn at 2x so
+ * it stays sharp.
  */
 
 const W = 1200;
@@ -112,6 +113,8 @@ export async function renderPaidPrivatelyCard(opts: {
   dark: boolean;
   /** e.g. "Tempo" or "Robinhood Chain" */
   networkLabel: string;
+  /** A testnet payment (the default) says so in the footer; a mainnet one names the chain alone. */
+  testnet?: boolean;
 }): Promise<Blob> {
   await loadFonts();
   const p = opts.dark ? DARK : LIGHT;
@@ -197,7 +200,7 @@ export async function renderPaidPrivatelyCard(opts: {
   ctx.fillStyle = p.mute;
   ctx.font = `400 20px ${FONT}`;
   ctx.textAlign = "right";
-  ctx.fillText(`On ${opts.networkLabel} testnet`, W - 28, 644);
+  ctx.fillText(opts.testnet === false ? `On ${opts.networkLabel}` : `On ${opts.networkLabel} testnet`, W - 28, 644);
   ctx.textAlign = "left";
 
   return new Promise<Blob>((resolve, reject) => {

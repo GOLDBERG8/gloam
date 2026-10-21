@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "Terms of Use" };
 
 export default function TermsPage() {
   return (
-    <LegalLayout title="Terms of Use" updated="October 12, 2026">
+    <LegalLayout title="Terms of Use" updated="October 21, 2026">
       <p>
         These Terms of Use (“Terms”) govern access to and use of the websites,
         applications, documentation, and interfaces operated under gloam.trade
@@ -15,26 +15,36 @@ export default function TermsPage() {
         <a href="/cookies">Cookie Policy</a> explain what information we
         handle.
       </p>
-      <h2>1. Testnet only</h2>
+      <h2>1. Mainnet and testnet</h2>
       <p>
-        Gloam runs only on test networks: Tempo Moderato testnet and Robinhood
-        Chain testnet. The tokens you use with it are test tokens with no
-        monetary value. Do not send real assets to any Gloam address or
-        contract.
+        Gloam runs on mainnet and on testnets. On mainnet (Robinhood Chain and
+        Tempo, from Gloam&apos;s mainnet launch on 21 October 2026) you use
+        real assets, and you can lose them. Mainnet is beta software: deposits
+        have limits, a cash out costs 0.25% of its amount, and the contracts
+        were reviewed internally before launch, with an external audit planned
+        but not yet done. Only deposit what you can afford to lose.
+      </p>
+      <p>
+        On the testnets (Tempo Moderato testnet and Robinhood Chain testnet)
+        the tokens you use are test tokens with no monetary value. Do not send
+        real assets to a testnet address or contract.
       </p>
       <p>
         We may change, pause, reset or remove any part of the Services at any
-        time, including redeploying contracts, which can leave earlier test
-        balances unusable. Testnets themselves can also be reset or stop
-        working. We do not guarantee that the Services, or any test balance,
-        will be available.
+        time. On testnet this includes redeploying contracts, which can leave
+        earlier test balances unusable, and testnets themselves can also be
+        reset or stop working. On mainnet we can lower deposit limits or close
+        deposits at any time; cash outs and private payments are not limited,
+        and there is no admin withdraw. We do not guarantee that the Services,
+        or any test balance, will be available.
       </p>
       <h2>2. Experimental software</h2>
       <p>
-        Gloam is early-stage, experimental software for interacting with
-        blockchain networks, including Tempo and Robinhood Chain. Features such
-        as private balances, private payments, payroll, proofs and private
-        trading may be incomplete, unavailable, or change without notice. There
+        Gloam is early-stage, beta software for interacting with blockchain
+        networks, including Tempo and Robinhood Chain. Features such as private
+        balances, private payments, payroll, proofs and private trading may be
+        incomplete, unavailable, or change without notice. Stock tokens are on
+        testnet only, and private trading is not available on mainnet. There
         is no guarantee of uptime, correctness, or fitness for any purpose.
       </p>
       <h2>3. No custody</h2>
@@ -92,7 +102,7 @@ export default function TermsPage() {
       <h2>9. Third-party services</h2>
       <p>
         The Services may link to or depend on third parties (the Tempo and
-        Robinhood Chain testnets, RPCs, wallets, Tempo&apos;s fee sponsor,
+        Robinhood Chain networks, mainnet and testnet, RPCs, wallets, Tempo&apos;s fee sponsor,
         bridges, indexers, DEXs, analytics, Telegram, and Anthropic, whose API
         writes the answers of Glim, our Telegram helper). We do not control
         those services and are not liable for their acts, failures, or terms.

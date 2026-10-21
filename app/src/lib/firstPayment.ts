@@ -203,9 +203,9 @@ export function readFirstPaySuggestion(
 
 export const SHARE_URL = "https://gloam.trade";
 
-/** The post: no amount, no recipient, no address. */
-export function privatePayShareText(): string {
-  return `I just paid privately on Gloam. The amount and who I paid stay hidden.\n\nTry it on testnet: ${SHARE_URL}`;
+/** The post: no amount, no recipient, no address. A payment on a mainnet does not say testnet. */
+export function privatePayShareText(testnet: boolean = true): string {
+  return `I just paid privately on Gloam. The amount and who I paid stay hidden.\n\n${testnet ? "Try it on testnet" : "Try it"}: ${SHARE_URL}`;
 }
 
 export function xIntentUrl(text: string): string {

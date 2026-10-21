@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="October 13, 2026">
+    <LegalLayout title="Privacy Policy" updated="October 21, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -14,11 +14,15 @@ export default function PrivacyPage() {
         Blockchain transactions are public by nature unless a privacy protocol
         applies, and even then, guarantees are limited.
       </p>
-      <h2>1. Testnet only</h2>
+      <h2>1. Mainnet and testnet</h2>
       <p>
-        Gloam runs only on test networks: Tempo Moderato testnet and Robinhood
-        Chain testnet. The tokens you use with it are test tokens with no
-        value. Do not send real funds to any Gloam address or contract.
+        Gloam runs on two kinds of network. On mainnet (Robinhood Chain and
+        Tempo, from Gloam&apos;s mainnet launch on 21 October 2026) it handles
+        real money. It is beta software, with deposit limits, and it was
+        reviewed internally before launch; an external audit is planned. On
+        the testnets (Tempo Moderato testnet and Robinhood Chain testnet) the
+        tokens you use are test tokens with no value. Do not send real funds
+        to a testnet address or contract.
       </p>
       <h2>2. What Gloam never has</h2>
       <p>
@@ -50,8 +54,9 @@ export default function PrivacyPage() {
         Your browser talks to each network&apos;s RPC nodes and explorers
         directly. They see your IP address and the addresses you look up, under
         their own policies. When the app shows your public wallet&apos;s recent
-        activity, our server asks the Robinhood Chain testnet explorer for that
-        address.
+        activity, our server asks that network&apos;s explorer for that
+        address: the Robinhood Chain testnet explorer, or the Robinhood Chain
+        mainnet explorer when you are on mainnet.
       </p>
       <h2>4. Usage data</h2>
       <p>
@@ -148,8 +153,10 @@ export default function PrivacyPage() {
       <p>
         Beyond the transaction itself, which is public on chain, the relay
         keeps only a hashed rate-limit count and, for about three minutes, a
-        lock on each spend so the same proof is not sent twice. Relaying is free
-        on testnet.
+        lock on each spend so the same proof is not sent twice. The relay pays
+        the network fee for what it submits. On mainnet, the only fee Gloam
+        takes is 0.25% of a cash out, kept by the vault; on testnet nothing is
+        charged.
       </p>
       <h2>7. Sanctions screening</h2>
       <p>
@@ -298,8 +305,9 @@ export default function PrivacyPage() {
         <li>Telegram: runs the group and delivers its messages to Glim.</li>
         <li>Chainalysis: sanctions checks, when we turn them on.</li>
         <li>
-          The Tempo and Robinhood Chain testnet RPC nodes and explorers, and
-          Tempo&apos;s fee sponsor when you use Tempo Wallet.
+          The Tempo and Robinhood Chain RPC nodes and explorers, on mainnet and
+          testnet, and Tempo&apos;s fee sponsor when you use Tempo Wallet on
+          the testnet.
         </li>
         <li>
           WalletConnect (Reown), only when you choose Use a wallet app: its

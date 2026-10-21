@@ -719,7 +719,9 @@ export function SettingsView() {
         </div>
         {backupMsg && <Status>{backupMsg}</Status>}
         <p className="mt-5 text-[12.5px] leading-relaxed text-mute">
-          To stay private, keep money in your vault and send or trade from there.
+          {network.testnet
+            ? "To stay private, keep money in your vault and send or trade from there."
+            : "To stay private, keep money in your vault and send from there."}{" "}
           Cashing out shows the amount.
         </p>
       </Card>

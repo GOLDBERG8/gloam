@@ -178,12 +178,15 @@ export function KeysPanel({
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const active = (keys ?? []).filter((k) => k.revokedAt === null).length;
 
-  async function create(e: FormEvent) {
+  async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    // Once Gloam runs on a mainnet the form has a live key button (first, so Enter makes one) and a test key button.
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const env = liveKeys && submitter?.value !== "test" ? "live" : "test";
     setBusy(true);
     setErr(null);
     try {
-      const r = await portal<{ secret: string; key: KeyView }>("/keys", { method: "POST", body: { name: name.trim() || "Server", env: "test" } });
+      const r = await portal<{ secret: string; key: KeyView }>("/keys", { method: "POST", body: { name: name.trim() || "Server", env } });
       setReveal({ name: r.key.name, secret: r.secret, rotated: false });
       setName("");
       onChanged();
@@ -213,14 +216,26 @@ export function KeysPanel({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
-          <button type="submit" disabled={busy || active >= maxActive} className="btn btn-ink btn-lg shrink-0">
-            {busy ? "Making…" : "Make a test key"}
-          </button>
+          {liveKeys ? (
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button type="submit" value="live" disabled={busy || active >= maxActive} className="btn btn-ink btn-lg">
+                {busy ? "Making…" : "Make a live key"}
+              </button>
+              <button type="submit" value="test" disabled={busy || active >= maxActive} className="btn btn-quiet btn-lg">
+                Make a test key
+              </button>
+            </div>
+          ) : (
+            <button type="submit" disabled={busy || active >= maxActive} className="btn btn-ink btn-lg shrink-0">
+              {busy ? "Making…" : "Make a test key"}
+            </button>
+          )}
         </form>
         <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
-          Test keys (gloam_test_) work on Robinhood Chain testnet and Tempo testnet.
-          {liveKeys ? " Live keys work on mainnet." : " Live keys (gloam_live_) open when Gloam launches on mainnet."} Keep keys on your
-          server; the API does not answer browsers on other sites.
+          {liveKeys
+            ? "Live keys (gloam_live_) work on mainnet. Test keys (gloam_test_) work on Robinhood Chain testnet and Tempo testnet."
+            : "Test keys (gloam_test_) work on Robinhood Chain testnet and Tempo testnet. Live keys (gloam_live_) open when Gloam launches on mainnet."}{" "}
+          Keep keys on your server; the API does not answer browsers on other sites.
         </p>
         {err && (
           <div className="mt-3">

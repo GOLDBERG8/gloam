@@ -12,6 +12,7 @@ import {
   type BridgeQuote,
   type BridgeStatus,
 } from "@/lib/bridge";
+import { MAINNET_ENABLED } from "@/lib/networks";
 import { useNetwork } from "./NetworkProvider";
 
 const noopSubscribe = () => () => {};
@@ -219,8 +220,17 @@ function BridgeSheet({
 
         {network.chain.testnet && (
           <p className="mt-4 rounded-2xl bg-surface px-4 py-3 text-[12.5px] leading-relaxed text-soft">
-            Preview. This moves real money to {dest.chain} mainnet. The private balance there opens when Gloam goes to
-            mainnet.
+            {MAINNET_ENABLED ? (
+              <>
+                Preview. This moves real money to {dest.chain} mainnet, not to this testnet. Switch to {dest.chain} mainnet
+                to add it privately.
+              </>
+            ) : (
+              <>
+                Preview. This moves real money to {dest.chain} mainnet. The private balance there opens when Gloam goes to
+                mainnet.
+              </>
+            )}
           </p>
         )}
 

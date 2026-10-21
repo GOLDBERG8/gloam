@@ -14,11 +14,14 @@ const FILE_NAME = "gloam-paid-privately.png";
 export function PrivatePayShare({
   chainId,
   networkLabel,
+  testnet = true,
 }: {
   chainId: number;
   networkLabel: string;
+  /** A mainnet payment's post and image do not say testnet. */
+  testnet?: boolean;
 }) {
-  const text = privatePayShareText();
+  const text = privatePayShareText(testnet);
   const [shareSheet] = useState(() => {
     if (typeof navigator === "undefined" || typeof window === "undefined") return false;
     try {
@@ -42,6 +45,7 @@ export function PrivatePayShare({
       const blob = await renderPaidPrivatelyCard({
         dark: document.documentElement.getAttribute("data-theme") === "dark",
         networkLabel,
+        testnet,
       });
       const file = new File([blob], FILE_NAME, { type: "image/png" });
       if (shareSheet) {

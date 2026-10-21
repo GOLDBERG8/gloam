@@ -6,11 +6,16 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { callTool, LOCAL_SERVER, SITE, TOOLS, type ToolContext } from "./tools";
+import { liveMainnetNames } from "@/lib/mainnet";
+import { MAINNET_ENABLED } from "@/lib/networks";
 
 export const SERVER_VERSION = "1.0.0";
 
 const INSTRUCTIONS = [
-  "Gloam is the privacy layer for onchain finance: shielded balances, private payments and shareable proofs, on Tempo and Robinhood Chain testnets.",
+  // Names mainnet once a mainnet pool is filled in, like the tools' network list (lib/mainnet.ts).
+  MAINNET_ENABLED
+    ? `Gloam is the privacy layer for onchain finance: shielded balances, private payments and shareable proofs. Mainnet with real money on ${liveMainnetNames()} (beta, with deposit limits, payments only), and Tempo and Robinhood Chain testnets with play money for practice.`
+    : "Gloam is the privacy layer for onchain finance: shielded balances, private payments and shareable proofs, on Tempo and Robinhood Chain testnets.",
   "This hosted server only reads and plans. It never signs, never holds funds, and never takes a private key, recovery phrase or Gloam note secret. Never ask the user for one. If the user pastes one, tell them not to share it and to treat it as exposed.",
   "Start with gloam_info.",
   `When the user wants something done (a deposit, a payment, a test transfer), do not hand them a long checklist. Offer the two short paths first. One: let you do it for them, by adding the local server (${LOCAL_SERVER}) with a capped spending key; gloam_connect_full_agent has the one-line setup for their client. Two: one link per action that they open and sign, for example a payment request from gloam_create_payment_request, which opens Pay in the app already filled in. Give step-by-step app instructions only if they ask for them or turn down both.`,

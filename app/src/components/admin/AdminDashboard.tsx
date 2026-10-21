@@ -894,7 +894,7 @@ function PartnersPanel() {
         <Kpi label="Partners" value={n(data.partners.length)} sub={`${n(data.partners.reduce((s, p) => s + p.activeKeys, 0))} active keys`} />
         <Kpi label="Private payments" value={n(t?.privatePayments)} sub="relayed with a partner key" />
         <Kpi label="Public volume" value={fmtUsd(t?.publicVolumeUsd ?? 0)} sub={`${n((t?.cashOuts ?? 0) + (t?.deposits ?? 0))} cash outs and deposits`} />
-        <Kpi label="Would-be fees" value={fmtUsd(t?.commissionUsd ?? 0)} sub="testnet, nothing charged" />
+        <Kpi label="Would-be fees" value={fmtUsd(t?.commissionUsd ?? 0)} sub={MAINNET_ENABLED ? "partner fees not charged yet" : "testnet, nothing charged"} />
       </section>
       <Panel title="Partners">
         <DataTable

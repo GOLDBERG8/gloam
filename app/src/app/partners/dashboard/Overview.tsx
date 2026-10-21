@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SealDots } from "@/components/ui/SealDots";
+import { useMainnetLive } from "@/components/MainnetCountdown";
 import { getNetwork } from "@/lib/networks";
 import type { Activity, FeeSetting, Stats } from "./client";
 import { ago, ArrowIcon, Card, fmtInt, fmtUnits, fmtUsd, fullDate, Kpi, LockIcon } from "./ui";
@@ -177,6 +178,7 @@ export function Overview({
   loading: boolean;
   onQuickstart: () => void;
 }) {
+  const mainnetLive = useMainnetLive();
   if (!stats) {
     return (
       <div aria-busy="true" className="space-y-3">
@@ -201,7 +203,7 @@ export function Overview({
           value={fmtUsd(t.publicVolumeUsd)}
           sub={`${fmtInt(publicCount)} cash outs and deposits${t.unpriced ? `, ${t.unpriced} unpriced` : ""}`}
         />
-        <Kpi label="Would-be fees" value={fmtUsd(t.commissionUsd)} sub="testnet, nothing charged" />
+        <Kpi label="Would-be fees" value={fmtUsd(t.commissionUsd)} sub={mainnetLive ? "nothing charged yet" : "testnet, nothing charged"} />
         <Kpi label="Active keys" value={fmtInt(activeKeys)} sub={stats.lastActivity ? `last payment ${ago(stats.lastActivity)}` : "no payments yet"} />
       </div>
 
@@ -217,9 +219,10 @@ export function Overview({
           <ul className="divide-y divide-line">
             {(
               [
-                ["Private payment", `$${(fees.privatePaymentCents / 100).toFixed(2)} each`, stats.byNetwork.robinhood.private_payment + stats.byNetwork.tempo.private_payment, true],
-                ["Cash out", `${(fees.cashoutBps / 100).toFixed(2)}%`, stats.byNetwork.robinhood.cash_out + stats.byNetwork.tempo.cash_out, false],
-                ["Deposit", `${(fees.depositBps / 100).toFixed(2)}%`, stats.byNetwork.robinhood.deposit + stats.byNetwork.tempo.deposit, false],
+                // Totals cover every network, mainnets included once their pools are in.
+                ["Private payment", `$${(fees.privatePaymentCents / 100).toFixed(2)} each`, t.privatePayments, true],
+                ["Cash out", `${(fees.cashoutBps / 100).toFixed(2)}%`, t.cashOuts, false],
+                ["Deposit", `${(fees.depositBps / 100).toFixed(2)}%`, t.deposits, false],
               ] as const
             ).map(([k, v, n, sealed]) => (
               <li key={k} className="flex min-h-[56px] items-center justify-between gap-3 px-5 sm:px-6">

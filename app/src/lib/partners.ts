@@ -8,9 +8,11 @@
  *  - Deposits and cash outs cross between a public wallet and the vault, so
  *    their amount is public, and a fee can be a share of it (basis points).
  *  - Collecting a fee for real needs a fee output inside the circuits and the
- *    vault contract, which is part of the mainnet ceremony. On testnet nothing
- *    is charged: this file records what each partner's key brought in and the
- *    fee that would have applied under the partner's setting at the time.
+ *    vault contract, which the mainnet pools do not have yet. So nothing is
+ *    charged on any network, mainnet or testnet: this file records what each
+ *    partner's key brought in and the fee that would have applied under the
+ *    partner's setting at the time. The only fee taken on mainnet is Gloam's
+ *    own 0.25% on cash outs, kept by the pool.
  *
  * What is recorded per transaction: network, kind, tx hash, time, and for
  * public edges only the asset and amount (both already on chain). Never a note,

@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "Disclosures" };
 
 export default function DisclosuresPage() {
   return (
-    <LegalLayout title="Disclosures" updated="July 14, 2026">
+    <LegalLayout title="Disclosures" updated="October 21, 2026">
       <p>
         Please read these disclosures carefully before using Gloam or any related
         interface.
@@ -22,6 +22,34 @@ export default function DisclosuresPage() {
         Smart contracts may contain bugs, economic design flaws, or be exploited.
         Upgrades, admin keys, oracles, bridges, and sequencers introduce
         additional risk. Audits, if any, do not eliminate risk.
+      </p>
+      <h2>Mainnet is beta</h2>
+      <p>
+        From Gloam&apos;s mainnet launch on 21 October 2026, the mainnet pools
+        on Robinhood Chain and Tempo hold real money. They are beta software.
+        The contracts were reviewed internally before launch; an external
+        audit is planned and has not been done.
+      </p>
+      <p>
+        Deposits are capped during the beta: 500 per deposit and 25,000 in
+        total for each stablecoin, and 25,000 per deposit and 250,000 in total
+        for $GLOAM. Cash outs and private payments are never limited.
+        Deposits and private payments are free; a cash out costs 0.25% of its
+        amount.
+      </p>
+      <p>
+        At launch the owner and treasury is a single wallet (a multisig is
+        planned), and the Gloam team runs the relay. The relay only submits
+        transactions that are already proven and pays their network fee; it
+        cannot move or redirect money. No function lets the team take pooled
+        funds. Raising limits, adding assets or changing verifiers waits a
+        public three-day timelock; the owner can lower limits or close
+        deposits at once.
+      </p>
+      <p>
+        The testnets (Robinhood Chain testnet and Tempo Moderato) use test
+        tokens with no value and single-party development keys.
+        Mainnet uses the final keys from the 13-contributor trusted setup.
       </p>
       <h2>Privacy is not absolute</h2>
       <p>
@@ -45,7 +73,7 @@ export default function DisclosuresPage() {
       </p>
       <h2>Third-party & chain risk</h2>
       <p>
-        Robinhood Chain, Ethereum, bridges, RPCs, and other infrastructure may
+        Robinhood Chain, Tempo, Ethereum, bridges, RPCs, and other infrastructure may
         halt, reorg, censor, or fail. We do not control those systems.
       </p>
       <h2>Interface only</h2>

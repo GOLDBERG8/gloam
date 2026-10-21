@@ -6,6 +6,7 @@ import { Header } from "@/components/Header";
 import {
   CountdownDigits,
   LocalLaunchTime,
+  MainnetCopy,
   MainnetHeadline,
   MainnetHeroActions,
   MainnetLiveNote,
@@ -69,7 +70,9 @@ export default function MainnetPage() {
         <section className="mx-auto max-w-[1240px] px-6 py-20 sm:py-28">
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
             <div>
-              <h2 className="t-display-l max-w-[12ch]">What goes live</h2>
+              <h2 className="t-display-l max-w-[12ch]">
+                <MainnetCopy live="What is live" before="What goes live" />
+              </h2>
               <p className="mt-5 max-w-[34ch] text-[15px] leading-relaxed text-mute">
                 The same Gloam you can try today, with real money.
               </p>
@@ -90,7 +93,8 @@ export default function MainnetPage() {
             <MainnetTestnetLine />
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <AppLink href="/app" className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed">
-                Try the testnet <span aria-hidden>→</span>
+                {/* once live, /app opens on mainnet; the testnet is one pick away in its network menu */}
+                <MainnetCopy live="Open the app" before="Try the testnet" /> <span aria-hidden>→</span>
               </AppLink>
               <Link href="/docs/testnet" className="t-label inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-sealed">
                 Testnet guide <span aria-hidden>→</span>

@@ -814,13 +814,22 @@ function wrongAddress(s: string, team: boolean): boolean {
   return others.length > 0 && (team || TOKEN_TALK.test(s));
 }
 
-/** One sentence breaks a rule that dropping it fixes: an off-list link, email or handle, a wrong address, a price, a mainnet claim or date, posing as a person. */
+/**
+ * "Gloam is audited", "the contracts were fully audited": not true. Gloam had an
+ * internal review before mainnet; an external audit is planned, not done.
+ * "Not audited yet" and "an audit is planned" are fine.
+ */
+const AUDITED_CLAIM =
+  /\b(?:is|are|was|were|been|got|fully|already|externally|independently|professionally)\s+(?:fully\s+|externally\s+|independently\s+|professionally\s+)?audited\b/gi;
+
+/** One sentence breaks a rule that dropping it fixes: an off-list link, email or handle, a wrong address, a price, a mainnet claim or date, an "audited" claim, posing as a person. */
 function brokenSentence(s: string, team: boolean, okHandles: Set<string>, mainnetLive = false): boolean {
   if ((s.match(LINK_RE) ?? []).some((l) => !linkAllowed(l))) return true;
   if ((s.match(EMAIL_RE) ?? []).some((e) => e.toLowerCase() !== "hello@gloam.trade")) return true;
   for (const m of s.matchAll(HANDLE_RE)) if (!okHandles.has(m[1]!.toLowerCase())) return true;
   if (wrongAddress(s, team)) return true;
   if (TOKEN_PRICE.test(s)) return true;
+  for (const m of s.matchAll(AUDITED_CLAIM)) if (!negated(s, m.index ?? 0, m[0])) return true;
   // $GLOAM really is on Robinhood Chain mainnet; the app is the part that is not, until mainnet is live
   if (!mainnetLive && !ABOUT_TOKEN.test(s)) {
     for (const m of s.matchAll(MAINNET_LIVE)) if (!negated(s, m.index ?? 0, m[0])) return true;
@@ -888,8 +897,8 @@ export function tidyReply(raw: string): string {
  * phrase, key or deployment secret, or a payment code or claim link, sinks the
  * whole reply. A sentence with an off-list link, email or handle, an address
  * that is not $GLOAM's, a token price, a claim that the app is on mainnet
- * (until it is) or a date for it other than the announced one, or claiming to
- * be a person is dropped, and the rest goes out. A group reply that lost most
+ * (until it is) or a date for it other than the announced one, a claim that
+ * Gloam is audited, or claiming to be a person is dropped, and the rest goes out. A group reply that lost most
  * of its sentences is not sent at all.
  */
 export function cleanReply(raw: string, policy: ReplyPolicy): string | null {

@@ -4,17 +4,24 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { FlowField } from "@/components/ui/FlowField";
 import { SealedField } from "@/components/ui/SealedField";
+import { MainnetCopy } from "@/components/MainnetCountdown";
 import { robinhood } from "@/lib/chain";
+import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { CopyAddress, TokenFilm } from "./TokenClient";
 
 const GLOAM_TOKEN = "0xDcD885F5c60b3aD49F6D58718696417314e8724d";
 const ORYNTH_URL = "https://www.orynth.dev/projects/gloam";
 const EXPLORER_URL = `${robinhood.blockExplorers.default.url}/token/${GLOAM_TOKEN}`;
 
+/** The Robinhood Chain mainnet pool (the one that lists $GLOAM) is filled in. */
+const RH_MAINNET = mainnetPool(4663) !== null;
+
 export const metadata: Metadata = {
   title: "$GLOAM",
-  description:
-    "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, half of Gloam's fees buy it back, and from mainnet you can hold it privately.",
+  // Fixed at build time: says the pool holds it once the Robinhood Chain mainnet pool is filled in.
+  description: RH_MAINNET
+    ? "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, half of Gloam's fees buy it back, and you can hold it privately in the Robinhood Chain mainnet pool."
+    : "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, half of Gloam's fees buy it back, and from mainnet you can hold it privately.",
   alternates: { canonical: "/token" },
   openGraph: {
     title: "$GLOAM, the Gloam token",
@@ -128,11 +135,141 @@ const PHASES: Phase[] = [
   },
 ];
 
+/* ---------- the same, once mainnet is live ---------- */
+
+const LIVE_USES: typeof USES = [
+  { ...USES[0], when: "First vote next" },
+  {
+    ...USES[1],
+    body: "On mainnet, deposits and private payments are free and cash-outs carry a 0.25% fee. Half of Gloam's fees buy $GLOAM from the market: half of that is burned, half goes to the Gloam treasury.",
+    when: "Fees live on mainnet",
+  },
+  RH_MAINNET
+    ? {
+        ...USES[2],
+        body: "The Robinhood Chain mainnet pool lists $GLOAM next to USDG. Shield it (up to 25,000 per deposit and 250,000 in total during beta) and your balance leaves the public record, and you can still prove it to someone when you need to.",
+        when: "Live on mainnet",
+      }
+    : USES[2],
+  { ...USES[3], when: "Next" },
+];
+
+const LIVE_QUESTIONS: typeof QUESTIONS = QUESTIONS.map((x, i) =>
+  i === 0 && RH_MAINNET
+    ? { ...x, a: "Buybacks tie it to how much Gloam gets used, you can hold it privately in the Robinhood Chain mainnet vault, and holders get new features first." }
+    : i === 2
+      ? { ...x, a: "By the product, not the token. On mainnet a cash-out carries a 0.25% fee: half of Gloam's fees run the team and the service, half buy back $GLOAM. Orynth also pays a small creator fee on trades. Payroll and API fees come later." }
+      : x
+);
+
+const LIVE_PHASES: Phase[] = [
+  {
+    tag: "Done",
+    title: "Rails first",
+    done: true,
+    items: [
+      "$GLOAM live on Robinhood Chain, with a fixed supply and locked liquidity",
+      "Private payments live on Tempo and Robinhood Chain testnet",
+      "Trusted setup closed with 13 contributors",
+    ],
+  },
+  {
+    tag: "Done",
+    title: "Mainnet",
+    done: true,
+    items: [
+      `Gloam live on ${liveMainnetNames()} mainnet`,
+      ...(RH_MAINNET ? ["Shield $GLOAM in the Robinhood Chain pool: 25,000 per deposit, 250,000 in total during beta"] : []),
+      "Fees on: deposits and payments free, 0.25% on cash-outs, and half of Gloam's fees buy back $GLOAM",
+    ],
+  },
+  {
+    tag: "Next",
+    title: "Holders",
+    items: ["The first holder vote, held in the open", "Private voting with a proof of your balance", "Holders get new features first"],
+  },
+  {
+    tag: "Later",
+    title: "Run the network",
+    items: ["Relayers stake $GLOAM to help run Gloam"],
+  },
+];
+
 function Check() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M5 12.5l4.2 4.2L19 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+function UseRows({ uses }: { uses: typeof USES }) {
+  return (
+    <>
+      {uses.map((u) => (
+        <div
+          key={u.n}
+          className="grid grid-cols-1 gap-3 border-b border-line px-5 py-6 last:border-0 sm:grid-cols-[180px_minmax(0,1fr)_200px] sm:items-start sm:gap-8 sm:px-7"
+        >
+          <p className="flex items-baseline gap-3 text-[18px] tracking-[-0.01em] text-foreground">
+            <span className="tnum text-[13px] text-mute">{u.n}</span>
+            {u.title}
+          </p>
+          <p className="max-w-[60ch] text-[14.5px] leading-relaxed text-mute">{u.body}</p>
+          <span className="inline-flex w-fit items-center gap-2 rounded-full bg-sealed-soft px-3 py-1.5 text-[12.5px] font-medium text-sealed sm:justify-self-end">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-sealed" />
+            {u.when}
+          </span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function QuestionRows({ questions }: { questions: typeof QUESTIONS }) {
+  return (
+    <>
+      {questions.map((x) => (
+        <div key={x.q} className="grid grid-cols-1 gap-2 py-6 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] sm:gap-8">
+          <dt className="text-[17px] leading-snug tracking-[-0.01em]">{x.q}</dt>
+          <dd className="text-[14.5px] leading-relaxed text-mute">{x.a}</dd>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function PhaseList({ phases }: { phases: Phase[] }) {
+  return (
+    <ol className="relative">
+      {phases.map((p, i) => (
+        <li key={p.title} className="relative grid grid-cols-[28px_1fr] gap-5 pb-12 last:pb-0">
+          {i < phases.length - 1 && (
+            <span aria-hidden className="absolute left-[13px] top-8 bottom-0 w-px bg-line" />
+          )}
+          <span
+            aria-hidden
+            className={`relative mt-0.5 grid h-7 w-7 place-items-center rounded-full ${
+              p.done ? "bg-sealed text-panel" : "border border-line-strong bg-panel text-mute"
+            }`}
+          >
+            {p.done ? <Check /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+          </span>
+          <div className="min-w-0">
+            <p className="t-label">{p.tag}</p>
+            <p className="mt-1.5 text-[22px] leading-snug tracking-[-0.015em]">{p.title}</p>
+            <ul className="mt-4 space-y-2.5">
+              {p.items.map((it) => (
+                <li key={it} className="flex gap-3 text-[14.5px] leading-relaxed text-mute">
+                  <span aria-hidden className={`mt-[9px] h-1 w-1 shrink-0 rounded-full ${p.done ? "bg-sealed" : "bg-faint"}`} />
+                  <span className="min-w-0">{it}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -204,22 +341,7 @@ export default function TokenPage() {
               <h2 className="t-display-l mt-4 max-w-[18ch]">Four jobs for one token</h2>
 
               <div className="mt-12 overflow-hidden rounded-[18px] border border-line bg-panel">
-                {USES.map((u) => (
-                  <div
-                    key={u.n}
-                    className="grid grid-cols-1 gap-3 border-b border-line px-5 py-6 last:border-0 sm:grid-cols-[180px_minmax(0,1fr)_200px] sm:items-start sm:gap-8 sm:px-7"
-                  >
-                    <p className="flex items-baseline gap-3 text-[18px] tracking-[-0.01em] text-foreground">
-                      <span className="tnum text-[13px] text-mute">{u.n}</span>
-                      {u.title}
-                    </p>
-                    <p className="max-w-[60ch] text-[14.5px] leading-relaxed text-mute">{u.body}</p>
-                    <span className="inline-flex w-fit items-center gap-2 rounded-full bg-sealed-soft px-3 py-1.5 text-[12.5px] font-medium text-sealed sm:justify-self-end">
-                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-sealed" />
-                      {u.when}
-                    </span>
-                  </div>
-                ))}
+                <MainnetCopy live={<UseRows uses={LIVE_USES} />} before={<UseRows uses={USES} />} />
               </div>
             </div>
           </div>
@@ -233,12 +355,7 @@ export default function TokenPage() {
               <h2 className="t-display-l mt-4 max-w-[12ch]">What holders ask</h2>
             </div>
             <dl className="divide-y divide-line border-y border-line">
-              {QUESTIONS.map((x) => (
-                <div key={x.q} className="grid grid-cols-1 gap-2 py-6 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] sm:gap-8">
-                  <dt className="text-[17px] leading-snug tracking-[-0.01em]">{x.q}</dt>
-                  <dd className="text-[14.5px] leading-relaxed text-mute">{x.a}</dd>
-                </div>
-              ))}
+              <MainnetCopy live={<QuestionRows questions={LIVE_QUESTIONS} />} before={<QuestionRows questions={QUESTIONS} />} />
             </dl>
           </div>
         </section>
@@ -250,39 +367,14 @@ export default function TokenPage() {
               <p className="t-label">Roadmap</p>
               <h2 className="t-display-l mt-4 max-w-[12ch]">Where $GLOAM goes from here</h2>
               <p className="mt-5 max-w-[36ch] text-[15px] leading-relaxed text-mute">
-                Each step lands with the product, not before it. Mainnet goes live
-                Wednesday 21 October, 13:00 UTC.
+                Each step lands with the product, not before it.{" "}
+                <MainnetCopy
+                  live="Mainnet went live Wednesday 21 October, 13:00 UTC."
+                  before="Mainnet goes live Wednesday 21 October, 13:00 UTC."
+                />
               </p>
             </div>
-            <ol className="relative">
-              {PHASES.map((p, i) => (
-                <li key={p.title} className="relative grid grid-cols-[28px_1fr] gap-5 pb-12 last:pb-0">
-                  {i < PHASES.length - 1 && (
-                    <span aria-hidden className="absolute left-[13px] top-8 bottom-0 w-px bg-line" />
-                  )}
-                  <span
-                    aria-hidden
-                    className={`relative mt-0.5 grid h-7 w-7 place-items-center rounded-full ${
-                      p.done ? "bg-sealed text-panel" : "border border-line-strong bg-panel text-mute"
-                    }`}
-                  >
-                    {p.done ? <Check /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="t-label">{p.tag}</p>
-                    <p className="mt-1.5 text-[22px] leading-snug tracking-[-0.015em]">{p.title}</p>
-                    <ul className="mt-4 space-y-2.5">
-                      {p.items.map((it) => (
-                        <li key={it} className="flex gap-3 text-[14.5px] leading-relaxed text-mute">
-                          <span aria-hidden className={`mt-[9px] h-1 w-1 shrink-0 rounded-full ${p.done ? "bg-sealed" : "bg-faint"}`} />
-                          <span className="min-w-0">{it}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </li>
-              ))}
-            </ol>
+            <MainnetCopy live={<PhaseList phases={LIVE_PHASES} />} before={<PhaseList phases={PHASES} />} />
           </div>
         </section>
 

@@ -102,11 +102,14 @@ const NETWORK_PROP = {
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true } as const;
 
+/** "Leave out for both" until a mainnet is listed next to the two testnets. */
+const LEAVE_OUT = MAINNET_ENABLED ? "Leave out for every network." : "Leave out for both.";
+
 /** Where Gloam runs, as one honest line. Testnets only until a mainnet pool is filled in. */
 const STATUS = MAINNET_ENABLED
   ? `Mainnet, real money: ${NETWORK_KEYS.filter((k) => !getNetwork(k).testnet)
       .map((k) => `${getNetwork(k).label} (${getNetwork(k).chainId})`)
-      .join(" and ")}, with the trusted setup's final keys (13 contributors) and beta deposit limits. Testnets, play money: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys. Private trade (sealed swaps) is paused until its solvency accounting lands.`
+      .join(" and ")}, with the trusted setup's final keys (13 contributors) and beta deposit limits. Deposits and private payments are free; a cash out costs 0.25%. Beta software: reviewed internally before launch, external audit planned. Testnets, play money: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys. Private trade (sealed swaps) is paused until its solvency accounting lands.`
   : "Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Testnet proofs use development keys; the production ceremony is done (13 contributors) and mainnet deploys its final keys. Private trade (sealed swaps) is paused until its solvency accounting lands.";
 
 const WHAT_IS_PUBLIC =
@@ -144,11 +147,12 @@ export const TOOLS: Tool[] = [
   {
     name: "gloam_networks",
     title: "Networks and assets",
-    description:
-      "The networks Gloam runs on, with each vault (pool) address, the assets you can deposit (OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and faucets.",
+    description: MAINNET_ENABLED
+      ? "The networks Gloam runs on, mainnets first, with each vault (pool) address, the assets you can deposit (on mainnet: USDC.e, pathUSD, USDT0 and OUSD on Tempo, USDG and GLOAM on Robinhood Chain; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and the testnet faucets."
+      : "The networks Gloam runs on, with each vault (pool) address, the assets you can deposit (OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and faucets.",
     inputSchema: {
       type: "object",
-      properties: { network: { ...NETWORK_PROP, description: `${NETWORK_PROP.description} Leave out for both.` } },
+      properties: { network: { ...NETWORK_PROP, description: `${NETWORK_PROP.description} ${LEAVE_OUT}` } },
     },
     annotations: { title: "Networks and assets", ...READ, openWorldHint: false },
   },
@@ -159,7 +163,7 @@ export const TOOLS: Tool[] = [
       "Public totals for each Gloam vault, read from the chain: what it holds, and counts of deposits, private transfers, cash outs and payment messages. Totals only, no wallets. Cached about a minute.",
     inputSchema: {
       type: "object",
-      properties: { network: { ...NETWORK_PROP, description: `${NETWORK_PROP.description} Leave out for both.` } },
+      properties: { network: { ...NETWORK_PROP, description: `${NETWORK_PROP.description} ${LEAVE_OUT}` } },
     },
     annotations: { title: "Vault stats", ...READ, openWorldHint: true },
   },
@@ -508,6 +512,8 @@ function mppHowTo(args: Args): CallToolResult {
   const n = getNetwork(network);
   // The SDK's GLOAM_NETWORKS names the testnet vaults by chain ("tempo", "robinhood").
   const family = n.family;
+  // A mainnet gets the SDK 0.1.0 snippets: mainnetNetwork() for its vault and the final keys for proofs.
+  if (!n.testnet) return mppHowToMainnet(role, network);
   const currencyLine =
     family === "tempo"
       ? `      network: "tempo",                                   // PathUSD by default; for OUSD add:\n      // currency: "${OUSD}", decimals: 6,`
@@ -571,26 +577,120 @@ const mppx = Mppx.create({
 const res = await mppx.fetch("https://api.example.com/answer");`,
   };
   return ok({
-    what: "MPP (mpp.dev) is HTTP 402 for machines: a server answers WWW-Authenticate: Payment, the client pays and retries with Authorization: Payment, and gets a Payment-Receipt. Other MPP methods settle in public. The gloam method pays with a private transfer inside a Gloam vault, sealed to the payee's receive tag.",
-    whatIsPublic: "The chain sees shielded transfers: a nullifier and two commitments each. No amount, asset, payer or payee.",
+    ...MPP_HEAD,
     network,
-    ...(n.testnet
-      ? {}
-      : {
-          mainnet: `GLOAM_NETWORKS in @gloamtrade/sdk names the testnet vaults. On ${n.label} mainnet use its vault instead: pool ${n.pool}, deploy block ${n.deployBlock}, chain ${n.chainId} (gloam_networks has the assets). Real money.`,
-        }),
     install: "npm i mppx @gloamtrade/mppx-gloam @gloamtrade/sdk",
     ...(role !== "pay" ? { charge } : {}),
     ...(role !== "charge" ? { pay } : {}),
-    withoutMppx:
-      "@gloamtrade/mppx-gloam/core has the whole method with no mppx dependency: createGloamPaywall on the server, createGloamChargeCredential with parsePaymentChallenges on the client.",
-    noCode: `The local Gloam MCP server (${LOCAL_SERVER}) does this with no code: gloam_payment_requirements prices a resource as an MPP challenge (and x402), gloam_fetch_paid fetches a URL and pays a Gloam 402 privately, gloam_verify_payment checks a payment and sweeps it before you serve. It signs with its own key under spending limits. See gloam_connect_full_agent.`,
-    keys: "Keys, receive keys and notes stay in your own code or the local server. Never paste them into a chat or this hosted server.",
-    links: {
-      package: "https://www.npmjs.com/package/@gloamtrade/mppx-gloam",
-      readme: "https://github.com/cryptoduke01/gloam/tree/main/packages/mppx-gloam",
-      spec: "https://github.com/cryptoduke01/gloam/blob/main/docs/mpp/draft-gloam-charge-00.md",
-    },
+    ...MPP_TAIL,
+    status: STATUS,
+  });
+}
+
+const MPP_HEAD = {
+  what: "MPP (mpp.dev) is HTTP 402 for machines: a server answers WWW-Authenticate: Payment, the client pays and retries with Authorization: Payment, and gets a Payment-Receipt. Other MPP methods settle in public. The gloam method pays with a private transfer inside a Gloam vault, sealed to the payee's receive tag.",
+  whatIsPublic: "The chain sees shielded transfers: a nullifier and two commitments each. No amount, asset, payer or payee.",
+};
+
+const MPP_TAIL = {
+  withoutMppx:
+    "@gloamtrade/mppx-gloam/core has the whole method with no mppx dependency: createGloamPaywall on the server, createGloamChargeCredential with parsePaymentChallenges on the client.",
+  noCode: `The local Gloam MCP server (${LOCAL_SERVER}) does this with no code: gloam_payment_requirements prices a resource as an MPP challenge (and x402), gloam_fetch_paid fetches a URL and pays a Gloam 402 privately, gloam_verify_payment checks a payment and sweeps it before you serve. It signs with its own key under spending limits. See gloam_connect_full_agent.`,
+  keys: "Keys, receive keys and notes stay in your own code or the local server. Never paste them into a chat or this hosted server.",
+  links: {
+    package: "https://www.npmjs.com/package/@gloamtrade/mppx-gloam",
+    readme: "https://github.com/cryptoduke01/gloam/tree/main/packages/mppx-gloam",
+    spec: "https://github.com/cryptoduke01/gloam/blob/main/docs/mpp/draft-gloam-charge-00.md",
+  },
+};
+
+/**
+ * MPP on a mainnet, with the SDK 0.1.0 API: mainnetNetwork() gives the vault
+ * (null until its pool is published), and proofs use the trusted setup's final
+ * keys through circuitArtifactUrls(), never the testnet's development keys.
+ */
+function mppHowToMainnet(role: "pay" | "charge" | "both", network: NetworkKey): CallToolResult {
+  const n = getNetwork(network);
+  const family = n.family;
+  const name = family === "tempo" ? "Tempo" : "Robinhood Chain";
+  const asset =
+    family === "tempo"
+      ? { import: "TEMPO_USDCE", line: "      currency: TEMPO_USDCE, decimals: 6,                 // or TEMPO_PATHUSD, TEMPO_USDT0, TEMPO_OUSD" }
+      : { import: "RH_MAINNET_USDG", line: "      currency: RH_MAINNET_USDG, decimals: 6,             // or GLOAM_TOKEN with decimals: 18" };
+  const netLines = `const net = mainnetNetwork("${family}");                   // null until the pool is published
+if (!net) throw new Error("${name} mainnet pool not published yet");`;
+  const charge = {
+    steps: [
+      "Make a receive key once with generateReceiveKey() from @gloamtrade/sdk and keep it on the server. Its tag (gloamr1.…) is what payers pay to; the key itself never leaves your server.",
+      "Add the gloam method to mppx. Routes answer 402 with a WWW-Authenticate: Payment challenge, then check the payer's credential.",
+      "Before serving, the server sweeps the payment into a fresh note only it knows (save that note in beforeSubmit: it is the money). Until the sweep confirms, the payer could spend the payment back, so access waits for it.",
+      "The sweep is a mainnet proof, so it must use the final keys: circuitArtifactUrls(\"transfer\", net.chainId).",
+    ],
+    code: `import { Mppx } from "mppx/server";
+import { gloam } from "@gloamtrade/mppx-gloam/server";
+import { gloamChargeChainFromClient } from "@gloamtrade/mppx-gloam/core";
+import { artifactProver, circuitArtifactUrls, mainnetNetwork, relayIntent, ${asset.import} } from "@gloamtrade/sdk";
+
+${netLines}
+const mppx = Mppx.create({
+  secretKey: process.env.MPP_SECRET_KEY!,
+  methods: [
+    gloam({
+      network: net.chainId,                               // ${name} mainnet (${n.chainId}), real money
+${asset.line}
+      pools: { [net.chainId]: net.pool },                 // Gloam's mainnet vault
+      receiveKey,                                         // from generateReceiveKey(), stored server side
+      chain: gloamChargeChainFromClient(publicClient, { pool: net.pool, fromBlock: net.deployBlock }),
+      prove: artifactProver(circuitArtifactUrls("transfer", net.chainId)), // the final keys
+      submit: (intent) => relayIntent(intent),            // or your own wallet
+      beforeSubmit: (freshNote) => saveNote(freshNote),   // persist before the sweep goes out
+    }),
+  ],
+});
+
+export async function handler(request: Request) {
+  const r = await mppx.charge({ amount: "0.01" })(request);
+  if (r.status === 402) return r.challenge;
+  return r.withReceipt(Response.json({ answer: 42 }));
+}`,
+  };
+  const pay = {
+    steps: [
+      `The payer needs a private note in the same ${name} mainnet vault and asset (deposit first: see gloam_plan_deposit). Deposits are capped during the beta.`,
+      "Add the gloam method to an mppx client. On a 402 it checks the vault is Gloam's and the price is inside your policy, proves a private transfer to the payee's tag, and retries with Authorization: Payment.",
+      'mode "pull" lets the server broadcast your transfer, so you need no gas and the server learns nothing about your wallet; "push" broadcasts it yourself or through the Gloam relay.',
+      "Mainnet proofs must use the final keys: circuitArtifactUrls(\"transfer\", net.chainId).",
+    ],
+    code: `import { Mppx } from "mppx/client";
+import { gloam } from "@gloamtrade/mppx-gloam/client";
+import { artifactProver, circuitArtifactUrls, mainnetNetwork, relayIntent } from "@gloamtrade/sdk";
+
+${netLines}
+const mppx = Mppx.create({
+  polyfill: false,
+  methods: [
+    gloam({
+      getNote: ({ amountWei, currency }) => wallet.noteCovering(amountWei, currency), // { secret, amountWei, path }
+      prove: artifactProver(circuitArtifactUrls("transfer", net.chainId)), // the final keys
+      pools: { [net.chainId]: net.pool },                 // pay only into Gloam's mainnet vault
+      mode: "auto",                                       // pull when offered, else push
+      submit: (intent) => relayIntent(intent),            // only needed for push
+      policy: { maxAmountWei: 50_000n },                  // refuse anything bigger, before proving
+      beforeSubmit: (built) => wallet.keep(built.changeNote),
+    }),
+  ],
+});
+
+const res = await mppx.fetch("https://api.example.com/answer");`,
+  };
+  return ok({
+    ...MPP_HEAD,
+    network,
+    mainnet: `${name} mainnet: real money, beta software with deposit limits. mainnetNetwork("${family}") in @gloamtrade/sdk 0.1.0 returns this vault (pool ${n.pool}, deploy block ${n.deployBlock}, chain ${n.chainId}); getGloamNetwork("${network}") is the same network by key. GLOAM_NETWORKS.${family} stays the testnet.`,
+    install: "npm i mppx @gloamtrade/mppx-gloam@^0.1.0 @gloamtrade/sdk@^0.1.0",
+    ...(role !== "pay" ? { charge } : {}),
+    ...(role !== "charge" ? { pay } : {}),
+    ...MPP_TAIL,
     status: STATUS,
   });
 }

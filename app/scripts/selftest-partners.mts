@@ -72,7 +72,7 @@ const {
   DEFAULT_FEES,
 } = await import("../src/lib/partners");
 const { SIWE_STATEMENT, createSession, issueNonce, nonceAllowed, readSession, verifySignIn } = await import("../src/lib/partnersAuth");
-const { getNetwork } = await import("../src/lib/networks");
+const { getNetwork, MAINNET_ENABLED } = await import("../src/lib/networks");
 const { PROOF_ARTIFACTS } = await import("../src/lib/proofs/artifacts");
 const { CIRCUIT_ARTIFACTS } = await import("../src/lib/circuitArtifacts");
 const { encodeProof } = await import("../src/lib/proofs");
@@ -401,11 +401,13 @@ await test("portal: nonce, sign in, account, keys over HTTP", async () => {
 
   const made = await json(await keysPost(req("/api/partners/keys", { method: "POST", cookie, body: { name: "Server" } }) as never));
   assert.ok(made.ok && typeof made.data!.secret === "string");
-  const live = await keysPost(req("/api/partners/keys", { method: "POST", cookie, body: { name: "Live", env: "live" } }) as never);
-  assert.equal((await json(live)).error!.code, "live_unavailable");
+  const live = await json(await keysPost(req("/api/partners/keys", { method: "POST", cookie, body: { name: "Live", env: "live" } }) as never));
+  // Live keys open once a mainnet pool is filled in (lib/mainnet.ts); before that they are refused.
+  if (MAINNET_ENABLED) assert.ok(live.ok && typeof live.data!.secret === "string", "live keys open with mainnet");
+  else assert.equal(live.error!.code, "live_unavailable");
   const list = await json(await keysGet(req("/api/partners/keys", { cookie }) as never));
   const keys = list.data!.keys as { name: string }[];
-  assert.equal(keys.length, 1);
+  assert.equal(keys.length, MAINNET_ENABLED ? 2 : 1);
   assert.ok(!JSON.stringify(list).includes(made.data!.secret as string), "listing never shows the secret");
   assert.ok(!JSON.stringify(list).includes('"hash"'), "listing never shows the hash");
 });
