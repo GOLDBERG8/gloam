@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.cryptoduke01/gloam",
   "title": "Gloam",
-  "description": "Private stablecoin payments for people and AI agents, hosted or local with spending limits.",
-  "version": "1.1.0",
+  "description": "Private stablecoin payments for people and AI agents on mainnet, hosted or local with limits.",
+  "version": "1.2.0",
   "websiteUrl": "https://gloam.trade/docs/agents",
   "repository": {
     "url": "https://github.com/cryptoduke01/gloam",
@@ -20,11 +20,18 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@gloamtrade/mcp",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
+        {
+          "name": "GLOAM_NETWORK",
+          "description": "Default network for tools: tempo-mainnet or robinhood-mainnet (real money), tempo or robinhood (testnet, the default when unset).",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
         {
           "name": "GLOAM_AGENT_PRIVATE_KEY",
           "description": "The agent's key. With GLOAM_TEMPO_ACCOUNT it is a Tempo access key bound by the owner's onchain limits. Optional: without it the tools only read and plan.",

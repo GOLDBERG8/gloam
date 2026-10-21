@@ -1,13 +1,14 @@
 # Gloam plugins
 
-Agent plugins for [Gloam](https://gloam.trade): private stablecoin payments for AI agents on Tempo,
-with spending limits the agent cannot lift. The layout mirrors
+Agent plugins for [Gloam](https://gloam.trade): private stablecoin payments for AI agents on Tempo
+and Robinhood Chain, live on mainnet (beta) with the testnets for free practice, under spending
+limits the agent cannot lift. The layout mirrors
 [tempoxyz/plugins](https://github.com/tempoxyz/plugins), so the same marketplace works in Claude
 Code, Codex and Cursor.
 
 | Plugin | What it adds |
 | --- | --- |
-| [`gloam`](./plugins/gloam) | The Gloam MCP server (`npx -y @gloamtrade/mcp@0.2.0`, stdio) and two skills: `gloam` (pay, get paid and check limits safely) and `gloam-setup` (connect, and give the agent a capped Tempo access key) |
+| [`gloam`](./plugins/gloam) | The Gloam MCP server (`npx -y @gloamtrade/mcp@0.3.0`, stdio) and two skills: `gloam` (pay, get paid and check limits safely) and `gloam-setup` (connect, and give the agent a capped Tempo access key) |
 
 ## Install
 
@@ -49,7 +50,7 @@ Or in any `mcpServers` config (Gemini CLI: `~/.gemini/settings.json`):
 { "mcpServers": { "gloam": { "command": "npx", "args": ["-y", "@gloamtrade/mcp"] } } }
 ```
 
-The plugin pins the server to `@gloamtrade/mcp@0.2.0`, so a new server version reaches agents only
+The plugin pins the server to `@gloamtrade/mcp@0.3.0`, so a new server version reaches agents only
 through a plugin update. The plain commands above take the latest version.
 
 ### Or connect by URL, nothing installed
@@ -84,12 +85,12 @@ expires or the owner revokes it.
 
 ```sh
 # 1. Make the agent key and print what the owner signs (sends nothing, never prints the key)
-npx -y @gloamtrade/mcp authorize-access-key --owner 0xYOUR_TEMPO_ACCOUNT --generate --limit 10 --period 1d --expires 30d
+npx -y @gloamtrade/mcp authorize-access-key --network tempo-mainnet --owner 0xYOUR_TEMPO_ACCOUNT --generate --limit 10 --period 1d --expires 30d
 
 # 2. Authorize it from the owner wallet: Tempo Wallet (wallet_authorizeAccessKey), cast, or the raw call it prints
 
 # 3. Check it (read-only), then restart the agent
-npx -y @gloamtrade/mcp authorize-access-key --check --owner 0xYOUR_TEMPO_ACCOUNT
+npx -y @gloamtrade/mcp authorize-access-key --check --network tempo-mainnet --owner 0xYOUR_TEMPO_ACCOUNT
 ```
 
 In Claude Code, `/gloam:gloam-setup` walks through this. The full reference, including what the cap
@@ -125,12 +126,13 @@ registry/gloam/server.json          Official MCP Registry entry (npm package, st
    - Claude directory: submit the plugin folder (`plugins/gloam`) as a plugin bundle, and the hosted
      server (`https://www.gloam.trade/mcp`) as an MCP connector, at `https://claude.ai/directory/manage`.
    - Cursor: submit the repository URL at `https://cursor.com/marketplace/publish`. Disclose that the
-     plugin can sign transactions and move testnet funds once a key is configured.
+     plugin can sign transactions and move real funds on mainnet (or test funds on testnet) once a
+     key is configured.
    - MCP Registry: `registry/gloam/server.json` matches `mcpName` in the npm package. Authenticate the
      `io.github.cryptoduke01` namespace with GitHub and run `mcp-publisher publish` from `registry/gloam`.
 
 Bump `version` in the three `plugin.json` manifests, `plugin.json`, `registry/gloam/server.json`
-and the pinned `@gloamtrade/mcp@0.2.0` in `.mcp.json` and `mcp.json` together when the server's minor
+and the pinned `@gloamtrade/mcp@0.3.0` in `.mcp.json` and `mcp.json` together when the server's minor
 version changes.
 
 ## License

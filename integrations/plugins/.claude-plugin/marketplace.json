@@ -1,7 +1,7 @@
 {
   "name": "gloam",
   "metadata": {
-    "description": "Gloam plugins for AI agents: private stablecoin payments on Tempo with spending limits the agent cannot lift."
+    "description": "Gloam plugins for AI agents: private stablecoin payments on Tempo and Robinhood Chain, live on mainnet, with spending limits the agent cannot lift."
   },
   "owner": {
     "name": "Gloam"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "gloam",
-      "description": "Private stablecoin payments for agents on Tempo: pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
+      "description": "Private stablecoin payments for agents on Tempo and Robinhood Chain, live on mainnet: pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
       "source": "./plugins/gloam",
       "category": "finance",
       "homepage": "https://gloam.trade/docs/agents"

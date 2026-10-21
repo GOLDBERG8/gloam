@@ -2,17 +2,26 @@
 name: gloam
 description: >
   Use when the user wants an agent to pay for an x402 or MPP resource privately, fetch a paid URL,
-  hold or check a private (shielded) stablecoin balance on Tempo, charge for a resource and verify
-  a private payment, or see the agent's spending limits and spending report. For installing Gloam,
-  keys, access keys and limits, use gloam-setup.
+  hold or check a private (shielded) stablecoin balance on Tempo or Robinhood Chain, charge for a
+  resource and verify a private payment, or see the agent's spending limits and spending report.
+  For installing Gloam, keys, access keys and limits, use gloam-setup.
 license: MIT
 ---
 
 # Gloam
 
-Gloam gives the agent private stablecoin payments on Tempo through the `gloam` MCP server: the
-public chain sees a shielded transfer, not who paid whom or how much. It also has private execution
-tools for Robinhood Chain. Both networks are testnets.
+Gloam gives the agent private stablecoin payments on Tempo and Robinhood Chain through the `gloam`
+MCP server: the public chain sees a shielded transfer, not who paid whom or how much.
+
+Each chain has a mainnet and a testnet, and tools take a `network`:
+
+- `tempo-mainnet` and `robinhood-mainnet` are **real money** (beta). Deposits are capped at 500 of
+  a stablecoin (25,000 GLOAM) per deposit during the beta. Deposits and private payments are free;
+  cashing out costs 0.25%.
+- `tempo` and `robinhood` are the testnets: test funds with no value, for practice.
+
+`gloam_info` lists the networks this server has and its default. Always say which network a payment
+is on, and say plainly when it is real money.
 
 The server holds the money. Note secrets stay in its encrypted store and the agent works with note
 handles such as `n-k3x9p2qw7m`. Every tool that moves money checks the owner's limits first, and with
@@ -22,8 +31,9 @@ a Tempo access key the protocol enforces the owner's onchain cap as well.
 
 1. Call `gloam_get_limits` and `gloam_get_spending_report`. They say which assets, recipients and
    amounts are allowed, how much is left in the last 24 hours, and when limits expire.
-2. Tell the user what you are about to pay: amount, asset, network, recipient and what for. Wait for
-   a clear yes, unless the user already gave a budget that covers this payment.
+2. Tell the user what you are about to pay: amount, asset, network (mainnet or testnet), recipient
+   and what for. Wait for a clear yes, unless the user already gave a budget that covers this
+   payment. On mainnet this is real money.
 3. Make the payment with one execute tool. Do not repeat a payment whose result is unclear (see
    below).
 
@@ -44,7 +54,7 @@ revoked key mean the owner's cap did its job. Only the owner can change it.
 | Pay a 402 from a note handle | `gloam_execute_private_pay` | yes |
 | Move stablecoins into the private balance | `gloam_plan_shield`, then `gloam_execute_shield` | yes |
 | Get paid: receive tag, price a resource, verify a payment | `gloam_receive_tag`, `gloam_payment_requirements`, `gloam_verify_payment` | no (the verify sweep only moves money that was just received) |
-| Public testnet transfer on Robinhood Chain (funding only, fully visible) | `gloam_execute_transfer` | yes |
+| Public transfer of test ETH on Robinhood Chain testnet (funding only, fully visible) | `gloam_execute_transfer` | yes (test funds) |
 
 Prefer `gloam_fetch_paid` for paid URLs: it pays and retries in one call, and the payment header
 only reaches the conversation when a retry fails. Always pass `maxAmount` with the most the user agreed to.
@@ -65,8 +75,10 @@ only reaches the conversation when a retry fails. Always pass `maxAmount` with t
   `gloam_fetch_paid` and `paymentHeader` instead of paying again.
 - If a result is unknown or pending, call `gloam_list_notes` with `refresh: true` before anything
   else. Do not pay a second time to be safe.
-- Be honest about privacy. Deposits (shields) are public; the pool's anonymity set is small on
-  testnet. Quote `gloam_privacy_status` when the user asks how private something is.
+- Be honest about privacy. Deposits (shields) are public, and the mainnet pools are new, so the
+  crowd of notes to hide among is small at first. Quote `gloam_privacy_status` when the user asks
+  how private something is. Never call Gloam audited: it was reviewed internally before launch and
+  an external audit is planned. Private trading is not live.
 
 ## When tools return plans
 
