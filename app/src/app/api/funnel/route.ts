@@ -7,23 +7,24 @@ const PER_IP_PER_MIN = 20;
 
 /**
  * Claim-link counts (lib/funnel). The body is one event name from a fixed list
- * and nothing else is read or kept: no cookie, no id, no IP, no user agent.
- * Each call adds 1 to today's total.
+ * and whether it was mainnet or a testnet; nothing else is read or kept: no
+ * cookie, no id, no IP, no user agent. Each call adds 1 to today's total.
  */
 export async function POST(req: Request) {
   const rate = await hitRateLimit(clientIp(req), "funnel", PER_IP_PER_MIN);
   if (!rate.allowed) return new NextResponse(null, { status: 429 });
   let e: unknown;
+  let env: unknown;
   try {
     const text = await req.text();
     if (text.length > 200) return new NextResponse(null, { status: 413 });
-    e = (JSON.parse(text) as { e?: unknown }).e;
+    ({ e, env } = JSON.parse(text) as { e?: unknown; env?: unknown });
   } catch {
     return new NextResponse(null, { status: 400 });
   }
   if (!isFunnelEvent(e)) return new NextResponse(null, { status: 400 });
   try {
-    await addFunnel(e);
+    await addFunnel(e, env === "mainnet" || env === "testnet" ? env : undefined);
   } catch {
     // counting is best effort
   }

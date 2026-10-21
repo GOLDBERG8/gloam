@@ -50,6 +50,121 @@ type MetricsPayload = {
 
 type Tab = "overview" | "revenue" | "relay" | "users" | "events" | "partners" | "testers" | "bugs";
 
+/** The two views: real money, or the testnets' play money. Never mixed. */
+type Env = "mainnet" | "testnet";
+const ENV_KEY = "gloam.admin.env";
+
+/** The view to open: ?env= in the address, then the last one picked here, else mainnet. */
+function readEnv(): Env {
+  if (typeof window === "undefined") return "mainnet";
+  const q = new URLSearchParams(window.location.search).get("env");
+  if (q === "testnet" || q === "mainnet") return q;
+  try {
+    return window.localStorage.getItem(ENV_KEY) === "testnet" ? "testnet" : "mainnet";
+  } catch {
+    return "mainnet";
+  }
+}
+
+/** Mainnet opened on this UTC day (21 Oct 2026, 13:00 UTC). No mainnet event is older. */
+const MAINNET_DAY = "2026-10-21";
+
+function isMainnetNetwork(value: string): boolean {
+  return isNetworkKey(value) && !getNetwork(value).testnet;
+}
+
+function isMainnetChainId(value: string): boolean {
+  return NETWORK_KEYS.some((k) => !getNetwork(k).testnet && String(getNetwork(k).chainId) === value);
+}
+
+type ProductSummary = NonNullable<MetricsPayload["product"]>;
+
+type SideProduct = {
+  counters: Record<string, number>;
+  total: number;
+  dims: Record<string, number>;
+  daily: DailyCounters[];
+  recent: StoredEvent[];
+};
+
+/**
+ * Product events for one side. Every event has carried its network since
+ * mainnet opened, so mainnet's all-time counts come from the network
+ * breakdown and the testnets get the rest, older untagged events included.
+ * Per-day and per-field counts are kept per side from 21 Oct 2026 evening;
+ * mainnet's launch day is its all-time count less the days after it.
+ */
+function splitProduct(p: ProductSummary | undefined, env: Env): SideProduct {
+  const counters = p?.counters ?? {};
+  const dims = p?.dims ?? {};
+  const main = env === "mainnet";
+
+  const mainAll: Record<string, number> = {};
+  for (const [key, v] of Object.entries(dims)) {
+    const m = /^([^:|]+)\|network=(.+)$/.exec(key);
+    if (m && isMainnetNetwork(m[2]!)) mainAll[m[1]!] = (mainAll[m[1]!] ?? 0) + v;
+  }
+  const side: Record<string, number> = {};
+  for (const t of Object.keys(counters)) {
+    if (t === "total" || t.includes(":")) continue;
+    const v = main ? (mainAll[t] ?? 0) : Math.max(0, (counters[t] ?? 0) - (mainAll[t] ?? 0));
+    if (v > 0) side[t] = v;
+  }
+
+  const sideDims: Record<string, number> = {};
+  for (const [key, v] of Object.entries(dims)) {
+    const sided = /^(mainnet|testnet):(.+)$/.exec(key);
+    const body = sided ? sided[2]! : key;
+    const [, pair] = body.split("|");
+    if (!pair) continue;
+    const [field, value = ""] = pair.split("=");
+    if (field === "network" || field === "chainId") {
+      // The unsided count holds every event; the value itself says which side.
+      if (sided) continue;
+      const isMain = field === "network" ? isMainnetNetwork(value) : isMainnetChainId(value);
+      if (isMain === main) sideDims[body] = (sideDims[body] ?? 0) + v;
+    } else if (main) {
+      if (sided?.[1] === "mainnet") sideDims[body] = (sideDims[body] ?? 0) + v;
+    } else if (!sided) {
+      sideDims[body] = (sideDims[body] ?? 0) + v;
+    } else if (sided[1] === "mainnet") {
+      sideDims[body] = (sideDims[body] ?? 0) - v;
+    }
+  }
+  for (const k of Object.keys(sideDims)) if (!(sideDims[k]! > 0)) delete sideDims[k];
+
+  const days = p?.daily ?? [];
+  const later = (t: string) => days.filter((d) => d.day > MAINNET_DAY).reduce((a, d) => a + (d.counters[`mainnet:${t}`] ?? 0), 0);
+  const daily = days.map(({ day, counters: c }) => {
+    const out: Record<string, number> = {};
+    for (const t of Object.keys(c)) {
+      if (t === "total" || t.includes(":")) continue;
+      const mainDay =
+        day < MAINNET_DAY ? 0 : day === MAINNET_DAY ? Math.max(0, (mainAll[t] ?? 0) - later(t)) : (c[`mainnet:${t}`] ?? 0);
+      const v = main ? mainDay : Math.max(0, (c[t] ?? 0) - mainDay);
+      if (v > 0) out[t] = v;
+    }
+    return { day, counters: out };
+  });
+
+  const recent = (p?.recent ?? []).filter((ev) => {
+    const net = typeof ev.meta?.network === "string" ? ev.meta.network : null;
+    const isMain = ev.meta?.mainnet === true || (net !== null && isMainnetNetwork(net));
+    return isMain === main;
+  });
+
+  return { counters: side, total: Object.values(side).reduce((a, b) => a + b, 0), dims: sideDims, daily, recent };
+}
+
+/** One day of claim-link counts for a side; a day stored before the split is all testnet. */
+function claimSide(r: FunnelDay, env: Env) {
+  if (r.mainnet && r.testnet) return r[env];
+  const zero = { link_created: 0, link_opened: 0, link_claimed: 0, claimer_sent: 0 };
+  return env === "testnet"
+    ? { link_created: r.link_created, link_opened: r.link_opened, link_claimed: r.link_claimed, claimer_sent: r.claimer_sent }
+    : zero;
+}
+
 /** Events added for proofs, the public ledger, requests and notes; shown first in the breakdowns. */
 /** How often an open admin tab refreshes. Only while it is on screen: each refresh reads Redis. */
 const ADMIN_REFRESH_MS = 60_000;
@@ -126,6 +241,21 @@ export function AdminDashboard() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
+  const [env, setEnvState] = useState<Env>(readEnv);
+
+  /** Mainnet or testnet, kept in the address (?env=testnet) and in this browser. */
+  const setEnv = useCallback((next: Env) => {
+    setEnvState(next);
+    try {
+      window.localStorage.setItem(ENV_KEY, next);
+    } catch {
+      /* private window: the address still keeps it */
+    }
+    const url = new URL(window.location.href);
+    if (next === "testnet") url.searchParams.set("env", "testnet");
+    else url.searchParams.delete("env");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, []);
 
   const checkSession = useCallback(async () => {
     try {
@@ -240,7 +370,11 @@ export function AdminDashboard() {
   const ocError = data?.onchain && !("networks" in data.onchain) ? data.onchain.error : null;
   const product = data?.product;
   const relay = data?.relay;
-  const counters = useMemo(() => product?.counters ?? {}, [product?.counters]);
+  const isMain = env === "mainnet";
+  const prod = useMemo(() => splitProduct(product, env), [product, env]);
+  const counters = prod.counters;
+  // This side's totals. Snapshots cached before the split have neither and read as not yet.
+  const agg = oc ? (isMain ? oc.mainnet : oc.testnet) : undefined;
 
   const funnel = useMemo(() => {
     const payrollKey = PAYROLL_KEYS.find((k) => counters[k] != null) ?? PAYROLL_KEYS[0];
@@ -249,23 +383,23 @@ export function AdminDashboard() {
       { k: "Wallet connects", v: counters.wallet_connect ?? 0, sub: "wallet_connect" },
       {
         k: "First deposits",
-        v: oc?.combined.depositors ?? 0,
+        v: agg?.depositors ?? 0,
         sub: "unique depositor wallets, on-chain",
       },
       {
         k: "Private sends and payments",
         v: counters.private_send_submit ?? 0,
-        sub: `private_send_submit, ${n(oc?.combined.transfers)} landed on-chain`,
+        sub: `private_send_submit, ${n(agg?.transfers)} landed on-chain`,
       },
       { k: "Proofs created", v: counters.proof_created ?? 0, sub: "proof_created" },
       { k: "Payroll runs", v: counters[payrollKey] ?? 0, sub: payrollKey },
     ];
     const max = Math.max(1, ...steps.map((s) => s.v));
     return steps.map((s) => ({ ...s, pct: (s.v / max) * 100 }));
-  }, [counters, oc]);
+  }, [counters, agg]);
 
   const claim = useMemo(() => {
-    const rows = data?.claimLinks ?? [];
+    const rows = (data?.claimLinks ?? []).map((r) => ({ day: r.day, ...claimSide(r, env) }));
     const t = { link_created: 0, link_opened: 0, link_claimed: 0, claimer_sent: 0 };
     for (const r of rows) {
       t.link_created += r.link_created;
@@ -273,30 +407,33 @@ export function AdminDashboard() {
       t.link_claimed += r.link_claimed;
       t.claimer_sent += r.claimer_sent;
     }
-    const rate = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}% of ${b === t.link_created ? "links made" : "claims"}` : "");
     const steps = [
-      { k: "Claim links made", v: t.link_created, sub: "the payment landed" },
-      { k: "Opened in Gloam", v: t.link_opened, sub: rate(t.link_opened, t.link_created) },
-      { k: "Claimed", v: t.link_claimed, sub: rate(t.link_claimed, t.link_created) },
-      { k: "Claimers who then paid someone", v: t.claimer_sent, sub: rate(t.claimer_sent, t.link_claimed) },
+      { k: "Links made in the app", v: t.link_created, sub: "single and payroll, payment landed" },
+      { k: "Opened", v: t.link_opened, sub: "once per link per browser" },
+      { k: "Claimed", v: t.link_claimed, sub: "any claim link or code" },
+      {
+        k: "Claimers who then paid someone",
+        v: t.claimer_sent,
+        sub: t.link_claimed > 0 ? `${Math.round((t.claimer_sent / t.link_claimed) * 100)}% of claims` : "",
+      },
     ];
     const max = Math.max(1, ...steps.map((s) => s.v));
-    return { steps: steps.map((s) => ({ ...s, pct: (s.v / max) * 100 })), rows: [...rows].reverse() };
-  }, [data?.claimLinks]);
+    return { totals: t, steps: steps.map((s) => ({ ...s, pct: (s.v / max) * 100 })), rows: [...rows].reverse() };
+  }, [data?.claimLinks, env]);
 
   const days = useMemo(() => {
-    const eventsByDay = new Map((product?.daily ?? []).map((d) => [d.day, d.counters]));
-    const chain = oc?.combined.daily ?? [];
-    const allDays = chain.length ? chain.map((d) => d.day) : (product?.daily ?? []).map((d) => d.day);
+    const eventsByDay = new Map(prod.daily.map((d) => [d.day, d.counters]));
+    const chain = agg?.daily ?? [];
+    const allDays = chain.length ? chain.map((d) => d.day) : prod.daily.map((d) => d.day);
     const byDay = new Map<string, DayRow>(chain.map((d) => [d.day, d]));
     return allDays
       .map((day) => ({ day, chain: byDay.get(day) ?? null, ev: eventsByDay.get(day) ?? {} }))
       .reverse();
-  }, [oc, product?.daily]);
+  }, [agg, prod.daily]);
 
   const breakdowns = useMemo(() => {
     const groups = new Map<string, { field: string; value: string; v: number }[]>();
-    for (const [key, v] of Object.entries(product?.dims ?? {})) {
+    for (const [key, v] of Object.entries(prod.dims)) {
       const [event, pair] = key.split("|");
       if (!event || !pair) continue;
       const [field, value] = pair.split("=");
@@ -314,7 +451,7 @@ export function AdminDashboard() {
         event,
         list: list.sort((a, b) => a.field.localeCompare(b.field) || b.v - a.v),
       }));
-  }, [product?.dims]);
+  }, [prod.dims]);
 
   if (authed === null) {
     return (
@@ -398,24 +535,52 @@ export function AdminDashboard() {
   const nets = oc?.networks ?? [];
   const isTest = (m: NetworkMetrics) => m.testnet ?? getNetwork(m.key).testnet;
   const nameOf = (m: NetworkMetrics) => adminName(getNetwork(m.key));
-  const hasTest = nets.some(isTest);
-  // Real money first. Snapshots cached before the split carry only `combined`.
-  const real = oc?.mainnet ?? oc?.combined;
-  const test = oc?.testnet;
-  const totalHeads = MAINNET_ENABLED && hasTest ? ["Mainnet total", "Testnet total"] : ["Total"];
+  // Only this side's networks, everywhere below.
+  const sideNets = nets.filter((m) => isTest(m) !== isMain);
+  const rev = agg?.revenue;
+  // $GLOAM creator fees are real money on Robinhood Chain mainnet; the testnets have none.
+  const creator = isMain && oc?.creator && "earnedEth" in oc.creator ? oc.creator : null;
+  const revenue = rev ? revenueTotals(rev, creator) : null;
   const byNetwork = (
     f: (m: NetworkMetrics) => ReactNode,
-    total: (c: NonNullable<typeof real>) => ReactNode
-  ): ReactNode[] => [
-    ...nets.map((m) => f(m)),
-    ...(totalHeads.length === 2 ? [real ? total(real) : "", test ? total(test) : ""] : [oc ? total(oc.combined) : ""]),
+    total: (c: NonNullable<typeof agg>) => ReactNode
+  ): ReactNode[] => [...sideNets.map((m) => f(m)), agg ? total(agg) : ""];
+  const recentTx = (oc?.recent ?? []).filter(
+    (tx) => getNetwork(isNetworkKey(tx.network) ? tx.network : "robinhood").testnet !== isMain
+  );
+  const money = isMain ? "real money" : "play money";
+  // Bridge and swaps move real money only.
+  const shown: Tab = !isMain && tab === "relay" ? "overview" : tab;
+  const sideTabs: [Tab, string][] = [
+    ["overview", "Overview"],
+    ["revenue", isMain ? "Revenue" : "Fees"],
+    ...(isMain ? ([["relay", "Bridge and swaps"]] as [Tab, string][]) : []),
+    ["users", "Wallets"],
+    ["events", "Product events"],
   ];
-  // Revenue is real money only: mainnet vault fees plus $GLOAM creator fees.
-  const realRev = oc?.mainnet?.revenue;
-  const creator = oc?.creator && "earnedEth" in oc.creator ? oc.creator : null;
-  const revenue = realRev ? revenueTotals(realRev, creator) : null;
-  const testSub = (v: number | undefined, what: string) =>
-    MAINNET_ENABLED && test ? `mainnet, real money; ${n(v)} ${what} on testnet` : "both networks, on-chain";
+  const opsTabs: [Tab, string][] = [
+    ["partners", "Partners"],
+    ["testers", "Testers"],
+    ["bugs", "Bug reports"],
+  ];
+  const liveRelay = relay && "enabled" in relay && relay.enabled ? relay : null;
+  const claimed = claim.totals.link_claimed;
+  const made = claim.totals.link_created;
+
+  const tabButton = ([id, label]: [Tab, string]) => (
+    <button
+      key={id}
+      type="button"
+      role="tab"
+      aria-selected={shown === id}
+      onClick={() => setTab(id)}
+      className={`h-9 shrink-0 whitespace-nowrap rounded-full px-3.5 transition-colors sm:px-4 ${
+        shown === id ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div className="gloam-app min-h-dvh bg-background text-foreground">
@@ -429,7 +594,7 @@ export function AdminDashboard() {
           </div>
           <div className="flex items-center gap-1.5">
             <span className="mr-2 hidden text-[12px] text-mute sm:inline">
-              {product?.backend === "redis" ? "Redis" : "Memory"}, refreshes every 45s
+              {product?.backend === "redis" ? "Redis" : "Memory"}, refreshes every minute
             </span>
             <button
               type="button"
@@ -450,49 +615,41 @@ export function AdminDashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1200px] space-y-8 px-5 py-10 sm:px-8 sm:py-12">
+      <main className="mx-auto max-w-[1200px] space-y-6 px-5 py-10 sm:px-8 sm:py-12">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="t-display-m">Traction</h1>
-            <p className="mt-2 text-[14px] text-mute">
-              On-chain activity on Robinhood Chain and Tempo, and the product funnel, in one place.
-            </p>
-          </div>
-          {/* Tabs */}
-          <div
-            role="tablist"
-            aria-label="Dashboard sections"
-            className="flex self-start rounded-full bg-surface-2 p-1 text-[13px] sm:self-auto"
-          >
-            {(
-              [
-                ["overview", "Overview"],
-                ["revenue", "Revenue"],
-                ["relay", "Bridge and swaps"],
-                ["users", "Wallets"],
-                ["events", "Product events"],
-                ["partners", "Partners"],
-                ["testers", "Testers"],
-                ["bugs", "Bug reports"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={tab === id}
-                onClick={() => setTab(id)}
-                className={`h-9 rounded-full px-3.5 transition-colors sm:px-4 ${
-                  tab === id
-                    ? "bg-panel font-medium text-foreground shadow-card"
-                    : "text-mute hover:text-foreground"
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="t-display-m">{isMain ? "Traction" : "Testnet traction"}</h1>
+              <span
+                className={`rounded-full px-2.5 py-1 text-[12px] font-medium ${
+                  isMain ? "bg-sealed-soft text-sealed" : "bg-warn-soft text-warn"
                 }`}
               >
-                {label}
-              </button>
-            ))}
+                {isMain ? "Mainnet, real money" : "Testnet, play money"}
+              </span>
+            </div>
+            <p className="mt-2 max-w-[60ch] text-[14px] leading-relaxed text-mute">
+              {isMain
+                ? "Robinhood Chain and Tempo mainnet: money people really moved, what it earned, and the product funnel."
+                : "Robinhood Chain and Tempo testnets: play money from testing. None of it counts toward mainnet."}
+            </p>
+          </div>
+          <EnvSwitch env={env} onChange={setEnv} />
+        </div>
+
+        <div className="-mx-5 overflow-x-auto px-5 sm:mx-0 sm:px-0">
+          <div role="tablist" aria-label="Dashboard sections" className="flex w-max items-center gap-0.5 rounded-full bg-surface-2 p-1 text-[13px]">
+            {sideTabs.map(tabButton)}
+            <span aria-hidden className="mx-1.5 h-5 w-px shrink-0 bg-line-strong" />
+            {opsTabs.map(tabButton)}
           </div>
         </div>
+
+        {!isMain && (
+          <p className="rounded-xl bg-warn-soft px-4 py-3 text-[14px] leading-relaxed text-warn">
+            You are looking at the testnets. Everything here is play money from testing; switch to Mainnet for real numbers.
+          </p>
+        )}
 
         {loadErr && (
           <p className="rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger" role="alert">
@@ -503,7 +660,7 @@ export function AdminDashboard() {
         {!data && !loadErr && (
           <p className="flex items-center gap-2.5 rounded-xl bg-surface px-4 py-3 text-[14px] text-mute" role="status">
             <span className="livedot h-2 w-2 rounded-full bg-foreground/60" />
-            Reading both chains. The first read after a deploy can take half a minute.
+            Reading the chains. The first read after a deploy can take half a minute.
           </p>
         )}
 
@@ -513,7 +670,7 @@ export function AdminDashboard() {
           </p>
         )}
 
-        {nets
+        {sideNets
           .filter((m) => m.error || m.catchingUp)
           .map((m) => (
             <p
@@ -528,94 +685,71 @@ export function AdminDashboard() {
             </p>
           ))}
 
-        {tab === "overview" && (
+        {shown === "overview" && (
           <>
             <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Kpi
                 label="TVL"
-                value={fmtUsd(real?.heldUsd ?? 0)}
-                sub={
-                  real?.unpriced.length
-                    ? `plus ${real.unpriced.length} unpriced`
-                    : MAINNET_ENABLED && test
-                      ? `real money; ${fmtUsd(test.heldUsd)} test money on testnet`
-                      : "priced holdings"
-                }
+                value={agg ? fmtUsd(agg.heldUsd) : "Not read yet"}
+                sub={agg?.unpriced.length ? `${money}, plus ${agg.unpriced.length} unpriced` : `${money}, held in the vaults`}
               />
               <Kpi
-                label="Revenue, 30 days"
+                label={isMain ? "Revenue, 30 days" : "Fees, 30 days"}
                 value={revenue ? fmtUsd(revenue.total.d30) : "Not read yet"}
                 sub={revenue ? `${fmtUsd(revenue.total.all)} all time` : "after the next chain read"}
               />
               <Kpi
                 label="Volume, 30 days"
-                value={realRev ? fmtUsd(realRev.depositVolume.d30 + realRev.cashoutVolume.d30) : "Not read yet"}
-                sub={realRev ? `${fmtUsd(realRev.depositVolume.d30)} in, ${fmtUsd(realRev.cashoutVolume.d30)} out` : "deposits and cash-outs"}
+                value={rev ? fmtUsd(rev.depositVolume.d30 + rev.cashoutVolume.d30) : "Not read yet"}
+                sub={rev ? `${fmtUsd(rev.depositVolume.d30)} in, ${fmtUsd(rev.cashoutVolume.d30)} out` : "deposits and cash-outs"}
               />
               <Kpi
                 label="Active wallets, 7 days"
-                value={realRev ? n(realRev.users.d7) : "Not read yet"}
-                sub={realRev ? `${n(realRev.users.d1)} in 24h, ${n(realRev.users.d30)} in 30 days` : "deposited or cashed out"}
+                value={rev ? n(rev.users.d7) : "Not read yet"}
+                sub={rev ? `${n(rev.users.d1)} in 24h, ${n(rev.users.d30)} in 30 days` : "deposited or cashed out"}
               />
             </section>
 
             <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Kpi label="Depositor wallets" value={n(agg?.depositors)} sub="deposited at least once" />
+              <Kpi label="Private transfers" value={n(agg?.transfers)} sub="all time, on-chain" />
               <Kpi
-                label="Depositor wallets"
-                value={n(real?.depositors)}
-                sub={testSub(test?.depositors, "more")}
-              />
-              <Kpi
-                label="Private transfers"
-                value={n(real?.transfers)}
-                sub={testSub(test?.transfers, "more")}
-              />
-              <Kpi
-                label="Transactions, 30 days"
-                value={realRev ? n(realRev.txs.d30) : "Not read yet"}
-                sub={realRev ? `${n(realRev.txs.all)} all time, on-chain` : "deposits, transfers, cash-outs"}
+                label="Cash-outs"
+                value={n(agg?.cashouts)}
+                sub={rev ? `${n(rev.txs.all)} transactions in all` : "all time, on-chain"}
               />
               <Kpi
                 label="Claim links, 14 days"
-                value={`${n(claim.steps[2]?.v)} claimed`}
-                sub={`of ${n(claim.steps[0]?.v)} made, ${n(claim.steps[1]?.v)} opened`}
+                value={`${n(claimed)} claimed`}
+                sub={`${n(made)} made in the app, ${n(claim.totals.link_opened)} opened`}
               />
             </section>
 
-            <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Kpi
-                label="Bridges and swaps, 30 days"
-                value={
-                  relay && "enabled" in relay && relay.enabled
-                    ? fmtUsd(relay.last30.bridge.inUsd + relay.last30.swap.inUsd)
-                    : n((counters.bridge_arrived ?? 0) + (counters.swap_success ?? 0))
-                }
-                sub={
-                  relay && "enabled" in relay && relay.enabled
-                    ? `${n(relay.last30.bridge.count)} bridges, ${n(relay.last30.swap.count)} swaps`
-                    : "finished, from product events"
-                }
-              />
-              <Kpi
-                label="Product events"
-                value={n(product?.totalEvents)}
-                sub={product?.backend ?? "unknown"}
-              />
-              <Kpi
-                label="Last activity"
-                value={fmtWhen(real?.lastActivity)}
-                sub={`first ${fmtWhen(real?.firstActivity)}`}
-              />
-              <Kpi
-                label="Chain read"
-                value={oc ? fmtAge(oc.ageSec) : "Not yet"}
-                sub={oc ? `${oc.source === "fresh" ? "just read" : `cached in ${oc.source}`}` : "waiting"}
-              />
-            </section>
+            <p className="flex flex-wrap gap-x-6 gap-y-1.5 text-[13px] text-mute">
+              <span>
+                Last activity <span className="text-soft">{fmtWhen(agg?.lastActivity)}</span>
+              </span>
+              <span>
+                Chain read <span className="text-soft">{oc ? `${fmtAge(oc.ageSec)}, ${oc.source === "fresh" ? "just now" : `cached in ${oc.source}`}` : "not yet"}</span>
+              </span>
+              <span>
+                Product events <span className="tnum text-soft">{n(prod.total)}</span>
+              </span>
+              {isMain && (
+                <span>
+                  Bridges and swaps, 30 days{" "}
+                  <span className="tnum text-soft">
+                    {liveRelay
+                      ? `${fmtUsd(liveRelay.last30.bridge.inUsd + liveRelay.last30.swap.inUsd)} in ${n(liveRelay.last30.bridge.count + liveRelay.last30.swap.count)}`
+                      : n((counters.bridge_arrived ?? 0) + (counters.swap_success ?? 0))}
+                  </span>
+                </span>
+              )}
+            </p>
 
             <Panel title="By network">
               <DataTable
-                headers={["", ...nets.map(nameOf), ...totalHeads]}
+                headers={["", ...sideNets.map(nameOf), "Total"]}
                 rows={[
                   ["Deposits", ...byNetwork((m) => n(m.deposits), (c) => n(c.deposits))],
                   ["Private transfers", ...byNetwork((m) => n(m.transfers), (c) => n(c.transfers))],
@@ -642,8 +776,8 @@ export function AdminDashboard() {
                   [
                     "Cash-out fees",
                     ...byNetwork(
-                      (m) => (isTest(m) ? "Not counted" : m.revenue ? fmtUsd(m.revenue.fees.all) : ""),
-                      (c) => (c === test ? "Not counted" : c.revenue ? fmtUsd(c.revenue.fees.all) : "")
+                      (m) => (m.revenue ? fmtUsd(m.revenue.fees.all) : ""),
+                      (c) => (c.revenue ? fmtUsd(c.revenue.fees.all) : "")
                     ),
                   ],
                   ["First activity", ...byNetwork((m) => fmtWhen(m.firstActivity), (c) => fmtWhen(c.firstActivity))],
@@ -668,13 +802,11 @@ export function AdminDashboard() {
                   ],
                   ["Read to block", ...byNetwork((m) => `#${m.scannedTo}`, () => "")],
                 ]}
-                empty="No on-chain figures yet"
+                empty={isMain ? "No mainnet vault read yet" : "No testnet vault read yet"}
               />
               <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                Current vaults only. Active wallets deposited or received a cash-out;
-                transfers and trades carry no wallet. Totals count a wallet used on both
-                networks once. Testnet money is play money and never counts toward the
-                mainnet total.
+                Current vaults only, {money}. Active wallets deposited or received a cash-out; transfers and trades carry
+                no wallet. The total counts a wallet used on both networks once.
               </p>
             </Panel>
 
@@ -682,8 +814,11 @@ export function AdminDashboard() {
               <Panel title="Claim links, last 14 days">
                 <BarChart rows={claim.steps} />
                 <p className="mt-5 text-[13px] leading-relaxed text-mute">
-                  Totals only, counted without cookies or ids. Opened counts each link once per
-                  browser; a claimer&apos;s first own payment counts once per browser.
+                  Totals only, counted without cookies or ids. Claimed can run ahead of made: claims count every claim link
+                  or code, while made counts only links made in this app whose payment landed (payroll links since 21 Oct;
+                  codes from the SDK, agents or before 13 Oct are not counted). Opened counts each link once per browser, so a
+                  link opened in a chat app and again in a wallet counts twice. Split by network since 21 Oct 2026 evening;
+                  older counts are in Testnet.
                 </p>
               </Panel>
               <Panel title="Claim links by day">
@@ -700,8 +835,8 @@ export function AdminDashboard() {
               <Panel title="Funnel">
                 <BarChart rows={funnel} />
                 <p className="mt-5 text-[13px] leading-relaxed text-mute">
-                  Event counts, not unique people, except first deposits, which are unique
-                  wallets read from the chain. Recording demo sessions are not counted.
+                  Event counts, not unique people, except first deposits, which are unique wallets read from the chain.
+                  Recording demo sessions are not counted.
                 </p>
               </Panel>
               <Panel title="Last 14 days">
@@ -721,8 +856,7 @@ export function AdminDashboard() {
                   minWidth={620}
                 />
                 <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                  UTC days. Active wallets deposited or received a cash-out that day, on either
-                  network.
+                  UTC days. Active wallets deposited or received a cash-out that day.
                 </p>
               </Panel>
             </div>
@@ -730,7 +864,7 @@ export function AdminDashboard() {
             <Panel title="Held by asset">
               <DataTable
                 headers={["Network", "Asset", "Held now", "USD", "Deposited", "Cashed out"]}
-                rows={nets.flatMap((m) =>
+                rows={sideNets.flatMap((m) =>
                   m.assets.map((a) => [
                     nameOf(m),
                     a.symbol,
@@ -752,7 +886,7 @@ export function AdminDashboard() {
             <Panel title="Recent on-chain activity">
               <DataTable
                 headers={["Network", "Kind", "Detail", "Wallet", "Tx", "When"]}
-                rows={(oc?.recent ?? []).map((tx) => {
+                rows={recentTx.map((tx) => {
                   const net = getNetwork(isNetworkKey(tx.network) ? tx.network : "robinhood");
                   return [
                     adminName(net),
@@ -791,15 +925,14 @@ export function AdminDashboard() {
           </>
         )}
 
-        {tab === "users" && (
+        {shown === "users" && (
           <Panel title="Depositors (by activity)">
             <p className="mb-4 text-[14px] text-mute">
-              Unique wallets that deposited into a current vault, per network. A wallet used
-              on both networks shows twice.
+              Unique wallets that deposited into a current vault, per network. A wallet used on both networks shows twice.
             </p>
             <DataTable
               headers={["#", "Network", "Address", "Deposits", "Last deposit", "Explorer"]}
-              rows={nets
+              rows={sideNets
                 .flatMap((m) => m.topDepositors.map((u) => ({ ...u, key: m.key, label: nameOf(m) })))
                 .sort((a, b) => b.deposits - a.deposits || b.lastTs - a.lastTs)
                 .map((u, i) => [
@@ -825,11 +958,15 @@ export function AdminDashboard() {
           </Panel>
         )}
 
-        {tab === "events" && (
+        {shown === "events" && (
           <>
+            <p className="text-[13px] leading-relaxed text-mute">
+              {isMain
+                ? "Events from mainnet only, counted for visitors who accepted analytics. Every event has carried its network since mainnet opened on 21 Oct 2026; per-day and per-field counts are split from that evening."
+                : "Events from the testnets, counted for visitors who accepted analytics. Events from before networks were tagged (21 Oct 2026) count here."}
+            </p>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               {Object.entries(counters)
-                .filter(([k]) => k !== "total")
                 .sort((a, b) => b[1] - a[1])
                 .map(([k, v]) => (
                   <Kpi key={k} label={k} value={n(v)} sub={NEW_EVENTS.includes(k) ? "count, new" : "count"} />
@@ -837,8 +974,8 @@ export function AdminDashboard() {
             </div>
             <Panel title="Breakdowns">
               <p className="mb-4 text-[14px] text-mute">
-                Kinds, networks and yes or no fields only. Events never carry amounts, names,
-                addresses, labels, notes or proofs.
+                Kinds, networks and yes or no fields only. Events never carry amounts, names, addresses, labels, notes or
+                proofs.
               </p>
               <DataTable
                 headers={["Event", "Field", "Value", "Count"]}
@@ -858,7 +995,7 @@ export function AdminDashboard() {
             <Panel title="Event stream">
               <DataTable
                 headers={["Event", "Path", "Details", "Time"]}
-                rows={(product?.recent ?? []).map((ev) => [
+                rows={prod.recent.map((ev) => [
                   <span key="t" className="text-foreground">
                     {ev.t}
                   </span>,
@@ -866,7 +1003,7 @@ export function AdminDashboard() {
                   metaText(ev.meta),
                   new Date(ev.ts).toLocaleString(),
                 ])}
-                empty="No product events, open /app to generate traffic"
+                empty={isMain ? "No mainnet events among the latest ones" : "No testnet events among the latest ones"}
               />
             </Panel>
             {product?.backend === "memory" && (
@@ -881,21 +1018,23 @@ export function AdminDashboard() {
           </>
         )}
 
-        {tab === "revenue" && (
+        {shown === "revenue" && (
           <RevenuePanel
+            env={env}
             oc={oc}
+            nets={sideNets}
             revenue={revenue}
-            realRev={realRev}
+            rev={rev}
             creator={creator}
             bridgeFeeBps={data?.revenueConfig?.bridgeFeeBps ?? null}
           />
         )}
 
-        {tab === "relay" && <RelayPanel relay={relay} counters={counters} dims={product?.dims ?? {}} />}
+        {shown === "relay" && <RelayPanel relay={relay} counters={counters} dims={prod.dims} />}
 
-        {tab === "partners" && <PartnersPanel />}
-        {tab === "testers" && <TestersPanel />}
-        {tab === "bugs" && <BugsPanel />}
+        {shown === "partners" && <PartnersPanel />}
+        {shown === "testers" && <TestersPanel />}
+        {shown === "bugs" && <BugsPanel />}
 
         <p className="tnum text-[12px] text-mute">
           Generated {data?.generatedAt ?? "not yet"} ·{" "}
@@ -907,6 +1046,34 @@ export function AdminDashboard() {
           </Link>
         </p>
       </main>
+    </div>
+  );
+}
+
+/** Mainnet or Testnet: two separate views, never mixed. */
+function EnvSwitch({ env, onChange }: { env: Env; onChange: (e: Env) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Network" className="flex shrink-0 self-start rounded-full bg-surface-2 p-1 text-[13px] sm:self-auto">
+      {(
+        [
+          ["mainnet", "Mainnet", "bg-sealed"],
+          ["testnet", "Testnet", "bg-warn"],
+        ] as const
+      ).map(([id, label, dot]) => (
+        <button
+          key={id}
+          type="button"
+          role="radio"
+          aria-checked={env === id}
+          onClick={() => onChange(id)}
+          className={`inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-full px-4 transition-colors ${
+            env === id ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"
+          }`}
+        >
+          <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1047,184 +1214,219 @@ function fmtEth(v: number | null | undefined): string {
 }
 
 function RevenuePanel({
+  env,
   oc,
+  nets,
   revenue,
-  realRev,
+  rev,
   creator,
   bridgeFeeBps,
 }: {
+  env: Env;
   oc: OnchainMetrics | null;
+  /** This side's networks only. */
+  nets: NetworkMetrics[];
   revenue: ReturnType<typeof revenueTotals> | null;
-  realRev: CombinedRevenue | undefined;
+  rev: CombinedRevenue | undefined;
   creator: CreatorFees | null;
   bridgeFeeBps: number | null;
 }) {
-  if (!oc || !realRev || !revenue) {
+  if (!oc || !rev || !revenue) {
     return (
       <p className="flex items-center gap-2.5 rounded-xl bg-surface px-4 py-3 text-[14px] text-mute" role="status">
         <span className="livedot h-2 w-2 rounded-full bg-foreground/60" />
-        Revenue appears after the next chain read. Press Refresh.
+        {env === "mainnet" ? "Revenue" : "Fees"} appear after the next chain read. Press Refresh.
       </p>
     );
   }
-  const creatorErr = oc.creator && !("earnedEth" in oc.creator) ? oc.creator.error : (creator?.error ?? null);
-  const mainnets = oc.networks.filter((m) => !(m.testnet ?? getNetwork(m.key).testnet));
+  const isMain = env === "mainnet";
+  const word = isMain ? "Revenue" : "Fees";
+  const kept = isMain ? "fees kept, real money" : "play money, not revenue";
+  const creatorErr = isMain ? (oc.creator && !("earnedEth" in oc.creator) ? oc.creator.error : (creator?.error ?? null)) : null;
   const bpsOf = (m: NetworkMetrics) => m.revenue?.feeBps;
-  const feeLine = mainnets
+  const feeLine = nets
     .map((m) => `${adminName(getNetwork(m.key))} ${bpsOf(m) == null ? "unknown" : `${((bpsOf(m) ?? 0) / 100).toFixed(2)}%`}`)
     .join(", ");
   const w = (v: Windowed | null | undefined, k: keyof Windowed) => (v ? fmtUsd(v[k]) : "Unknown");
-  const daily = realRev.daily
+  const daily = rev.daily
     .map((d) => {
       const c = creator?.daily.find((x) => x.day === d.day);
       return { ...d, creatorUsd: c?.usd ?? null, creatorEth: c?.eth ?? 0 };
     })
     .reverse();
 
+  const feesByAsset = (
+    <Panel title="Cash-out fees by asset">
+      <DataTable
+        headers={["Network", "Asset", "Earned", "USD", "Cash-outs", "Waiting", "Collected"]}
+        rows={nets.flatMap((m) =>
+          (m.revenue?.feeRows ?? []).map((r) => [
+            adminName(getNetwork(m.key)),
+            r.symbol,
+            r.earned,
+            fmtUsd(r.earnedUsd),
+            n(r.count),
+            r.owed ?? "Unknown",
+            r.collected,
+          ])
+        )}
+        empty="No cash-out fees yet"
+        minWidth={560}
+      />
+      <p className="mt-4 text-[13px] leading-relaxed text-mute">
+        Waiting fees sit in the vault until someone calls collectFees(asset), which sends them to the fee recipient
+        {nets[0]?.revenue?.feeRecipient ? ` ${shortAddress(nets[0].revenue.feeRecipient, 4)}` : ""}. Anyone can call it;
+        the destination is fixed.
+      </p>
+    </Panel>
+  );
+
   return (
     <>
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Revenue, 24 hours" value={fmtUsd(revenue.total.d1)} sub="fees kept, real money" />
-        <Kpi label="Revenue, 7 days" value={fmtUsd(revenue.total.d7)} sub="fees kept, real money" />
-        <Kpi label="Revenue, 30 days" value={fmtUsd(revenue.total.d30)} sub="fees kept, real money" />
-        <Kpi label="Revenue, all time" value={fmtUsd(revenue.total.all)} sub={revenue.creatorPriced ? "creator fees at today's ETH price" : "vault fees only"} />
+        <Kpi label={`${word}, 24 hours`} value={fmtUsd(revenue.total.d1)} sub={kept} />
+        <Kpi label={`${word}, 7 days`} value={fmtUsd(revenue.total.d7)} sub={kept} />
+        <Kpi label={`${word}, 30 days`} value={fmtUsd(revenue.total.d30)} sub={kept} />
+        <Kpi
+          label={`${word}, all time`}
+          value={fmtUsd(revenue.total.all)}
+          sub={!isMain ? kept : revenue.creatorPriced ? "creator fees at today's ETH price" : "vault fees only"}
+        />
       </section>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Deposit volume, 30 days" value={fmtUsd(realRev.depositVolume.d30)} sub={`${fmtUsd(realRev.depositVolume.all)} all time`} />
-        <Kpi label="Cash-out volume, 30 days" value={fmtUsd(realRev.cashoutVolume.d30)} sub={`${fmtUsd(realRev.cashoutVolume.all)} all time`} />
-        <Kpi label="Fees waiting to collect" value={fmtUsd(realRev.owedUsd)} sub="in the vaults, for collectFees" />
-        <Kpi label="Active wallets, 30 days" value={n(realRev.users.d30)} sub={`${n(realRev.users.d7)} in 7 days, ${n(realRev.users.d1)} in 24h`} />
+        <Kpi label="Deposit volume, 30 days" value={fmtUsd(rev.depositVolume.d30)} sub={`${fmtUsd(rev.depositVolume.all)} all time`} />
+        <Kpi label="Cash-out volume, 30 days" value={fmtUsd(rev.cashoutVolume.d30)} sub={`${fmtUsd(rev.cashoutVolume.all)} all time`} />
+        <Kpi label="Fees waiting to collect" value={fmtUsd(rev.owedUsd)} sub="in the vaults, for collectFees" />
+        <Kpi label="Active wallets, 30 days" value={n(rev.users.d30)} sub={`${n(rev.users.d7)} in 7 days, ${n(rev.users.d1)} in 24h`} />
       </section>
 
-      <Panel title="Revenue by source">
+      <Panel title={isMain ? "Revenue by source" : "Fees by source"}>
         <DataTable
           headers={["Source", "24 hours", "7 days", "30 days", "All time", "How it is counted"]}
           rows={[
             [
               "Cash-out fees",
-              fmtUsd(realRev.fees.d1),
-              fmtUsd(realRev.fees.d7),
-              fmtUsd(realRev.fees.d30),
-              fmtUsd(realRev.fees.all),
-              `Kept by the mainnet vaults on each cash-out (${feeLine || "no mainnet vault"})`,
+              fmtUsd(rev.fees.d1),
+              fmtUsd(rev.fees.d7),
+              fmtUsd(rev.fees.d30),
+              fmtUsd(rev.fees.all),
+              `Kept by the ${isMain ? "mainnet" : "testnet"} vaults on each cash-out (${feeLine || "no vault read"})`,
             ],
-            [
-              "$GLOAM creator fees",
-              w(creator?.earnedUsd, "d1"),
-              w(creator?.earnedUsd, "d7"),
-              w(creator?.earnedUsd, "d30"),
-              w(creator?.earnedUsd, "all"),
-              creator ? `1% of the ETH side of every trade on Orynth, ${fmtEth(creator.earnedEth.all)} all time` : "Not read",
-            ],
-            [
-              "Bridge fee",
-              "",
-              "",
-              "",
-              "",
-              bridgeFeeBps ? `On, ${(bridgeFeeBps / 100).toFixed(2)}%. Paid out by Relay, not read here` : "Off. Bridging and swaps charge nothing on top of Relay",
-            ],
-            ["Partner API fees", "", "", "", "", "Not charged yet. Would-be fees are on the Partners tab"],
-            [
-              <span key="t" className="font-medium text-foreground">
-                Total
-              </span>,
-              fmtUsd(revenue.total.d1),
-              fmtUsd(revenue.total.d7),
-              fmtUsd(revenue.total.d30),
-              fmtUsd(revenue.total.all),
-              "",
-            ],
+            ...(isMain
+              ? [
+                  [
+                    "$GLOAM creator fees",
+                    w(creator?.earnedUsd, "d1"),
+                    w(creator?.earnedUsd, "d7"),
+                    w(creator?.earnedUsd, "d30"),
+                    w(creator?.earnedUsd, "all"),
+                    creator ? `1% of the ETH side of every trade on Orynth, ${fmtEth(creator.earnedEth.all)} all time` : "Not read",
+                  ],
+                  [
+                    "Bridge fee",
+                    "",
+                    "",
+                    "",
+                    "",
+                    bridgeFeeBps
+                      ? `On, ${(bridgeFeeBps / 100).toFixed(2)}%. Paid out by Relay, not read here`
+                      : "Off. Bridging and swaps charge nothing on top of Relay",
+                  ],
+                  ["Partner API fees", "", "", "", "", "Not charged yet. Would-be fees are on the Partners tab"],
+                  [
+                    <span key="t" className="font-medium text-foreground">
+                      Total
+                    </span>,
+                    fmtUsd(revenue.total.d1),
+                    fmtUsd(revenue.total.d7),
+                    fmtUsd(revenue.total.d30),
+                    fmtUsd(revenue.total.all),
+                    "",
+                  ],
+                ]
+              : []),
           ]}
           minWidth={820}
         />
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
-          Real money only; testnet fees are play money and never count. Priced at today&apos;s prices: stablecoins at $1,
-          ETH {oc.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "not priced right now"}, $GLOAM from DEX Screener.
-          Windows are the last 24 hours, 7 days and 30 days.
+          {isMain
+            ? "Real money only. Priced at today's prices: stablecoins at $1, "
+            : "Play money from testing: these fees are not revenue. $GLOAM creator fees exist on mainnet only. Priced at today's prices: stablecoins at $1, "}
+          ETH {oc.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "not priced right now"}
+          {isMain ? ", $GLOAM from DEX Screener" : ""}. Windows are the last 24 hours, 7 days and 30 days.
         </p>
       </Panel>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Panel title="Cash-out fees by asset">
-          <DataTable
-            headers={["Network", "Asset", "Earned", "USD", "Cash-outs", "Waiting", "Collected"]}
-            rows={mainnets.flatMap((m) =>
-              (m.revenue?.feeRows ?? []).map((r) => [
-                adminName(getNetwork(m.key)),
-                r.symbol,
-                r.earned,
-                fmtUsd(r.earnedUsd),
-                n(r.count),
-                r.owed ?? "Unknown",
-                r.collected,
-              ])
+      {isMain ? (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {feesByAsset}
+          <Panel title="$GLOAM creator fees">
+            {creator ? (
+              <>
+                <DataTable
+                  headers={["", "ETH", "USD now"]}
+                  rows={[
+                    ["Earned, all time", fmtEth(creator.earnedEth.all), w(creator.earnedUsd, "all")],
+                    ["Earned, 30 days", fmtEth(creator.earnedEth.d30), w(creator.earnedUsd, "d30")],
+                    ["Claimed", fmtEth(creator.claimedEth), oc.prices.ethUsd ? fmtUsd(creator.claimedEth * oc.prices.ethUsd) : "Unknown"],
+                    ["Waiting to claim", fmtEth(creator.unclaimedEth), oc.prices.ethUsd ? fmtUsd(creator.unclaimedEth * oc.prices.ethUsd) : "Unknown"],
+                    ["Trades that paid a share", n(creator.trades), ""],
+                  ]}
+                  minWidth={360}
+                />
+                <p className="mt-4 text-[13px] leading-relaxed text-mute">
+                  Read from the Orynth fee vault{" "}
+                  <a
+                    href={getNetwork("robinhood-mainnet").explorerAddress(creator.vault)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-mute transition-colors hover:text-foreground"
+                  >
+                    {shortAddress(creator.vault, 4)} <ArrowUpRight />
+                  </a>{" "}
+                  for the creator wallet {shortAddress(creator.creator, 4)}.
+                  {creator.catchingUp ? " Still reading its history; the next refresh continues." : ""}
+                  {creatorErr ? ` The last read failed (${creatorErr}); showing what was read before.` : ""}
+                </p>
+              </>
+            ) : (
+              <p className="text-[14px] text-mute">{creatorErr ?? "Not read yet. Creator fees are read once Robinhood Chain mainnet is live."}</p>
             )}
-            empty="No cash-out fees yet"
-            minWidth={560}
-          />
-          <p className="mt-4 text-[13px] leading-relaxed text-mute">
-            Waiting fees sit in the vault until someone calls collectFees(asset), which sends them to the fee recipient
-            {mainnets[0]?.revenue?.feeRecipient ? ` ${shortAddress(mainnets[0].revenue.feeRecipient, 4)}` : ""}. Anyone can
-            call it; the destination is fixed.
-          </p>
-        </Panel>
-
-        <Panel title="$GLOAM creator fees">
-          {creator ? (
-            <>
-              <DataTable
-                headers={["", "ETH", "USD now"]}
-                rows={[
-                  ["Earned, all time", fmtEth(creator.earnedEth.all), w(creator.earnedUsd, "all")],
-                  ["Earned, 30 days", fmtEth(creator.earnedEth.d30), w(creator.earnedUsd, "d30")],
-                  ["Claimed", fmtEth(creator.claimedEth), oc.prices.ethUsd ? fmtUsd(creator.claimedEth * oc.prices.ethUsd) : "Unknown"],
-                  ["Waiting to claim", fmtEth(creator.unclaimedEth), oc.prices.ethUsd ? fmtUsd(creator.unclaimedEth * oc.prices.ethUsd) : "Unknown"],
-                  ["Trades that paid a share", n(creator.trades), ""],
-                ]}
-                minWidth={360}
-              />
-              <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                Read from the Orynth fee vault{" "}
-                <a
-                  href={getNetwork("robinhood-mainnet").explorerAddress(creator.vault)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-mute transition-colors hover:text-foreground"
-                >
-                  {shortAddress(creator.vault, 4)} <ArrowUpRight />
-                </a>{" "}
-                for the creator wallet {shortAddress(creator.creator, 4)}.
-                {creator.catchingUp ? " Still reading its history; the next refresh continues." : ""}
-                {creatorErr ? ` The last read failed (${creatorErr}); showing what was read before.` : ""}
-              </p>
-            </>
-          ) : (
-            <p className="text-[14px] text-mute">{creatorErr ?? "Not read yet. Creator fees are read once Robinhood Chain mainnet is live."}</p>
-          )}
-        </Panel>
-      </div>
+          </Panel>
+        </div>
+      ) : (
+        feesByAsset
+      )}
 
       <Panel title="Daily, last 30 days">
         <DataTable
-          headers={["Day", "Revenue", "Cash-out fees", "Creator fees", "Deposits", "Cash-outs", "Transactions", "Active wallets"]}
-          rows={daily.map((d) => [
-            fmtDay(d.day),
-            fmtUsd(d.feesUsd + (d.creatorUsd ?? 0)),
-            fmtUsd(d.feesUsd),
-            d.creatorUsd == null ? fmtEth(d.creatorEth) : fmtUsd(d.creatorUsd),
-            fmtUsd(d.depositUsd),
-            fmtUsd(d.cashoutUsd),
-            n(d.txs),
-            n(d.wallets),
-          ])}
+          headers={
+            isMain
+              ? ["Day", "Revenue", "Cash-out fees", "Creator fees", "Deposits", "Cash-outs", "Transactions", "Active wallets"]
+              : ["Day", "Cash-out fees", "Deposits", "Cash-outs", "Transactions", "Active wallets"]
+          }
+          rows={daily.map((d) =>
+            isMain
+              ? [
+                  fmtDay(d.day),
+                  fmtUsd(d.feesUsd + (d.creatorUsd ?? 0)),
+                  fmtUsd(d.feesUsd),
+                  d.creatorUsd == null ? fmtEth(d.creatorEth) : fmtUsd(d.creatorUsd),
+                  fmtUsd(d.depositUsd),
+                  fmtUsd(d.cashoutUsd),
+                  n(d.txs),
+                  n(d.wallets),
+                ]
+              : [fmtDay(d.day), fmtUsd(d.feesUsd), fmtUsd(d.depositUsd), fmtUsd(d.cashoutUsd), n(d.txs), n(d.wallets)]
+          )}
           empty="No days yet"
-          minWidth={820}
+          minWidth={isMain ? 820 : 620}
         />
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
-          UTC days, newest first, mainnet only. Deposits and cash-outs are dollar volume; transactions count deposits,
-          private transfers, cash-outs and trades. Creator fees are placed in days by block, to within a couple of minutes.
+          UTC days, newest first, {isMain ? "mainnet" : "testnets"} only. Deposits and cash-outs are dollar volume;
+          transactions count deposits, private transfers, cash-outs and trades.
+          {isMain ? " Creator fees are placed in days by block, to within a couple of minutes." : ""}
         </p>
       </Panel>
     </>
@@ -1638,11 +1840,11 @@ function Kpi({
 }) {
   return (
     <div className="gl-card min-w-0 px-4 py-4 sm:px-5 sm:py-5">
-      <p className="t-label truncate">{label}</p>
+      <p className="t-label text-balance">{label}</p>
       <p className="tnum mt-3 truncate text-[22px] font-light leading-none tracking-[-0.02em] text-foreground sm:text-[30px]">
         {value}
       </p>
-      {sub && <p className="mt-2 truncate text-[12px] text-mute">{sub}</p>}
+      {sub && <p className="mt-2 line-clamp-2 text-[12px] leading-snug text-mute">{sub}</p>}
     </div>
   );
 }

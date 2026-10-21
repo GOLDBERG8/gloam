@@ -43,7 +43,7 @@ export default function ClaimPage() {
         }
         return;
       }
-      countLinkOpened(code);
+      countLinkOpened(code, q);
       let amount: string | null = null;
       let note: string | undefined;
       const locked = isEncryptedPackage(code);

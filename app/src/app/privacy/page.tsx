@@ -80,7 +80,8 @@ export default function PrivacyPage() {
         reach people, the app adds 1 to one of four daily totals: a claim link
         was made (once its payment lands), a claim link was opened in Gloam, a
         claim link was claimed, and someone who claimed a link made their own
-        first payment. The request carries only which of the four it is. It has
+        first payment. The request carries only which of the four it is, and
+        whether it happened on mainnet or a testnet. It has
         no cookie or ID, and nothing about the link, the amount, the people
         involved or your wallet, and our server keeps no IP address or browser
         details with it. Your browser remembers on its own which links it

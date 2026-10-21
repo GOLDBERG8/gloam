@@ -9,6 +9,10 @@
  *  - per-day counters (UTC), so the dashboard can show the last two weeks
  *  - breakdown counters for a few low-cardinality meta fields (kind, network,
  *    chainId, reason, booleans), e.g. "proof_created|kind=funds"
+ *  - the same counters per side, "mainnet:proof_created" and
+ *    "mainnet:proof_created|kind=funds", for events that say whether they came
+ *    from mainnet or a testnet (all since 21 Oct 2026). The dashboard keeps the
+ *    two apart; anything without a side counts as testnet.
  *
  * On-chain volume/users are separate (see onchainMetrics), that is source of truth.
  */
@@ -139,6 +143,14 @@ function dimKeysFor(ev: StoredEvent): string[] {
   return out;
 }
 
+/** "mainnet" or "testnet" from the event's own meta (lib/track networkMeta), or null for older events. */
+export function eventSide(meta: Record<string, unknown> | null): "mainnet" | "testnet" | null {
+  if (!meta) return null;
+  if (meta.mainnet === true) return "mainnet";
+  if (meta.mainnet === false) return "testnet";
+  return null;
+}
+
 function bump(m: Map<string, number>, k: string) {
   m.set(k, (m.get(k) ?? 0) + 1);
 }
@@ -154,8 +166,11 @@ export async function recordTractionEvent(ev: StoredEvent): Promise<void> {
   mem.unshift(ev);
   if (mem.length > MEM_MAX) mem.length = MEM_MAX;
   bump(memCounters, ev.t);
+  const side = eventSide(ev.meta);
+  if (side) bump(memCounters, `${side}:${ev.t}`);
   const dims = dimKeysFor(ev);
-  for (const d of dims) bump(memDims, d);
+  const sideDims = side ? dims.map((d) => `${side}:${d}`) : [];
+  for (const d of [...dims, ...sideDims]) bump(memDims, d);
   // Day of arrival, not the client's clock.
   const day = utcDay(Date.now());
   let dayMap = memDaily.get(day);
@@ -166,6 +181,7 @@ export async function recordTractionEvent(ev: StoredEvent): Promise<void> {
     for (const k of [...memDaily.keys()]) if (k < oldest) memDaily.delete(k);
   }
   bump(dayMap, ev.t);
+  if (side) bump(dayMap, `${side}:${ev.t}`);
 
   if (!redisConfigured()) return;
   try {
@@ -178,8 +194,10 @@ export async function recordTractionEvent(ev: StoredEvent): Promise<void> {
       ...(trim ? [["LTRIM", REDIS_LIST, 0, REDIS_MAX - 1]] : []),
       ["HINCRBY", REDIS_COUNTERS, ev.t, 1],
       ["HINCRBY", REDIS_COUNTERS, "total", 1],
-      ...dims.map((d) => ["HINCRBY", REDIS_DIMS, d, 1]),
+      ...(side ? [["HINCRBY", REDIS_COUNTERS, `${side}:${ev.t}`, 1]] : []),
+      ...[...dims, ...sideDims].map((d) => ["HINCRBY", REDIS_DIMS, d, 1]),
       ["HINCRBY", dayKey, ev.t, 1],
+      ...(side ? [["HINCRBY", dayKey, `${side}:${ev.t}`, 1]] : []),
       ...(expire ? [["EXPIRE", dayKey, DAY_TTL_SEC]] : []),
     ]);
     if (trim) sinceTrim = 0;

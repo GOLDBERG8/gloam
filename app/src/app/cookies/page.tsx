@@ -52,7 +52,8 @@ export default function CookiesPage() {
         only&rdquo;, or before you choose, the only thing counted is four daily
         totals that show whether payment links reach people: a claim link was
         made, opened, or claimed, and someone who claimed one made their own
-        first payment. Each count is just &ldquo;add 1 to today&rdquo;: no
+        first payment. Each count is just &ldquo;add 1 to today&rdquo;, on
+        mainnet or a testnet: no
         cookie, no ID, no IP address kept, and nothing about the link, the
         amount, the people involved or your wallet. Your browser keeps a short
         local note of the links it already counted (in local storage), so the

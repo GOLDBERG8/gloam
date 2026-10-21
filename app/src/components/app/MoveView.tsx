@@ -262,7 +262,7 @@ export function MoveView() {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
       if (isNetworkKey(net) && net !== networkKey) setNetworkKey(net);
       if (code) {
-        countLinkOpened(code);
+        countLinkOpened(code, net);
         setMode("receive");
         setImportText(code);
         // opened from a claim link: go straight to the claim, not the address above it
