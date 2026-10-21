@@ -38,6 +38,7 @@ const groups: {
       { href: "/brand", label: "Brand" },
       { href: "/brand#downloads", label: "Brand kit" },
       { href: "/transparency", label: "Transparency" },
+      { href: "/blog/live-on-mainnet", label: "Live on mainnet" },
       { href: "/blog/live-on-tempo", label: "Live on Tempo" },
       { href: "/blog/privacy-without-an-operator", label: "Privacy without an operator" },
       { href: "/pitch", label: "Pitch" },
