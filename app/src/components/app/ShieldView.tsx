@@ -40,6 +40,7 @@ import { TokenLogo } from "./TokenLogo";
 import { SuccessModal } from "./SuccessModal";
 import { DevKeysBanner } from "./DevKeysBanner";
 import { BridgeInCard } from "./BridgeIn";
+import { RefreshIcon } from "./VaultHealth";
 import { BRIDGE_DESTINATIONS, bridgeVisible } from "@/lib/bridge";
 
 type TxKind = "shield" | "approve" | "pull" | null;
@@ -170,6 +171,18 @@ export function ShieldView() {
       : [],
     query: { enabled: deployed && !demo, refetchInterval: 12_000 },
   });
+
+  // Balances read again on demand: after a bridge or swap lands, or when a
+  // wallet's own app moved money, the numbers here catch up without a reload.
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshBalances = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.allSettled([refetchEth(), refetchTok(), refetchAllow(), refetchPool()]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const nextIndex =
     poolData?.[0]?.status === "success"
@@ -769,6 +782,19 @@ export function ShieldView() {
                 <label htmlFor="shield-amount" className="text-mute">
                   You add
                 </label>
+                <span className="flex min-w-0 items-center gap-1">
+                <button
+                  type="button"
+                  disabled={!isConnected || refreshing}
+                  onClick={() => void refreshBalances()}
+                  aria-label="Refresh balance"
+                  title="Refresh balance"
+                  className="-my-2 grid h-10 w-10 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-panel hover:text-foreground disabled:opacity-45"
+                >
+                  <span className={refreshing ? "animate-spin motion-reduce:animate-none" : ""}>
+                    <RefreshIcon />
+                  </span>
+                </button>
                 <button
                   type="button"
                   disabled={!isConnected}
@@ -790,6 +816,7 @@ export function ShieldView() {
                   </span>
                   <span className="font-medium text-foreground">Max</span>
                 </button>
+                </span>
               </div>
               <div className="mt-2 flex items-center gap-3">
                 <input
@@ -964,6 +991,9 @@ export function ShieldView() {
                   tokens.find((t) => t.symbol === dest.symbol);
                 if (landed) setAssetChoice(landed.id as AssetChoice);
                 setAmount(arrived);
+                // The new balance can take a few seconds to show on the RPC.
+                void refreshBalances();
+                for (const ms of [4_000, 10_000]) window.setTimeout(() => void refreshBalances(), ms);
               }}
             />
           )}

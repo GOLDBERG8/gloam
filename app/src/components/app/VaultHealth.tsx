@@ -9,7 +9,7 @@ import { readVaultSealedReadiness } from "@/lib/vaultStatus";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { StatusPill } from "./StatusPill";
 
-function RefreshIcon() {
+export function RefreshIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
