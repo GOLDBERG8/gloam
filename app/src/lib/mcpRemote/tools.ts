@@ -351,6 +351,7 @@ async function vaultStats(args: Args, ctx: ToolContext): Promise<CallToolResult>
     networks: nets.map((n) => ({
       network: n.key,
       label: n.label,
+      testnet: n.testnet ?? getNetwork(n.key).testnet,
       chainId: n.chainId,
       pool: n.pool,
       vaultSince: n.vaultSince ? new Date(n.vaultSince * 1000).toISOString() : null,
@@ -376,6 +377,17 @@ async function vaultStats(args: Args, ctx: ToolContext): Promise<CallToolResult>
             cashouts: m.combined.cashouts,
             paymentMessages: m.combined.memos,
           },
+          ...(m.mainnet
+            ? {
+                mainnet: {
+                  heldUsd: Math.round(m.mainnet.heldUsd * 100) / 100,
+                  deposits: m.mainnet.deposits,
+                  privateTransfers: m.mainnet.transfers,
+                  cashouts: m.mainnet.cashouts,
+                  paymentMessages: m.mainnet.memos,
+                },
+              }
+            : {}),
         }),
     about:
       "Vault-level totals anyone can read from public nodes, the same figures as /transparency. Amounts of private transfers and who holds what inside a vault are not public, and are not here.",

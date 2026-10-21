@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAddress } from "viem";
 import { isAdminAuthenticated } from "@/lib/adminAuth";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import { readTractionSummary } from "@/lib/tractionStore";
@@ -11,6 +12,13 @@ import {
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+/** The bridge's own cut, as api/bridge/quote reads it: on only with a valid rate and recipient. */
+function bridgeFeeBps(): number | null {
+  const bps = Number(process.env.BRIDGE_FEE_BPS ?? "");
+  const recipient = process.env.BRIDGE_FEE_RECIPIENT ?? "";
+  return Number.isInteger(bps) && bps > 0 && bps <= 100 && isAddress(recipient) ? bps : null;
+}
 
 /**
  * Admin metrics: on-chain figures for both networks (cached about a minute,
@@ -51,5 +59,6 @@ export async function GET(req: Request) {
     onchain,
     product,
     claimLinks,
+    revenueConfig: { bridgeFeeBps: bridgeFeeBps() },
   });
 }

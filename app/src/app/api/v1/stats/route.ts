@@ -1,5 +1,6 @@
 import { ApiError, withApiKey } from "@/lib/partnersApi";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
+import { getNetwork } from "@/lib/networks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ export async function GET(req: Request) {
         networks: m.networks.map((n) => ({
           network: n.key,
           label: n.label,
+          testnet: n.testnet ?? getNetwork(n.key).testnet,
           chainId: n.chainId,
           pool: n.pool,
           vaultSince: n.vaultSince,
@@ -50,6 +52,19 @@ export async function GET(req: Request) {
           heldUsd: m.combined.heldUsd,
           unpriced: m.combined.unpriced,
         },
+        // real money only; `combined` above also counts the testnets
+        ...(m.mainnet
+          ? {
+              mainnet: {
+                deposits: m.mainnet.deposits,
+                transfers: m.mainnet.transfers,
+                cashouts: m.mainnet.cashouts,
+                memos: m.mainnet.memos,
+                heldUsd: m.mainnet.heldUsd,
+                unpriced: m.mainnet.unpriced,
+              },
+            }
+          : {}),
       },
     };
   });

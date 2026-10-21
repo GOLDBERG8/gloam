@@ -13,7 +13,8 @@ import { Logo } from "@/components/Logo";
 import { SealedField } from "@/components/ui/SealedField";
 import { shortAddress } from "@/lib/chain";
 import { MAINNET_ENABLED, NETWORK_KEYS, getNetwork, isNetworkKey, networkName, type GloamNetwork } from "@/lib/networks";
-import type { DayRow, NetworkMetrics, OnchainMetrics } from "@/lib/onchainMetrics";
+import type { CreatorFees } from "@/lib/creatorFees";
+import type { CombinedRevenue, DayRow, NetworkMetrics, OnchainMetrics, Windowed } from "@/lib/onchainMetrics";
 import type { DailyCounters, StoredEvent } from "@/lib/tractionStore";
 import type { FunnelDay } from "@/lib/funnelStore";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
@@ -38,10 +39,12 @@ type MetricsPayload = {
   };
   /** Claim-link totals per UTC day, oldest first (lib/funnel). */
   claimLinks?: FunnelDay[];
+  /** Revenue switches read from env (bridge app fee). */
+  revenueConfig?: { bridgeFeeBps: number | null };
   error?: string;
 };
 
-type Tab = "overview" | "users" | "events" | "partners" | "testers" | "bugs";
+type Tab = "overview" | "revenue" | "users" | "events" | "partners" | "testers" | "bugs";
 
 /** Events added for proofs, the public ledger, requests and notes; shown first in the breakdowns. */
 /** How often an open admin tab refreshes. Only while it is on screen: each refresh reads Redis. */
@@ -383,10 +386,26 @@ export function AdminDashboard() {
   }
 
   const nets = oc?.networks ?? [];
-  const byNetwork = (f: (m: NetworkMetrics) => ReactNode, total: ReactNode): ReactNode[] => [
+  const isTest = (m: NetworkMetrics) => m.testnet ?? getNetwork(m.key).testnet;
+  const nameOf = (m: NetworkMetrics) => adminName(getNetwork(m.key));
+  const hasTest = nets.some(isTest);
+  // Real money first. Snapshots cached before the split carry only `combined`.
+  const real = oc?.mainnet ?? oc?.combined;
+  const test = oc?.testnet;
+  const totalHeads = MAINNET_ENABLED && hasTest ? ["Mainnet total", "Testnet total"] : ["Total"];
+  const byNetwork = (
+    f: (m: NetworkMetrics) => ReactNode,
+    total: (c: NonNullable<typeof real>) => ReactNode
+  ): ReactNode[] => [
     ...nets.map((m) => f(m)),
-    total,
+    ...(totalHeads.length === 2 ? [real ? total(real) : "", test ? total(test) : ""] : [oc ? total(oc.combined) : ""]),
   ];
+  // Revenue is real money only: mainnet vault fees plus $GLOAM creator fees.
+  const realRev = oc?.mainnet?.revenue;
+  const creator = oc?.creator && "earnedEth" in oc.creator ? oc.creator : null;
+  const revenue = realRev ? revenueTotals(realRev, creator) : null;
+  const testSub = (v: number | undefined, what: string) =>
+    MAINNET_ENABLED && test ? `mainnet, real money; ${n(v)} ${what} on testnet` : "both networks, on-chain";
 
   return (
     <div className="gloam-app min-h-dvh bg-background text-foreground">
@@ -438,6 +457,7 @@ export function AdminDashboard() {
             {(
               [
                 ["overview", "Overview"],
+                ["revenue", "Revenue"],
                 ["users", "Wallets"],
                 ["events", "Product events"],
                 ["partners", "Partners"],
@@ -492,8 +512,8 @@ export function AdminDashboard() {
               }`}
             >
               {m.error
-                ? `${m.label}: the last read failed (${m.error}). Showing what was read before.`
-                : `${m.label}: still reading its history, up to block ${m.scannedTo} of ${m.latestBlock}. The next refresh continues.`}
+                ? `${nameOf(m)}: the last read failed (${m.error}). Showing what was read before.`
+                : `${nameOf(m)}: still reading its history, up to block ${m.scannedTo} of ${m.latestBlock}. The next refresh continues.`}
             </p>
           ))}
 
@@ -501,23 +521,48 @@ export function AdminDashboard() {
           <>
             <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Kpi
-                label="Depositor wallets"
-                value={n(oc?.combined.depositors)}
-                sub="both networks, on-chain"
-              />
-              <Kpi
-                label="Held in the vaults"
-                value={fmtUsd(oc?.combined.heldUsd ?? 0)}
+                label="TVL"
+                value={fmtUsd(real?.heldUsd ?? 0)}
                 sub={
-                  oc?.combined.unpriced.length
-                    ? `plus ${oc.combined.unpriced.length} unpriced`
-                    : "priced holdings"
+                  real?.unpriced.length
+                    ? `plus ${real.unpriced.length} unpriced`
+                    : MAINNET_ENABLED && test
+                      ? `real money; ${fmtUsd(test.heldUsd)} test money on testnet`
+                      : "priced holdings"
                 }
               />
               <Kpi
+                label="Revenue, 30 days"
+                value={revenue ? fmtUsd(revenue.total.d30) : "Not read yet"}
+                sub={revenue ? `${fmtUsd(revenue.total.all)} all time` : "after the next chain read"}
+              />
+              <Kpi
+                label="Volume, 30 days"
+                value={realRev ? fmtUsd(realRev.depositVolume.d30 + realRev.cashoutVolume.d30) : "Not read yet"}
+                sub={realRev ? `${fmtUsd(realRev.depositVolume.d30)} in, ${fmtUsd(realRev.cashoutVolume.d30)} out` : "deposits and cash-outs"}
+              />
+              <Kpi
+                label="Active wallets, 7 days"
+                value={realRev ? n(realRev.users.d7) : "Not read yet"}
+                sub={realRev ? `${n(realRev.users.d1)} in 24h, ${n(realRev.users.d30)} in 30 days` : "deposited or cashed out"}
+              />
+            </section>
+
+            <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Kpi
+                label="Depositor wallets"
+                value={n(real?.depositors)}
+                sub={testSub(test?.depositors, "more")}
+              />
+              <Kpi
                 label="Private transfers"
-                value={n(oc?.combined.transfers)}
-                sub="both networks, on-chain"
+                value={n(real?.transfers)}
+                sub={testSub(test?.transfers, "more")}
+              />
+              <Kpi
+                label="Transactions, 30 days"
+                value={realRev ? n(realRev.txs.d30) : "Not read yet"}
+                sub={realRev ? `${n(realRev.txs.all)} all time, on-chain` : "deposits, transfers, cash-outs"}
               />
               <Kpi
                 label="Product events"
@@ -538,8 +583,8 @@ export function AdminDashboard() {
               />
               <Kpi
                 label="Last activity"
-                value={fmtWhen(oc?.combined.lastActivity)}
-                sub={`first ${fmtWhen(oc?.combined.firstActivity)}`}
+                value={fmtWhen(real?.lastActivity)}
+                sub={`first ${fmtWhen(real?.firstActivity)}`}
               />
               <Kpi
                 label="Chain read"
@@ -550,19 +595,40 @@ export function AdminDashboard() {
 
             <Panel title="By network">
               <DataTable
-                headers={["", ...nets.map((m) => m.label), "Total"]}
+                headers={["", ...nets.map(nameOf), ...totalHeads]}
                 rows={[
-                  ["Deposits", ...byNetwork((m) => n(m.deposits), n(oc?.combined.deposits))],
-                  ["Private transfers", ...byNetwork((m) => n(m.transfers), n(oc?.combined.transfers))],
-                  ["Cash-outs", ...byNetwork((m) => n(m.cashouts), n(oc?.combined.cashouts))],
-                  ["Private trades", ...byNetwork((m) => n(m.trades), n(oc?.combined.trades))],
-                  ["Payment messages", ...byNetwork((m) => n(m.memos), n(oc?.combined.memos))],
-                  ["Depositor wallets", ...byNetwork((m) => n(m.depositors), n(oc?.combined.depositors))],
-                  ["Active wallets", ...byNetwork((m) => n(m.activeWallets), n(oc?.combined.activeWallets))],
-                  ["Held (priced)", ...byNetwork((m) => fmtUsd(m.heldUsd), fmtUsd(oc?.combined.heldUsd ?? 0))],
-                  ["First activity", ...byNetwork((m) => fmtWhen(m.firstActivity), fmtWhen(oc?.combined.firstActivity))],
-                  ["Last activity", ...byNetwork((m) => fmtWhen(m.lastActivity), fmtWhen(oc?.combined.lastActivity))],
-                  ["Vault since", ...byNetwork((m) => fmtWhen(m.vaultSince), "")],
+                  ["Deposits", ...byNetwork((m) => n(m.deposits), (c) => n(c.deposits))],
+                  ["Private transfers", ...byNetwork((m) => n(m.transfers), (c) => n(c.transfers))],
+                  ["Cash-outs", ...byNetwork((m) => n(m.cashouts), (c) => n(c.cashouts))],
+                  ["Private trades", ...byNetwork((m) => n(m.trades), (c) => n(c.trades))],
+                  ["Payment messages", ...byNetwork((m) => n(m.memos), (c) => n(c.memos))],
+                  ["Depositor wallets", ...byNetwork((m) => n(m.depositors), (c) => n(c.depositors))],
+                  ["Active wallets", ...byNetwork((m) => n(m.activeWallets), (c) => n(c.activeWallets))],
+                  ["Held (priced)", ...byNetwork((m) => fmtUsd(m.heldUsd), (c) => fmtUsd(c.heldUsd))],
+                  [
+                    "Deposit volume",
+                    ...byNetwork(
+                      (m) => (m.revenue ? fmtUsd(m.revenue.depositVolume.all) : ""),
+                      (c) => (c.revenue ? fmtUsd(c.revenue.depositVolume.all) : "")
+                    ),
+                  ],
+                  [
+                    "Cash-out volume",
+                    ...byNetwork(
+                      (m) => (m.revenue ? fmtUsd(m.revenue.cashoutVolume.all) : ""),
+                      (c) => (c.revenue ? fmtUsd(c.revenue.cashoutVolume.all) : "")
+                    ),
+                  ],
+                  [
+                    "Cash-out fees",
+                    ...byNetwork(
+                      (m) => (isTest(m) ? "Not counted" : m.revenue ? fmtUsd(m.revenue.fees.all) : ""),
+                      (c) => (c === test ? "Not counted" : c.revenue ? fmtUsd(c.revenue.fees.all) : "")
+                    ),
+                  ],
+                  ["First activity", ...byNetwork((m) => fmtWhen(m.firstActivity), (c) => fmtWhen(c.firstActivity))],
+                  ["Last activity", ...byNetwork((m) => fmtWhen(m.lastActivity), (c) => fmtWhen(c.lastActivity))],
+                  ["Vault since", ...byNetwork((m) => fmtWhen(m.vaultSince), () => "")],
                   [
                     "Vault",
                     ...byNetwork(
@@ -577,17 +643,18 @@ export function AdminDashboard() {
                           {shortAddress(m.pool, 4)} <ArrowUpRight />
                         </a>
                       ),
-                      ""
+                      () => ""
                     ),
                   ],
-                  ["Read to block", ...byNetwork((m) => `#${m.scannedTo}`, "")],
+                  ["Read to block", ...byNetwork((m) => `#${m.scannedTo}`, () => "")],
                 ]}
                 empty="No on-chain figures yet"
               />
               <p className="mt-4 text-[13px] leading-relaxed text-mute">
                 Current vaults only. Active wallets deposited or received a cash-out;
                 transfers and trades carry no wallet. Totals count a wallet used on both
-                networks once.
+                networks once. Testnet money is play money and never counts toward the
+                mainnet total.
               </p>
             </Panel>
 
@@ -645,7 +712,7 @@ export function AdminDashboard() {
                 headers={["Network", "Asset", "Held now", "USD", "Deposited", "Cashed out"]}
                 rows={nets.flatMap((m) =>
                   m.assets.map((a) => [
-                    m.label,
+                    nameOf(m),
                     a.symbol,
                     a.held ?? "Unknown",
                     fmtUsd(a.heldUsd),
@@ -668,7 +735,7 @@ export function AdminDashboard() {
                 rows={(oc?.recent ?? []).map((tx) => {
                   const net = getNetwork(isNetworkKey(tx.network) ? tx.network : "robinhood");
                   return [
-                    net.label,
+                    adminName(net),
                     KIND_LABEL[tx.kind] ?? tx.kind,
                     tx.detail,
                     tx.wallet ? (
@@ -713,7 +780,7 @@ export function AdminDashboard() {
             <DataTable
               headers={["#", "Network", "Address", "Deposits", "Last deposit", "Explorer"]}
               rows={nets
-                .flatMap((m) => m.topDepositors.map((u) => ({ ...u, key: m.key, label: m.label })))
+                .flatMap((m) => m.topDepositors.map((u) => ({ ...u, key: m.key, label: nameOf(m) })))
                 .sort((a, b) => b.deposits - a.deposits || b.lastTs - a.lastTs)
                 .map((u, i) => [
                   String(i + 1),
@@ -792,6 +859,16 @@ export function AdminDashboard() {
               </p>
             )}
           </>
+        )}
+
+        {tab === "revenue" && (
+          <RevenuePanel
+            oc={oc}
+            revenue={revenue}
+            realRev={realRev}
+            creator={creator}
+            bridgeFeeBps={data?.revenueConfig?.bridgeFeeBps ?? null}
+          />
         )}
 
         {tab === "partners" && <PartnersPanel />}
@@ -928,6 +1005,204 @@ function PartnersPanel() {
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
           Fee setting is per private payment, cash outs, deposits. Volume counts payments relayed with a partner key and
           deposits partners reported (checked on chain). Store: {data.backend}.
+        </p>
+      </Panel>
+    </>
+  );
+}
+
+/** Revenue over the windows, in dollars: vault cash-out fees plus $GLOAM creator fees at today's ETH price. */
+function revenueTotals(rev: CombinedRevenue, creator: CreatorFees | null) {
+  const c = creator?.earnedUsd;
+  const w = (k: keyof Windowed) => rev.fees[k] + (c ? c[k] : 0);
+  return { total: { d1: w("d1"), d7: w("d7"), d30: w("d30"), all: w("all") }, creatorPriced: Boolean(c) };
+}
+
+function fmtEth(v: number | null | undefined): string {
+  if (v == null) return "Unknown";
+  if (v > 0 && v < 0.0001) return "<0.0001 ETH";
+  return `${v.toLocaleString("en-US", { maximumFractionDigits: 4 })} ETH`;
+}
+
+function RevenuePanel({
+  oc,
+  revenue,
+  realRev,
+  creator,
+  bridgeFeeBps,
+}: {
+  oc: OnchainMetrics | null;
+  revenue: ReturnType<typeof revenueTotals> | null;
+  realRev: CombinedRevenue | undefined;
+  creator: CreatorFees | null;
+  bridgeFeeBps: number | null;
+}) {
+  if (!oc || !realRev || !revenue) {
+    return (
+      <p className="flex items-center gap-2.5 rounded-xl bg-surface px-4 py-3 text-[14px] text-mute" role="status">
+        <span className="livedot h-2 w-2 rounded-full bg-foreground/60" />
+        Revenue appears after the next chain read. Press Refresh.
+      </p>
+    );
+  }
+  const creatorErr = oc.creator && !("earnedEth" in oc.creator) ? oc.creator.error : (creator?.error ?? null);
+  const mainnets = oc.networks.filter((m) => !(m.testnet ?? getNetwork(m.key).testnet));
+  const bpsOf = (m: NetworkMetrics) => m.revenue?.feeBps;
+  const feeLine = mainnets
+    .map((m) => `${adminName(getNetwork(m.key))} ${bpsOf(m) == null ? "unknown" : `${((bpsOf(m) ?? 0) / 100).toFixed(2)}%`}`)
+    .join(", ");
+  const w = (v: Windowed | null | undefined, k: keyof Windowed) => (v ? fmtUsd(v[k]) : "Unknown");
+  const daily = realRev.daily
+    .map((d) => {
+      const c = creator?.daily.find((x) => x.day === d.day);
+      return { ...d, creatorUsd: c?.usd ?? null, creatorEth: c?.eth ?? 0 };
+    })
+    .reverse();
+
+  return (
+    <>
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Revenue, 24 hours" value={fmtUsd(revenue.total.d1)} sub="fees kept, real money" />
+        <Kpi label="Revenue, 7 days" value={fmtUsd(revenue.total.d7)} sub="fees kept, real money" />
+        <Kpi label="Revenue, 30 days" value={fmtUsd(revenue.total.d30)} sub="fees kept, real money" />
+        <Kpi label="Revenue, all time" value={fmtUsd(revenue.total.all)} sub={revenue.creatorPriced ? "creator fees at today's ETH price" : "vault fees only"} />
+      </section>
+
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Deposit volume, 30 days" value={fmtUsd(realRev.depositVolume.d30)} sub={`${fmtUsd(realRev.depositVolume.all)} all time`} />
+        <Kpi label="Cash-out volume, 30 days" value={fmtUsd(realRev.cashoutVolume.d30)} sub={`${fmtUsd(realRev.cashoutVolume.all)} all time`} />
+        <Kpi label="Fees waiting to collect" value={fmtUsd(realRev.owedUsd)} sub="in the vaults, for collectFees" />
+        <Kpi label="Active wallets, 30 days" value={n(realRev.users.d30)} sub={`${n(realRev.users.d7)} in 7 days, ${n(realRev.users.d1)} in 24h`} />
+      </section>
+
+      <Panel title="Revenue by source">
+        <DataTable
+          headers={["Source", "24 hours", "7 days", "30 days", "All time", "How it is counted"]}
+          rows={[
+            [
+              "Cash-out fees",
+              fmtUsd(realRev.fees.d1),
+              fmtUsd(realRev.fees.d7),
+              fmtUsd(realRev.fees.d30),
+              fmtUsd(realRev.fees.all),
+              `Kept by the mainnet vaults on each cash-out (${feeLine || "no mainnet vault"})`,
+            ],
+            [
+              "$GLOAM creator fees",
+              w(creator?.earnedUsd, "d1"),
+              w(creator?.earnedUsd, "d7"),
+              w(creator?.earnedUsd, "d30"),
+              w(creator?.earnedUsd, "all"),
+              creator ? `1% of the ETH side of every trade on Orynth, ${fmtEth(creator.earnedEth.all)} all time` : "Not read",
+            ],
+            [
+              "Bridge fee",
+              "",
+              "",
+              "",
+              "",
+              bridgeFeeBps ? `On, ${(bridgeFeeBps / 100).toFixed(2)}%. Paid out by Relay, not read here` : "Off. Bridging and swaps charge nothing on top of Relay",
+            ],
+            ["Partner API fees", "", "", "", "", "Not charged yet. Would-be fees are on the Partners tab"],
+            [
+              <span key="t" className="font-medium text-foreground">
+                Total
+              </span>,
+              fmtUsd(revenue.total.d1),
+              fmtUsd(revenue.total.d7),
+              fmtUsd(revenue.total.d30),
+              fmtUsd(revenue.total.all),
+              "",
+            ],
+          ]}
+          minWidth={820}
+        />
+        <p className="mt-4 text-[13px] leading-relaxed text-mute">
+          Real money only; testnet fees are play money and never count. Priced at today&apos;s prices: stablecoins at $1,
+          ETH {oc.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "not priced right now"}, $GLOAM from DEX Screener.
+          Windows are the last 24 hours, 7 days and 30 days.
+        </p>
+      </Panel>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <Panel title="Cash-out fees by asset">
+          <DataTable
+            headers={["Network", "Asset", "Earned", "USD", "Cash-outs", "Waiting", "Collected"]}
+            rows={mainnets.flatMap((m) =>
+              (m.revenue?.feeRows ?? []).map((r) => [
+                adminName(getNetwork(m.key)),
+                r.symbol,
+                r.earned,
+                fmtUsd(r.earnedUsd),
+                n(r.count),
+                r.owed ?? "Unknown",
+                r.collected,
+              ])
+            )}
+            empty="No cash-out fees yet"
+            minWidth={560}
+          />
+          <p className="mt-4 text-[13px] leading-relaxed text-mute">
+            Waiting fees sit in the vault until someone calls collectFees(asset), which sends them to the fee recipient
+            {mainnets[0]?.revenue?.feeRecipient ? ` ${shortAddress(mainnets[0].revenue.feeRecipient, 4)}` : ""}. Anyone can
+            call it; the destination is fixed.
+          </p>
+        </Panel>
+
+        <Panel title="$GLOAM creator fees">
+          {creator ? (
+            <>
+              <DataTable
+                headers={["", "ETH", "USD now"]}
+                rows={[
+                  ["Earned, all time", fmtEth(creator.earnedEth.all), w(creator.earnedUsd, "all")],
+                  ["Earned, 30 days", fmtEth(creator.earnedEth.d30), w(creator.earnedUsd, "d30")],
+                  ["Claimed", fmtEth(creator.claimedEth), oc.prices.ethUsd ? fmtUsd(creator.claimedEth * oc.prices.ethUsd) : "Unknown"],
+                  ["Waiting to claim", fmtEth(creator.unclaimedEth), oc.prices.ethUsd ? fmtUsd(creator.unclaimedEth * oc.prices.ethUsd) : "Unknown"],
+                  ["Trades that paid a share", n(creator.trades), ""],
+                ]}
+                minWidth={360}
+              />
+              <p className="mt-4 text-[13px] leading-relaxed text-mute">
+                Read from the Orynth fee vault{" "}
+                <a
+                  href={getNetwork("robinhood-mainnet").explorerAddress(creator.vault)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-mute transition-colors hover:text-foreground"
+                >
+                  {shortAddress(creator.vault, 4)} <ArrowUpRight />
+                </a>{" "}
+                for the creator wallet {shortAddress(creator.creator, 4)}.
+                {creator.catchingUp ? " Still reading its history; the next refresh continues." : ""}
+                {creatorErr ? ` The last read failed (${creatorErr}); showing what was read before.` : ""}
+              </p>
+            </>
+          ) : (
+            <p className="text-[14px] text-mute">{creatorErr ?? "Not read yet. Creator fees are read once Robinhood Chain mainnet is live."}</p>
+          )}
+        </Panel>
+      </div>
+
+      <Panel title="Daily, last 30 days">
+        <DataTable
+          headers={["Day", "Revenue", "Cash-out fees", "Creator fees", "Deposits", "Cash-outs", "Transactions", "Active wallets"]}
+          rows={daily.map((d) => [
+            fmtDay(d.day),
+            fmtUsd(d.feesUsd + (d.creatorUsd ?? 0)),
+            fmtUsd(d.feesUsd),
+            d.creatorUsd == null ? fmtEth(d.creatorEth) : fmtUsd(d.creatorUsd),
+            fmtUsd(d.depositUsd),
+            fmtUsd(d.cashoutUsd),
+            n(d.txs),
+            n(d.wallets),
+          ])}
+          empty="No days yet"
+          minWidth={820}
+        />
+        <p className="mt-4 text-[13px] leading-relaxed text-mute">
+          UTC days, newest first, mainnet only. Deposits and cash-outs are dollar volume; transactions count deposits,
+          private transfers, cash-outs and trades. Creator fees are placed in days by block, to within a couple of minutes.
         </p>
       </Panel>
     </>
