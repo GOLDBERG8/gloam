@@ -6,6 +6,7 @@ import {
   BRIDGE_DESTINATIONS,
   BRIDGE_MAX_USD,
   BRIDGE_MIN_USD,
+  SWAP_SOURCES,
   bridgeChain,
   bridgeToken,
   swapSource,
@@ -19,6 +20,9 @@ export const dynamic = "force-dynamic";
 const RELAY_API = "https://api.relay.link";
 /** Quotes per IP per minute. Each one makes a fresh deposit address at Relay. */
 const RATE_LIMIT = 12;
+/** Swap prices per IP per minute: no deposit address, and the panel re-prices as the amount is typed. */
+const SWAP_RATE_LIMIT = 60;
+const SWAP_CHAIN_IDS = new Set(Object.values(SWAP_SOURCES).map((c) => c!.id));
 
 const ADDRESS_NAME: Record<string, string> = { svm: "Solana", tvm: "Tron", bvm: "Bitcoin" };
 
@@ -40,15 +44,20 @@ function appFees(): { recipient: string; fee: string }[] | undefined {
  * delivers the network's stablecoin to `recipient`. We keep nothing.
  */
 export async function POST(req: Request) {
-  const rate = await hitRateLimit(clientIp(req), "bridge-quote", RATE_LIMIT);
-  if (!rate.allowed) return fail(429, "Too many tries. Wait a minute.", { "Retry-After": String(rate.retryAfterSec) });
-
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;
   } catch {
     return fail(400, "Send the details as JSON.");
   }
+
+  const swapAsk = SWAP_CHAIN_IDS.has(Number(body.chainId));
+  const rate = await hitRateLimit(
+    clientIp(req),
+    swapAsk ? "swap-quote" : "bridge-quote",
+    swapAsk ? SWAP_RATE_LIMIT : RATE_LIMIT
+  );
+  if (!rate.allowed) return fail(429, "Too many tries. Wait a minute.", { "Retry-After": String(rate.retryAfterSec) });
 
   if (typeof body.network !== "string" || !isNetworkKey(body.network)) return fail(400, "Pick Robinhood Chain or Tempo.");
   const network = getNetwork(body.network);

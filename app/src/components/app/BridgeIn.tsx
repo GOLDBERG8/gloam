@@ -183,6 +183,45 @@ function BridgeSheet({
     resetSend();
   }, [resetSend]);
 
+  // A live price for the swap while the amount is typed, refreshed every 20 seconds,
+  // so the rate and fees show before review. It is the same quote the review uses.
+  const [preview, setPreview] = useState<{ amount: string; at: number; quote: BridgeQuote | null; error: string | null } | null>(null);
+  const [tick, setTick] = useState(0);
+  const pricing = open && swapping && stage.kind === "form" && /^\d+(\.\d+)?$/.test(amount) && Number(amount) > 0;
+  useEffect(() => {
+    if (!pricing) return;
+    const ctrl = new AbortController();
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/bridge/quote", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chainId: chain.id, symbol: token.symbol, network: network.key, amount, recipient }),
+          signal: ctrl.signal,
+        });
+        const json = (await res.json()) as { ok: boolean; data?: BridgeQuote; error?: { message: string } };
+        setPreview({
+          amount,
+          at: Date.now(),
+          quote: json.ok && json.data ? json.data : null,
+          error: json.ok ? null : (json.error?.message ?? "No price right now. Try again."),
+        });
+      } catch {
+        if (!ctrl.signal.aborted) setPreview({ amount, at: Date.now(), quote: null, error: "Couldn't get a price. Check your connection." });
+      }
+    }, 400);
+    return () => {
+      ctrl.abort();
+      window.clearTimeout(t);
+    };
+  }, [pricing, amount, chain.id, token.symbol, network.key, recipient, tick]);
+  useEffect(() => {
+    if (!pricing) return;
+    const t = window.setInterval(() => setTick((n) => n + 1), 20_000);
+    return () => window.clearInterval(t);
+  }, [pricing]);
+  const live = preview && preview.amount === amount ? preview : null;
+
 
   useEffect(() => {
     if (!open) return;
@@ -234,6 +273,11 @@ function BridgeSheet({
 
   async function getAddress(e: React.FormEvent) {
     e.preventDefault();
+    // A swap price from the last few seconds is the review: no second wait.
+    if (swapping && live?.quote && Date.now() - live.at < 25_000) {
+      setStage({ kind: "address", quote: live.quote, qr: null });
+      return;
+    }
     setStage({ kind: "loading" });
     setStatus(null);
     try {
@@ -454,24 +498,35 @@ function BridgeSheet({
                   onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
                   className="tnum min-w-0 flex-1 bg-transparent text-[16px] text-foreground outline-none! placeholder:text-faint"
                 />
+                {swapping && live?.quote?.send.usd != null && (
+                  <span className="tnum shrink-0 text-[13px] text-mute">${fmtMoney(live.quote.send.usd)}</span>
+                )}
                 <TokenMark src={token.logo} size={20} />
                 <span className="text-[14px] text-mute">{token.symbol}</span>
               </div>
               {swapping && gasCoin != null && (
-                <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[12px] text-mute">
-                  <span className="tnum">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="tnum text-[12px] text-mute">
                     In your wallet: {trimAmount(formatUnits(gasCoin.value, token.decimals))} {token.symbol}
                   </span>
-                  {maxWei > BigInt(0) && (
-                    <button
-                      type="button"
-                      onClick={() => setAmount(trimAmount(formatUnits(maxWei, token.decimals)))}
-                      className="font-medium text-foreground underline-offset-2 hover:underline"
-                    >
-                      Max
-                    </button>
-                  )}
-                </p>
+                  <div role="group" aria-label="Amount shortcuts" className="flex gap-1.5">
+                    {[25, 50, 75, 100].map((pct) => {
+                      const wei = pct === 100 ? maxWei : (gasCoin.value * BigInt(pct)) / BigInt(100);
+                      const pick = wei > maxWei ? maxWei : wei;
+                      return (
+                        <button
+                          key={pct}
+                          type="button"
+                          disabled={pick === BigInt(0)}
+                          onClick={() => setAmount(trimAmount(formatUnits(pick, token.decimals)))}
+                          className="h-9 rounded-full border border-line px-3 text-[12.5px] text-soft transition-colors hover:bg-surface hover:text-foreground disabled:opacity-40"
+                        >
+                          {pct === 100 ? "Max" : `${pct}%`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
               <p className={`mt-1.5 text-[12px] ${overBalance ? "text-danger" : "text-mute"}`}>
                 {overBalance
@@ -483,6 +538,16 @@ function BridgeSheet({
                       : `Up to about $${BRIDGE_MAX_USD.toLocaleString("en-US")} worth. It arrives as ${dest.token.symbol}.`}
               </p>
             </div>
+
+            {swapping && amountNum > 0 && !overBalance && (
+              live?.error ? (
+                <p role="alert" className="rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
+                  {live.error}
+                </p>
+              ) : (
+                <SwapPrice quote={live?.quote ?? null} from={token.symbol} to={dest.token.symbol} />
+              )
+            )}
 
             {chain.kind !== "evm" && (
               <div>
@@ -726,6 +791,10 @@ function SwapReview({
           </dd>
         </div>
         <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Rate</dt>
+          <dd className="tnum text-right text-foreground">{rateLine(quote)}</dd>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
           <dt className="text-mute">At least</dt>
           <dd className="tnum text-right text-foreground">
             {Number(quote.receive.minimum).toFixed(2)} {quote.receive.symbol}
@@ -791,5 +860,48 @@ function SwapReview({
         </p>
       )}
     </div>
+  );
+}
+
+/** Dollars with cents and thousands separators. */
+function fmtMoney(n: number): string {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** "1 ETH = 2,504.83 USDG", from what a quote sends and returns. */
+function rateLine(q: BridgeQuote): string {
+  const rate = Number(q.receive.amount) / Number(q.send.amount);
+  return Number.isFinite(rate) && rate > 0 ? `1 ${q.send.symbol} = ${fmtMoney(rate)} ${q.receive.symbol}` : "";
+}
+
+/** The live price under the swap amount: what arrives, the rate and the fees. */
+function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: string; to: string }) {
+  const wait = <span aria-hidden className="inline-block h-3.5 w-20 animate-pulse rounded bg-foreground/10" />;
+  const rows: [string, React.ReactNode][] = [
+    [
+      "You get about",
+      quote ? (
+        <span className="flex items-center gap-1.5 font-medium">
+          <TokenMark src={quote.receive.logo} size={16} />
+          {fmtMoney(Number(quote.receive.amount))} {to}
+        </span>
+      ) : (
+        wait
+      ),
+    ],
+    ["Rate", quote ? rateLine(quote) : wait],
+    ["At least", quote ? `${fmtMoney(Number(quote.receive.minimum))} ${to}` : wait],
+    ["Swap fee", quote ? (quote.feeUsd < 0.01 ? "Under a cent" : `about $${fmtMoney(quote.feeUsd)}`) : wait],
+    ["Network fee", `A few cents of ${from}`],
+  ];
+  return (
+    <dl className="divide-y divide-line rounded-2xl bg-surface px-4 text-[13.5px]" aria-live="polite" aria-busy={!quote}>
+      {rows.map(([k, v]) => (
+        <div key={k} className="flex min-h-10 items-center justify-between gap-3">
+          <dt className="text-mute">{k}</dt>
+          <dd className="tnum text-right text-foreground">{v}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
