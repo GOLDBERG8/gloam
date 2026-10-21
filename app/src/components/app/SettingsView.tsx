@@ -597,16 +597,32 @@ export function SettingsView() {
                   setBackupMsg("No private balances to export.");
                   return;
                 }
-                if (!(await passkeyAllowsExport())) return;
-                const json = JSON.stringify(backup, null, 2);
-                const text = backupPass.trim()
-                  ? await sealWithPassphrase(json, backupPass)
-                  : json;
-                await navigator.clipboard.writeText(text).catch((err) => {
-                  // Some browsers drop the click after a passkey prompt.
-                  if (vault.protected) throw new Error("Passkey confirmed. Press Copy backup again to copy it.");
-                  throw err;
-                });
+                // Build the text and hand the clipboard a promise of it inside this click.
+                // A plain writeText after the passkey prompt and the slow passphrase lock
+                // can be refused once the click has expired, which left whatever was on
+                // the clipboard before in place.
+                const textPromise = (async () => {
+                  if (!(await passkeyAllowsExport())) throw new Error("cancelled");
+                  const json = JSON.stringify(backup, null, 2);
+                  return backupPass.trim() ? await sealWithPassphrase(json, backupPass) : json;
+                })();
+                try {
+                  if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+                    await navigator.clipboard.write([
+                      new ClipboardItem({ "text/plain": textPromise.then((t) => new Blob([t], { type: "text/plain" })) }),
+                    ]);
+                  } else {
+                    await navigator.clipboard.writeText(await textPromise);
+                  }
+                } catch (err) {
+                  if (err instanceof Error && err.message === "cancelled") return;
+                  // Last try: write the finished text directly.
+                  const text = await textPromise.catch(() => null);
+                  if (text === null) return;
+                  await navigator.clipboard.writeText(text).catch(() => {
+                    throw new Error("Your browser blocked the copy. Press Copy backup again, or use Download.");
+                  });
+                }
                 setBackupMsg(
                   backupPass.trim()
                     ? `Copied a locked backup (${backup.notes.length} balance(s)).`
