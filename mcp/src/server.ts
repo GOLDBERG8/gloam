@@ -1,10 +1,12 @@
 /**
  * The Gloam MCP tools.
  *
- * Gives an AI agent private execution tools across Gloam's networks: private
- * stablecoin payments on Tempo and private trading on Robinhood Chain. The x402
- * payment tools target either network (pass `network`), so an agent can settle a
- * 402 challenge privately in PathUSD on Tempo or in the RH asset on Robinhood.
+ * Gives an AI agent private payment tools across Gloam's networks: Robinhood
+ * Chain and Tempo, each on mainnet (real money, the ceremony's final keys, beta
+ * deposit limits, payments only) and testnet (test funds, dev keys). Tools take
+ * a `network` (default: GLOAM_NETWORK, else Robinhood Chain testnet), and the
+ * 402 payment tools settle on whatever network the price names. Private trading
+ * is not live on any network; the market and trade tools only plan.
  *
  * This exposes read + planning tools that work today, and returns honest
  * "intent" objects for write actions (shield / pay / send) when there is no
@@ -59,10 +61,10 @@ import {
   POOL_STATE_ABI,
   GLOAM_NOT_FINAL,
   GLOAM_VS_ZONE,
-  GLOAM_NETWORKS,
   GLOAM_RELAY_URL,
   GLOAM_X402_SCHEME,
   relayIntent,
+  assertDepositAllowed,
   type GloamIntent,
   type GloamPaymentPayload,
   type GloamPaymentRequirements,
@@ -76,7 +78,17 @@ import { getPublicClient, getSigner, signerSetup, type Signer } from "./signer.j
 import { checkAccessKey } from "./accessKey.js";
 import { packageVersion } from "./version.js";
 import { shieldArtifacts, transferArtifacts } from "./artifacts.js";
-import { networkByKey, networkByChainId, MCP_NETWORKS, type McpNetwork } from "./networks.js";
+import {
+  allNetworks,
+  defaultNetworkKey,
+  describeNetwork,
+  networkByKey,
+  networkByChainId,
+  tempoAccessNetwork,
+  MCP_NETWORKS,
+  NETWORK_KEYS,
+  type McpNetwork,
+} from "./networks.js";
 import { KNOWN_ASSETS, assetLabel, type Spend } from "./policy.js";
 import { authorizeSpend, limitsReport, previewSpend, settleSpend, spendingReport } from "./spendGuard.js";
 import { balances, noteView, openNoteStore, type NoteStore, type StoredNote } from "./noteStore.js";
@@ -122,8 +134,9 @@ export interface ServerDeps {
   env: Env;
   signer(net: McpNetwork): Signer | null;
   publicClient(net: McpNetwork): ChainClient;
-  shieldProver(): Promise<Prover>;
-  transferProver(): Promise<Prover>;
+  /** The prover for `net`'s key set: dev keys on testnet, the ceremony's final keys on mainnet. */
+  shieldProver(net?: McpNetwork): Promise<Prover>;
+  transferProver(net?: McpNetwork): Promise<Prover>;
   syncTree: typeof syncTree;
   relay(intent: GloamIntent, opts: RelayOptions): Promise<Hex>;
   fetch: typeof fetch;
@@ -134,8 +147,8 @@ function defaultDeps(env: Env): ServerDeps {
     env,
     signer: (net) => getSigner(net, env),
     publicClient: (net) => getPublicClient(net),
-    shieldProver: async () => artifactProver(await shieldArtifacts()),
-    transferProver: async () => artifactProver(await transferArtifacts()),
+    shieldProver: async (net) => artifactProver(await shieldArtifacts(net?.ceremony ?? "dev")),
+    transferProver: async (net) => artifactProver(await transferArtifacts(net?.ceremony ?? "dev")),
     syncTree,
     relay: relayIntent,
     fetch: guardedFetch(env),
@@ -254,7 +267,7 @@ const AGENT_WALLET_NOTE =
   "This build does not sign or broadcast. Connect an agent wallet with signing (e.g. Turnkey embedded wallet + policy) to execute this intent. Returned as a plan an agent or human can approve.";
 
 const NO_SIGNER =
-  "No signer configured. Set GLOAM_AGENT_PRIVATE_KEY (testnet) to execute. For limits the protocol enforces on Tempo, make the agent a Tempo access key: npx -y @gloamtrade/mcp authorize-access-key --owner <account> --generate";
+  "No signer configured. Set GLOAM_AGENT_PRIVATE_KEY to execute. For limits the protocol enforces on Tempo, make the agent a Tempo access key: npx -y @gloamtrade/mcp authorize-access-key --owner <account> --generate";
 
 const LEGACY_WARNING =
   "GLOAM_EXPOSE_NOTE_SECRETS=1 is set: note secrets are passed to and from the agent. Anyone who reads a secret can spend that money, and spending limits cannot stop that. Turn it off unless you are migrating old notes.";
@@ -263,6 +276,15 @@ const LEGACY_WARNING =
 export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServer {
   const deps: ServerDeps = { ...defaultDeps(overrides.env ?? process.env), ...overrides };
   const env = deps.env;
+  /** The network a tool uses when the agent names none. Throws at startup on a GLOAM_NETWORK this build lacks. */
+  const defaultNet = defaultNetworkKey(env);
+  const networkArg = (what: string) =>
+    z
+      .enum(NETWORK_KEYS)
+      .default(defaultNet)
+      .describe(
+        `${what} ${NETWORK_KEYS.map((k) => `"${k}"`).join(", ")}. The -mainnet ones are real money (beta deposit limits); "robinhood" and "tempo" are the testnets (test funds). Default here: "${defaultNet}".`
+      );
   /** Old behavior: secrets in tool results and arguments. Read once; restart to change. */
   const legacy = env.GLOAM_EXPOSE_NOTE_SECRETS?.trim() === "1";
   const server = new McpServer({ name: "gloam", version: packageVersion() });
@@ -307,22 +329,31 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     {
       title: "About Gloam",
       description:
-        "What Gloam is and what an agent can do with it. Call this first to understand the private-trading tools available.",
+        "What Gloam is, which networks it runs on, and what an agent can do with it. Call this first.",
     },
     async () =>
       text({
-        what: "Gloam is private trading on Robinhood Chain. Hold, send, and trade stocks and crypto without broadcasting size or strategy to the public chain.",
+        what: "Gloam is private stablecoin payments for people and AI agents on Robinhood Chain and Tempo. Hold a private balance, pay and get paid without putting amounts or counterparties on the public chain, and prove one fact to one reader when needed.",
         whyAgentsCareMost:
-          "Agents run predictable, high-frequency strategies. On a public chain every move is copyable and front-runnable. Gloam keeps an agent's positions and size private.",
-        chain: CHAIN,
+          "Agents pay for tools and data all day. On a public chain every payment shows who it pays, how much and how often, which leaks the agent's whole strategy. Gloam keeps those payments private.",
+        networks: allNetworks().map((n) => ({
+          key: n.key,
+          network: describeNetwork(n),
+          chainId: n.chainId,
+          pool: n.pool,
+          keys: n.ceremony === "production" ? "the trusted setup's final keys" : "dev keys",
+        })),
+        defaultNetwork: defaultNet,
+        mainnet:
+          "Mainnet is beta and moves real money. The mainnet pools take payments only (no private trading), with beta deposit limits of 500 per deposit and 25,000 in total for each stablecoin (25,000 and 250,000 for GLOAM). Deposits and private payments are free; cashing out costs 0.25%. Reviewed internally before launch; an external audit is planned, not done.",
         tools: [
           "gloam_privacy_status: honest privacy posture, what is public vs private (read)",
-          "gloam_list_markets: tradable markets and marks (read)",
-          "gloam_quote: indicative quote and what stays private (read)",
-          "gloam_plan_private_trade: build a private-trade intent, no execution (planning)",
+          "gloam_list_markets: markets for private trading, which is NOT live yet; indicative testnet marks (read)",
+          "gloam_quote: indicative quote for a future private trade (read)",
+          "gloam_plan_private_trade: plan a private trade; it cannot execute while private trading is off (planning)",
           "gloam_plan_shield: describe a shield before executing (planning)",
           "gloam_execute_shield: REAL private deposit. Mints a note, proves, and broadcasts shieldBound; returns a note handle (execution; needs a signer)",
-          "gloam_execute_transfer: sign and broadcast a public testnet transfer (execution; needs a signer)",
+          "gloam_execute_transfer: sign and broadcast a public transfer of test ETH on Robinhood Chain testnet, for funding (execution; needs a signer)",
           "gloam_list_notes: this server's private notes as handles, and the private balance per asset (read)",
           "gloam_receive_tag: this server's receive tag, for others to pay it privately (read)",
           "gloam_payment_requirements: price an agent resource in a private payment, as x402 requirements and an MPP challenge (server side)",
@@ -357,14 +388,19 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     "gloam_list_markets",
     {
       title: "List markets",
-      description: "List the markets an agent can trade privately on Gloam, with indicative testnet marks.",
+      description:
+        "List the markets planned for private trading on Gloam, with indicative testnet marks. Private trading is not live on any network yet (mainnet takes payments only), so these are for planning.",
       inputSchema: {
         kind: z.enum(["stock", "crypto", "all"]).default("all").describe("Filter by asset kind."),
       },
     },
     async ({ kind }) => {
       const list = kind === "all" ? MARKETS : MARKETS.filter((m) => m.kind === kind);
-      return text({ count: list.length, note: "Marks are indicative testnet values.", markets: list });
+      return text({
+        count: list.length,
+        note: "Marks are indicative testnet values. Private trading is not live yet: these markets cannot be traded today.",
+        markets: list,
+      });
     }
   );
 
@@ -392,7 +428,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         markUsd: m.mark,
         staysPrivate: ["your size", "your position", "who you are"],
         becomesPublic: ["only that a private trade occurred, not the amount"],
-        note: "Indicative only. Size privacy depends on the current anonymity set (see gloam_privacy_status).",
+        note: "Indicative only, and private trading is not live yet, so this cannot be executed today. Size privacy depends on the current anonymity set (see gloam_privacy_status).",
       });
     }
   );
@@ -402,7 +438,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     {
       title: "Plan a private trade",
       description:
-        "Build a private-trade intent (does not execute). Returns the exact action a connected agent wallet would sign.",
+        "Plan a private trade (never executes). Private trading is not live on any network yet, so this is a plan only.",
       inputSchema: {
         market: z.string().describe("Symbol or id, e.g. TSLA."),
         side: z.enum(["buy", "sell"]),
@@ -422,6 +458,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         estimatedUnits: Number((usd / m.mark).toFixed(6)),
         agentAddress: agentAddress ?? null,
         privacy: "Size and position stay off the public chain.",
+        status: "Private trading is switched off on every network while a new engine is built. The mainnet pools take payments only.",
         execution: AGENT_WALLET_NOTE,
       });
     }
@@ -432,9 +469,9 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     {
       title: "Plan a shield (deposit to private)",
       description:
-        "Build an intent to move funds into a private balance (shield), the first step before private trading or sending.",
+        "Describe moving funds into a private balance (shield), the first step before paying privately. To actually shield, use gloam_execute_shield.",
       inputSchema: {
-        asset: z.string().default("ETH").describe("Asset to shield, e.g. ETH or TSLA."),
+        asset: z.string().default("ETH").describe("Asset to shield, e.g. USDG, USDC.e, or ETH on testnet."),
         usd: z.number().positive().describe("Amount to shield, in USD."),
         agentAddress: z.string().optional(),
       },
@@ -456,25 +493,24 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     {
       title: "Execute a private shield",
       description:
-        "Deposit into a PRIVATE balance on the chosen Gloam network. Mints a note, generates the Groth16 shield proof server-side, and broadcasts shieldBound() (approving the ERC-20 first when the asset is a token, e.g. PathUSD on Tempo). The note's secret stays inside this server; the agent gets a note handle to pay from later (gloam_execute_private_pay, gloam_list_notes). Requires GLOAM_AGENT_PRIVATE_KEY; without it, returns a plan.",
+        "Deposit into a PRIVATE balance on the chosen Gloam network. Mints a note, generates the Groth16 shield proof server-side with that network's keys, and broadcasts shieldBound() (approving the ERC-20 first when the asset is a token). On mainnet (real money) the pool takes USDG or GLOAM on Robinhood Chain and USDC.e, pathUSD, USDT0 or OUSD on Tempo, at most 500 of a stablecoin (25,000 GLOAM) per deposit during the beta; deposits are free. The note's secret stays inside this server; the agent gets a note handle to pay from later (gloam_execute_private_pay, gloam_list_notes). Requires GLOAM_AGENT_PRIVATE_KEY; without it, returns a plan.",
       inputSchema: {
         amount: z
           .number()
           .positive()
-          .describe("Amount to shield into a private balance, in the asset's units (e.g. PathUSD on Tempo, ETH on Robinhood)."),
-        network: z
-          .enum(["robinhood", "tempo"])
-          .default("robinhood")
-          .describe("Which network to shield on. Tempo shields the PathUSD stablecoin; Robinhood shields native ETH by default."),
+          .describe("Amount to shield into a private balance, in the asset's units (e.g. 25 for 25 USDC.e)."),
+        network: networkArg("Which network to shield on:"),
         asset: z
           .string()
           .optional()
-          .describe("ERC-20 token address to shield; omit to use the network default (PathUSD on Tempo, native ETH on Robinhood)."),
+          .describe(
+            "ERC-20 token address to shield; omit to use the network default (USDG on Robinhood Chain mainnet, USDC.e on Tempo mainnet, PathUSD on Tempo testnet, native ETH on Robinhood Chain testnet)."
+          ),
         decimals: z
           .number()
           .int()
           .optional()
-          .describe("Decimals of the asset; omit to use the network default (6 for PathUSD, 18 for ETH)."),
+          .describe("Decimals of the asset; omit to use the asset's own (6 for the stablecoins, 18 for GLOAM and ETH)."),
       },
     },
     async ({ amount, network, asset, decimals }) => {
@@ -486,6 +522,12 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       const dec = decimals ?? (asset ? assetInfo(net.chainId, assetAddr).decimals : net.defaultAssetDecimals);
       const amountWei = parseUnits(String(amount), dec);
       const isNative = assetAddr.toLowerCase() === NATIVE_ASSET.toLowerCase();
+      // Mainnet pools list their assets and cap each deposit during the beta: say so before anything is reserved or signed.
+      try {
+        assertDepositAllowed(net.chainId, assetAddr, amountWei);
+      } catch (e) {
+        return text({ status: "error", network: net.key, error: errMsg(e) });
+      }
       const spend: Spend = {
         tool: "shield",
         network: net.key,
@@ -498,7 +540,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       if (!signer) {
         return text({
           status: "no_signer",
-          plan: { action: "shield", amount, asset: assetAddr, network: net.key, chainId: net.chainId, pool: net.pool },
+          plan: { action: "shield", amount, asset: assetAddr, network: net.key, realMoney: !net.testnet, chainId: net.chainId, pool: net.pool },
           limits: previewSpend(spend, env),
           message: NO_SIGNER,
         });
@@ -515,8 +557,9 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         const intent = await buildShieldBoundIntent({
           amountWei,
           asset: assetAddr,
+          chainId: net.chainId,
           poolAddress: net.pool,
-          prover: await deps.shieldProver(),
+          prover: await deps.shieldProver(net),
         });
         // Keep the note before anything is broadcast, so a crash mid-flight cannot lose it.
         held = notes.add({
@@ -535,8 +578,8 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           origin: "shield",
           createdTx: null,
         });
-        // ERC-20 shields (e.g. PathUSD on Tempo) approve the pool to pull the
-        // tokens before shieldBound; native shields carry value instead.
+        // ERC-20 shields (every mainnet asset, PathUSD on Tempo testnet) approve
+        // the pool to pull the tokens before shieldBound; native shields carry value instead.
         let approveHash: Hex | undefined;
         if (!isNative) {
           approveHash = await signer.walletClient.writeContract({
@@ -605,7 +648,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     {
       title: "Execute a transfer (public)",
       description:
-        "Send testnet ETH publicly on Robinhood Chain from the agent wallet. This is the PUBLIC rail (amount and recipient are visible), useful for funding. For private movement, use gloam_execute_shield. Requires GLOAM_AGENT_PRIVATE_KEY; without it, returns a plan only.",
+        "Send test ETH publicly on Robinhood Chain TESTNET from the agent wallet, for funding while practicing. This is the PUBLIC rail (amount and recipient are visible) and testnet only. For private movement, use gloam_execute_shield and gloam_execute_private_pay. Requires GLOAM_AGENT_PRIVATE_KEY; without it, returns a plan only.",
       inputSchema: {
         to: z.string().describe("Recipient 0x address."),
         eth: z.number().positive().describe("Amount of testnet ETH to send."),
@@ -661,7 +704,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       description:
         "This server's private notes as handles, with network, asset, amount, status (unspent, pending, spent) and the transaction that created each one, plus the spendable private balance per asset. Never shows a secret. Pass refresh to check pending notes against the chain.",
       inputSchema: {
-        network: z.enum(["robinhood", "tempo"]).optional().describe("Only this network."),
+        network: z.enum(NETWORK_KEYS).optional().describe("Only this network."),
         includeSpent: z.boolean().default(false).describe("Also list spent notes."),
         refresh: z.boolean().default(false).describe("Check pending notes on chain first (read-only calls)."),
       },
@@ -747,18 +790,26 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         "SERVER side. Build the HTTP 402 price an agent-paid resource returns, settled privately through Gloam: the amount and parties never go public. Returns it in both dialects: x402 requirements (and their encoded form), and an MPP challenge (mpp.wwwAuthenticate, the WWW-Authenticate: Payment value for method gloam, intent charge). payTo defaults to this server's own receive tag. Check what the payer presents with gloam_verify_payment.",
       inputSchema: {
         amount: z.number().positive().describe("Price in the asset's display units, e.g. 0.25."),
-        decimals: z.number().int().min(0).max(36).default(18).describe("Decimals of the settlement asset."),
-        assetSymbol: z.string().default("ETH").describe("Asset label, e.g. USD on Tempo or ETH on Robinhood testnet."),
-        asset: z.string().optional().describe("Settlement token address; omit for the chain's native unit."),
+        decimals: z
+          .number()
+          .int()
+          .min(0)
+          .max(36)
+          .optional()
+          .describe("Decimals of the settlement asset; omit for the asset's own (6 for the stablecoins)."),
+        assetSymbol: z.string().optional().describe("Asset label, e.g. USDC.e; omit for the asset's own symbol."),
+        asset: z
+          .string()
+          .optional()
+          .describe(
+            "Settlement token address; omit for the network default (USDG on Robinhood Chain mainnet, USDC.e on Tempo mainnet, PathUSD on Tempo testnet, ETH on Robinhood Chain testnet)."
+          ),
         payTo: z
           .string()
           .optional()
           .describe("Payee receive tag (gloamr1.…). Omit to be paid to this server's own tag, which gloam_verify_payment can open."),
         resource: z.string().describe("What is being paid for: a URL or an MCP tool id."),
-        network: z
-          .enum(["robinhood", "tempo"])
-          .default("robinhood")
-          .describe("Which Gloam network to settle on. Tempo is the stablecoin-payments chain (pay in PathUSD); Robinhood is the equities chain."),
+        network: networkArg("Which Gloam network the payer settles on:"),
         realm: z
           .string()
           .optional()
@@ -786,12 +837,14 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           return text({ status: "error", error: errMsg(e) });
         }
       }
-      const net = GLOAM_NETWORKS[network];
+      const net = networkByKey(network);
+      const settleAsset = (asset as Address | undefined) ?? net.defaultAsset;
+      const known = assetInfo(net.chainId, settleAsset, net.defaultAssetDecimals);
       try {
         const req = buildGloamPaymentRequirements({
-          amountWei: parseUnits(String(amount), decimals),
-          asset: (asset as Address | undefined) ?? NATIVE_ASSET,
-          assetSymbol,
+          amountWei: parseUnits(String(amount), decimals ?? known.decimals),
+          asset: settleAsset,
+          assetSymbol: assetSymbol ?? known.symbol,
           payTo: tag,
           resource,
           network: net.chainId,
@@ -800,7 +853,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         // The same price as an MPP challenge. It needs this server's challenge key (MPP_SECRET_KEY, or the note store key).
         let mpp: Record<string, unknown>;
         try {
-          const issued = await mppChallengeFor(req, { env, realm, decimals, expiresInSeconds });
+          const issued = await mppChallengeFor(req, { env, realm, decimals: decimals ?? known.decimals, expiresInSeconds });
           mpp = {
             wwwAuthenticate: issued.wwwAuthenticate,
             challengeId: issued.challenge.id,
@@ -814,6 +867,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           mpp = { error: `No MPP challenge: ${errMsg(e)}` };
         }
         return text({
+          network: describeNetwork(net),
           requirements: req,
           encoded: encodeRequirements(req),
           httpHint:
@@ -844,7 +898,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       const priced = parsePriced(requirements);
       if ("error" in priced) return text({ status: "error", error: priced.error });
       const { req, mpp } = priced;
-      const netForReq = Object.values(GLOAM_NETWORKS).find((n) => n.chainId === Number(req.network));
+      const netForReq = networkByChainId(Number(req.network));
       const tagOk = isReceiveTag(String(req.payTo ?? ""));
       return text({
         status: "plan",
@@ -865,8 +919,10 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
             ? "Not a receive tag. With GLOAM_EXPOSE_NOTE_SECRETS=1 the note would go in the header unsealed, readable by anyone who sees it."
             : "Not a receive tag, so this payment would be refused. Ask the payee for its gloamr1. tag.",
         poolStatus: netForReq
-          ? `Live: pool ${netForReq.pool} on ${netForReq.label} (chain ${netForReq.chainId}).`
-          : `Unknown network ${req.network}.`,
+          ? `Live: pool ${netForReq.pool} on ${describeNetwork(netForReq)}, chain ${netForReq.chainId}.${
+              String(req.poolAddress).toLowerCase() === netForReq.pool.toLowerCase() ? "" : ` These requirements name ${req.poolAddress} instead, so this server will refuse to pay.`
+            }`
+          : `Chain ${req.network} is not a network this server can pay on.`,
         execute: mpp
           ? "gloam_execute_private_pay({ requirements, note? }) pays and returns the Authorization: Payment credential; gloam_fetch_paid({ url }) also makes the request and the retry."
           : "gloam_execute_private_pay({ requirements, note? }) pays and returns the X-PAYMENT header; gloam_fetch_paid({ url }) also makes the request and the retry.",
@@ -908,8 +964,15 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     const fail = (result: Record<string, unknown>): PayResult => ({ ok: false, result });
     if (req.scheme !== GLOAM_X402_SCHEME) return fail({ status: "error", error: `Not a Gloam private payment (scheme "${req.scheme}").` });
     // The requirements name the network to settle on; use it for the signer,
-    // tree scan, and explorer so an agent can pay privately on Tempo or Robinhood.
-    const net = networkByChainId(Number(req.network)) ?? MCP_NETWORKS.robinhood;
+    // tree scan, keys and explorer. A chain this build has no pool for is refused.
+    const net = networkByChainId(Number(req.network));
+    if (!net) {
+      return fail({
+        status: "refused",
+        code: "unknown_network",
+        message: `This price settles on chain ${req.network}, which this server has no Gloam pool for. It pays on: ${NETWORK_KEYS.join(", ")}.`,
+      });
+    }
     let spend: Spend & { pool?: Address };
     try {
       spend = {
@@ -1015,7 +1078,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         senderSecretHex: input.secret,
         senderNoteAmountWei: input.amountWei,
         path,
-        prove: await deps.transferProver(),
+        prove: await deps.transferProver(net),
         issuerTag: opts.issuerTag,
         legacyUnsealed: legacy && !sealed,
       });
@@ -1106,6 +1169,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           ...(logWarning ? { logWarning } : {}),
           ...(noteWarning ? { noteWarning } : {}),
           network: net.key,
+          ...(net.testnet ? {} : { realMoney: true }),
           submittedBy: relay ? "gloam-relay (agent wallet hidden)" : "agent wallet",
           hash,
           explorer: `${net.explorer}/tx/${hash}`,
@@ -1477,7 +1541,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         note,
         poolAddress: net.pool,
         chainId: net.chainId,
-        prove: await deps.transferProver(),
+        prove: await deps.transferProver(net),
         chain: sweepChain(client, net),
         submit,
         // The fresh note's secret is the money: store it before the sweep is sent.
@@ -1751,7 +1815,8 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       }
       if (setup.mode !== "access-key") return text(report);
       try {
-        const onchain = await checkAccessKey({ owner: setup.owner, keyId: setup.keyAddress }, deps.publicClient(MCP_NETWORKS.tempo));
+        const tempoNet = tempoAccessNetwork(env);
+        const onchain = await checkAccessKey({ owner: setup.owner, keyId: setup.keyAddress, network: tempoNet }, deps.publicClient(tempoNet));
         return text({ ...report, onchain });
       } catch (e) {
         return text({ ...report, onchain: { error: `Could not read the access key's onchain state: ${errMsg(e)}` } });

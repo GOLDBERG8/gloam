@@ -1,8 +1,30 @@
 # @gloamtrade/mcp
 
-Private stablecoin payments for AI agents on Tempo, and private execution on Robinhood Chain, powered by [`@gloamtrade/sdk`](../packages/sdk). The agent pays x402 and MPP resources, holds a shielded balance and gets paid, within spending limits it cannot lift: off-chain limits this server checks, and on Tempo an access key whose cap the protocol enforces.
+Private stablecoin payments for AI agents on Tempo and Robinhood Chain, powered by [`@gloamtrade/sdk`](../packages/sdk). The agent pays x402 and MPP resources, holds a shielded balance and gets paid, within spending limits it cannot lift: off-chain limits this server checks, and on Tempo an access key whose cap the protocol enforces.
 
-Robinhood gives agents an MCP server for **public** trading. Gloam gives them one for **private** execution. An agent connects both: Robinhood for open trades, Gloam so its size and strategy stay off the public chain.
+Live on mainnet (beta, real money) on Tempo (`4217`) and Robinhood Chain (`4663`), and on testnet for free practice. Robinhood gives agents an MCP server for **public** trading. Gloam gives them one for **private** payments, so who an agent pays, and how much, stays off the public chain.
+
+## Mainnet or testnet
+
+Every tool that touches a chain takes a `network`:
+
+| `network` | What it is | Assets | Keys |
+| --- | --- | --- | --- |
+| `tempo-mainnet` | Tempo mainnet, real money | USDC.e, pathUSD, USDT0, OUSD | Final ceremony keys |
+| `robinhood-mainnet` | Robinhood Chain mainnet, real money | USDG, GLOAM | Final ceremony keys |
+| `tempo` | Tempo testnet (Moderato), test funds | PathUSD and other test stablecoins | Dev keys |
+| `robinhood` | Robinhood Chain testnet, test funds | Test ETH, test USDG | Dev keys |
+
+`GLOAM_NETWORK` sets the network a tool uses when the agent names none. Unset, it is `robinhood` (testnet), as in earlier versions, so an existing setup never starts moving real money by itself. For mainnet, set `GLOAM_NETWORK=tempo-mainnet` (or `robinhood-mainnet`) and give the agent mainnet limits (see [Mainnet assets in limits](#mainnet-assets-in-limits)). A price an agent pays names its own network, and the server pays there only if that network is one it has a pool for.
+
+On mainnet:
+
+- **Payments only, beta limits.** The mainnet pools take deposits, private payments and sweeps. Private trading is not live. A deposit is at most 500 of a stablecoin (25,000 GLOAM) during the beta, checked before anything is proved; private payments are never limited.
+- **Fees.** Deposits and private payments are free. Cashing out costs 0.25% (this server does not cash out; use the Gloam app or the SDK).
+- **Final keys.** Proofs for mainnet use the final keys of the 13-contributor trusted setup, downloaded from `https://www.gloam.trade/circuits/final` and checked against the SHA-256 the SDK pins. Testnet proofs use the dev keys. The two are cached apart.
+- **Beta software.** The contracts and circuits were reviewed internally before launch with no Critical or High findings open; an external audit is planned, not done. The mainnet pools are new, so the crowd of notes to hide among is small at first. Start with small amounts.
+- **Pools come with the version.** A mainnet appears here once the SDK this package ships with has its pool. If `GLOAM_NETWORK` names a mainnet this version lacks, the server stops at startup and says so.
+- **Your own RPC.** `GLOAM_RPC_URL_4217` and `GLOAM_RPC_URL_4663` point Tempo and Robinhood Chain mainnet at another RPC (any chain id works the same way).
 
 ## Install
 
@@ -27,10 +49,10 @@ Nothing to install: paste `https://www.gloam.trade/mcp` into Claude (Settings, C
 With no settings the server reads and plans and never signs. To let the agent spend, give it a key and limits in `~/.gloam/agent.env`. The safest way, on Tempo, is an access key the owner's wallet caps onchain:
 
 ```bash
-npx -y @gloamtrade/mcp authorize-access-key --owner 0xYOUR_TEMPO_ACCOUNT --generate --limit 10 --period 1d --expires 30d
+npx -y @gloamtrade/mcp authorize-access-key --network tempo-mainnet --owner 0xYOUR_TEMPO_ACCOUNT --generate --limit 10 --period 1d --expires 30d
 ```
 
-That makes the agent's key, saves it with matching off-chain limits, and prints what the owner signs. See [Onchain limits with a Tempo access key](#onchain-limits-with-a-tempo-access-key).
+That makes the agent's key, saves it with matching off-chain limits and `GLOAM_NETWORK=tempo-mainnet`, and prints what the owner signs. To practice first with test funds, use `--network tempo`. See [Onchain limits with a Tempo access key](#onchain-limits-with-a-tempo-access-key).
 
 ### Settings
 
@@ -38,26 +60,28 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 
 | Setting | Meaning |
 | --- | --- |
+| `GLOAM_NETWORK` | Default network for tools: `tempo-mainnet`, `robinhood-mainnet` (real money), `tempo` or `robinhood` (testnet). Default `robinhood`. A mainnet here also puts the Tempo access key on Tempo mainnet |
 | `GLOAM_AGENT_PRIVATE_KEY` | The agent's key. Without it the execute tools return plans |
 | `GLOAM_TEMPO_ACCOUNT` | The owner's Tempo account. With it, the key is a Tempo access key acting for that account |
 | `GLOAM_TEMPO_FEE_TOKEN` | Token to pay Tempo fees in, in access-key mode. Default: the protocol's choice |
 | `GLOAM_NOTE_KEY` | Note store key (see [Notes stay in the server](#notes-stay-in-the-server)) |
 | `GLOAM_LIMIT_*`, `GLOAM_LIMITS_FILE` | Off-chain spending limits (see [Spending limits](#spending-limits)) |
 | `GLOAM_ENV_FILE` | Where the settings file is. Default `~/.gloam/agent.env` |
+| `GLOAM_RPC_URL_<chainId>` | Another RPC for one network, e.g. `GLOAM_RPC_URL_4217` for Tempo mainnet |
 | `GLOAM_MPP_SECRET_KEY` (or `MPP_SECRET_KEY`) | Key that binds the MPP challenges this server issues (at least 32 characters; the same key an mppx server uses). Default: derived from the note store key |
 
 ## Tools
 
 | Tool | Type | What it does |
 | --- | --- | --- |
-| `gloam_info` | read | What Gloam is and what the agent can do |
-| `gloam_privacy_status` | read | Honest posture: what is public, what is private, how thin the anonymity set is |
-| `gloam_list_markets` | read | Markets an agent can trade privately, with indicative marks |
-| `gloam_quote` | read | Indicative quote plus what stays private |
-| `gloam_plan_private_trade` | plan | Describe a private trade before executing (no signing) |
+| `gloam_info` | read | What Gloam is, its networks, and what the agent can do |
+| `gloam_privacy_status` | read | Honest posture: what is public, what is private, mainnet limits and fees, how thin the anonymity set is |
+| `gloam_list_markets` | read | Markets planned for private trading, with indicative testnet marks. Private trading is not live |
+| `gloam_quote` | read | Indicative quote for a future private trade |
+| `gloam_plan_private_trade` | plan | Describe a private trade (never executes; private trading is off) |
 | `gloam_plan_shield` | plan | Describe a shield before executing (no signing) |
-| `gloam_execute_shield` | execute | **Real private deposit.** Mints a note, generates the Groth16 proof server-side, broadcasts `shieldBound()`, and returns a note handle |
-| `gloam_execute_transfer` | execute | Public testnet transfer (funding). Amount and recipient are visible |
+| `gloam_execute_shield` | execute | **Real private deposit** on the chosen network. Mints a note, generates the Groth16 proof server-side with that network's keys, broadcasts `shieldBound()`, and returns a note handle |
+| `gloam_execute_transfer` | execute | Public transfer of test ETH on Robinhood Chain testnet (funding while practicing). Amount and recipient are visible |
 | `gloam_list_notes` | read | This server's notes as handles (network, asset, amount, status, creating tx) and the private balance per asset. `refresh` checks pending notes on chain |
 | `gloam_receive_tag` | read | This server's receive tag (`gloamr1.…`), for others to pay it. Created on first use |
 | `gloam_payment_requirements` | server | Price an agent resource in a private payment; returns the x402 requirements and the MPP challenge (`mpp.wwwAuthenticate`). `payTo` defaults to this server's receive tag |
@@ -151,12 +175,39 @@ Not protected:
 | --- | --- |
 | `tools` | Which money tools the agent may use: `pay`, `send`, `shield`. Default all three |
 | `assets` | Which assets it may move. Required, there is no "any" |
-| `maxPerPayment` | Cap on a single payment, in the asset's units (e.g. `"5"` is 5 PathUSD) |
+| `maxPerPayment` | Cap on a single payment, in the asset's units (e.g. `"5"` is 5 USDC.e) |
 | `maxPerDay` | Cap over a rolling 24 hours, so a burst cannot straddle midnight |
 | `recipients` | `"any"`, or a list of Gloam receive tags and `0x` addresses. Required. Shields go to the agent's own balance and skip this |
 | `expiresAt` | After this the agent cannot spend. `"2026-12-31"` means through the end of that day (UTC); a full ISO timestamp is taken as written |
 
-Assets are named by symbol (`ETH` and `USDG` on Robinhood Chain; `PathUSD`, `AlphaUSD`, `BetaUSD`, `ThetaUSD` on Tempo) or by `0x` token address with `decimals`. Matching is by network and contract address, never by the symbol a payee writes into a 402 challenge, so a payment cannot slip through by relabeling a token. Private payments must also go through Gloam's own pool on that network.
+Assets are named by symbol or by `0x` token address (with `decimals` for a token Gloam does not know). Matching is by network and contract address, never by the symbol a payee writes into a 402 challenge, so a payment cannot slip through by relabeling a token. Private payments must also go through Gloam's own pool on that network.
+
+| Network | Symbols |
+| --- | --- |
+| `tempo-mainnet` | `USDC.e`, `pathUSD`, `USDT0`, `OUSD` |
+| `robinhood-mainnet` | `USDG`, `GLOAM` |
+| `tempo` (testnet) | `PathUSD`, `OUSD`, `AlphaUSD`, `BetaUSD`, `ThetaUSD` |
+| `robinhood` (testnet) | `ETH`, `USDG` |
+
+### Mainnet assets in limits
+
+Mainnet and testnet are different chains, so each limit is for one of them. A symbol on both sides (`USDG`, `pathUSD`, `OUSD`), or a token address on both (pathUSD and OUSD use the same address on Tempo mainnet and testnet), means the **testnet** asset unless the entry names a network. That way a config written for testnet never starts approving real money by itself. Mainnet-only symbols (`USDC.e`, `USDT0`, `GLOAM`) and the mainnet USDG address name the mainnet asset directly.
+
+```json
+{
+  "agents": {
+    "research-bot": {
+      "recipients": ["gloamr1.MFkwEwYH...their-receive-tag"],
+      "assets": {
+        "USDC.e": { "maxPerPayment": "2", "maxPerDay": "20" },
+        "pathUSD": { "network": "tempo-mainnet", "maxPerPayment": "2", "maxPerDay": "20" }
+      }
+    }
+  }
+}
+```
+
+With the environment variables, `GLOAM_LIMIT_NETWORK=tempo-mainnet` puts every asset in `GLOAM_LIMIT_ASSETS` on that network.
 
 ### Configure with a file (several agents)
 
@@ -170,26 +221,36 @@ Point `GLOAM_LIMITS_FILE` at a JSON file and pick the agent with `GLOAM_AGENT_ID
       "recipients": ["gloamr1.MFkwEwYH...their-receive-tag"],
       "expiresAt": "2026-12-31",
       "assets": {
-        "PathUSD": { "maxPerPayment": "5", "maxPerDay": "50" }
+        "USDC.e": { "maxPerPayment": "5", "maxPerDay": "50" }
       }
     },
     "ops-agent": {
       "recipients": "any",
       "maxPerPayment": "250",
       "maxPerDay": "1000",
-      "assets": ["USDG", "PathUSD"]
+      "assets": {
+        "USDG": { "network": "robinhood-mainnet" },
+        "USDT0": {}
+      }
+    },
+    "practice-bot": {
+      "recipients": "any",
+      "maxPerPayment": "5",
+      "maxPerDay": "50",
+      "assets": ["PathUSD", "USDG"]
     }
   }
 }
 ```
 
-The array form of `assets` uses the agent-level `maxPerPayment` and `maxPerDay` for each asset; the object form sets them per asset (an asset entry may also take `network` and, for an unknown token address, `decimals`). A config that does not parse, names an unknown asset, or leaves out a cap is treated as no permission: every spend is refused with the reason.
+The array form of `assets` uses the agent-level `maxPerPayment` and `maxPerDay` for each asset; the object form can set them per asset, or leave them out to use the agent's (an asset entry may also take `network` and, for an unknown token address, `decimals`). In the example, `research-bot` and `ops-agent` spend real money and `practice-bot` only test funds. A config that does not parse, names an unknown asset, or leaves out a cap is treated as no permission: every spend is refused with the reason.
 
 ### Configure with environment variables (one agent)
 
 ```bash
 GLOAM_AGENT_ID=research-bot
-GLOAM_LIMIT_ASSETS=PathUSD,USDG          # required
+GLOAM_LIMIT_ASSETS=USDC.e,pathUSD        # required
+GLOAM_LIMIT_NETWORK=tempo-mainnet        # optional: the network of every asset above (else testnet for shared symbols)
 GLOAM_LIMIT_MAX_PER_PAYMENT=5            # required, applies to each asset
 GLOAM_LIMIT_MAX_PER_DAY=50               # required, applies to each asset
 GLOAM_LIMIT_RECIPIENTS=any               # required: any, or a comma list
@@ -220,10 +281,10 @@ The server then signs Tempo transactions for the owner's account with that key, 
 1. Make the key and print what the owner signs. Nothing is signed or sent, and the key is never printed:
 
    ```bash
-   npx -y @gloamtrade/mcp authorize-access-key --owner 0xOWNER --generate --limit 25 --period 1d --expires 30d
+   npx -y @gloamtrade/mcp authorize-access-key --network tempo-mainnet --owner 0xOWNER --generate --limit 25 --period 1d --expires 30d
    ```
 
-   `--generate` writes the new key, `GLOAM_TEMPO_ACCOUNT`, a note-store key and matching off-chain limits to `~/.gloam/agent.env` (mode 600), keeping anything already there. To authorize a key you already have, use `--key <address>` or leave both out to use `GLOAM_AGENT_PRIVATE_KEY`. Repeat `--limit AlphaUSD=10` for more stablecoins, use `--period once` for a total that never resets, and `--json` for machine-readable output. From a checkout: `pnpm --filter @gloamtrade/mcp authorize-access-key --owner ...`.
+   `--network` is `tempo-mainnet` (real money) or `tempo` (testnet). An access key is authorized on one chain, so a key made on testnet does nothing on mainnet. Left out, it is Tempo mainnet when `GLOAM_NETWORK` names a mainnet, else Tempo testnet. `--generate` writes the new key, `GLOAM_TEMPO_ACCOUNT`, a note-store key and matching off-chain limits to `~/.gloam/agent.env` (mode 600), keeping anything already there; on mainnet it also writes `GLOAM_NETWORK` and `GLOAM_LIMIT_NETWORK`. To authorize a key you already have, use `--key <address>` or leave both out to use `GLOAM_AGENT_PRIVATE_KEY`. `--limit 25` is in the network's default stablecoin (USDC.e on mainnet, PathUSD on testnet); repeat `--limit USDT0=10` for more stablecoins, use `--period once` for a total that never resets, and `--json` for machine-readable output. From a checkout: `pnpm --filter @gloamtrade/mcp authorize-access-key --owner ...`.
 
 2. The owner authorizes it from their own wallet, with one of the three printed options:
    - Tempo Wallet or any Tempo Accounts SDK provider: the printed `wallet_authorizeAccessKey` request (passkey accounts).
@@ -235,7 +296,7 @@ The server then signs Tempo transactions for the owner's account with that key, 
 4. Check it. This only reads the chain:
 
    ```bash
-   npx -y @gloamtrade/mcp authorize-access-key --check --owner 0xOWNER
+   npx -y @gloamtrade/mcp authorize-access-key --check --network tempo-mainnet --owner 0xOWNER
    ```
 
    It reports whether the key is authorized, its expiry, what is left of each limit and when it resets, its call scopes, and any pool allowance the cap would not count. It exits 0 only when all of that is in order.
@@ -276,18 +337,22 @@ pnpm --filter @gloamtrade/mcp smoke       # start dist/index.js over stdio and l
 
 The Gloam workspace packages (`@gloamtrade/sdk` and others) ship TypeScript source, so the build bundles them into `dist/index.js` with esbuild and leaves every other dependency to npm. It fails if the server imports a package missing from `dependencies`. Publish with pnpm so workspace versions are rewritten: `pnpm --filter @gloamtrade/mcp publish --access public`.
 
-To execute with a raw testnet key instead of an access key (only the off-chain limits bind it), give the server a funded testnet signer, a note-store key and its limits:
+To execute with a raw key instead of an access key (only the off-chain limits bind it), give the server a funded signer, a note-store key and its limits. On Robinhood Chain mainnet, for example:
 
 ```bash
-GLOAM_AGENT_PRIVATE_KEY=0x<funded RH testnet key> \
+GLOAM_NETWORK=robinhood-mainnet \
+GLOAM_AGENT_PRIVATE_KEY=0x<key holding a little USDG and ETH for gas> \
 GLOAM_NOTE_KEY=$(openssl rand -hex 32) \
-GLOAM_LIMIT_ASSETS=ETH GLOAM_LIMIT_MAX_PER_PAYMENT=0.01 GLOAM_LIMIT_MAX_PER_DAY=0.05 GLOAM_LIMIT_RECIPIENTS=any \
+GLOAM_LIMIT_ASSETS=USDG GLOAM_LIMIT_NETWORK=robinhood-mainnet \
+GLOAM_LIMIT_MAX_PER_PAYMENT=5 GLOAM_LIMIT_MAX_PER_DAY=20 GLOAM_LIMIT_RECIPIENTS=any \
 pnpm --filter @gloamtrade/mcp start
 ```
 
+To practice with test funds instead, use `GLOAM_NETWORK=robinhood`, a key funded from the [Robinhood Chain testnet faucet](https://faucet.testnet.chain.robinhood.com/), and `GLOAM_LIMIT_ASSETS=ETH` with small caps (no `GLOAM_LIMIT_NETWORK`).
+
 The same lines can go in `~/.gloam/agent.env`. Keep the note key somewhere durable (not a fresh `openssl` each start): the store cannot be opened without it. Without the signer the server still runs and exposes every tool; execute tools just return plans. Without limits, execute tools refuse to spend (see above). For a hard boundary use a Tempo access key (above); on other chains a policy wallet such as a Turnkey server wallet plays that role.
 
-Tests (no chain needed): `pnpm --filter @gloamtrade/mcp test` runs the spending limits, the note custody tests (store encryption and locking, shield to pay to sweep over a mock pool, the fetch round trip, the legacy flag, and a scan that no tool result carries a secret) and the access key tests (the authorization encoding and scopes, keychain signing for the owner's account, fail-closed settings, the settings file and the CLI).
+Tests (no chain needed): `pnpm --filter @gloamtrade/mcp test` runs the spending limits, the note custody tests (store encryption and locking, shield to pay to sweep over a mock pool, the fetch round trip, the legacy flag, and a scan that no tool result carries a secret), the access key tests (the authorization encoding and scopes, keychain signing for the owner's account, fail-closed settings, the settings file and the CLI) and the mainnet tests (which networks a build offers, mainnet assets in limits, the key set per network).
 
 ## Connect an agent
 
@@ -306,8 +371,11 @@ The server speaks MCP over stdio. Point any MCP client at it (Claude Desktop, Cu
 
 Keys and limits come from `~/.gloam/agent.env`. For several agents on one machine, give each its own file with `"env": { "GLOAM_ENV_FILE": "/home/me/.gloam/research-bot.env" }`, or share a `GLOAM_LIMITS_FILE` and set `GLOAM_AGENT_ID` per agent. To run a checkout instead of the npm package, use `"command": "node", "args": ["/absolute/path/to/gloam/mcp/dist/index.js"]` after a build.
 
-Then the agent can read markets, quote and plan private trades, shield into a private balance, and pay for x402 resources privately, alongside its public Robinhood activity.
+Then the agent can shield into a private balance, pay for x402 and MPP resources privately, and get paid, alongside its public Robinhood activity.
 
-## Testnet
+## Status
 
-Testnet only, dev-ceremony proving keys. The shield and transfer circuit artifacts are fetched from `https://www.gloam.trade/circuits` on first use and cached locally. Sealed-swap execution stays a plan until swaps are re-enabled. See the [SDK docs](https://gloam.trade/docs/agents).
+- **Mainnet (beta, real money):** Tempo and Robinhood Chain, payments only, beta deposit limits, the trusted setup's final keys. Reviewed internally before launch; an external audit is planned, not done.
+- **Testnet (free practice):** Tempo Moderato and Robinhood Chain testnet, dev keys, test funds with no value.
+- **Circuit files** are fetched from `https://www.gloam.trade/circuits` (final keys under `/final`) on first use, checked against pinned SHA-256 and cached locally (`GLOAM_ARTIFACTS_DIR`).
+- **Private trading** is off on every network; the market and trade tools only plan. See the [agent docs](https://gloam.trade/docs/agents).

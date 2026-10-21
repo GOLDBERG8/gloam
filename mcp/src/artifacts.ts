@@ -1,53 +1,71 @@
 /**
  * Provers run server-side in node, which needs the circuit artifacts as local
  * file paths (snarkjs cannot prove from a URL in node). This downloads each
- * circuit's wasm + final zkey once into a cache dir and returns their paths.
+ * circuit's wasm + zkey once into a cache dir and returns their paths.
+ *
+ * Two key sets: the testnet pools verify the dev keys, the mainnet pools the
+ * trusted setup's final keys (served under /circuits/final and cached under
+ * final/ here, so the two never mix). Every file is checked against the SHA-256
+ * the SDK pins before it is used; a file that does not match is deleted and
+ * fetched again once, then refused.
  *
  * shield backs gloam_execute_shield. transfer backs the private send that
- * settles an x402 payment (gloam_pay_x402); unshield backs cash out. All three
- * come from the same source; only shield is fetched until a tool needs the rest.
+ * settles an x402 or MPP payment and the payee's sweep; unshield backs cash out.
  */
-import { mkdirSync, existsSync, writeFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, existsSync, readFileSync, rmSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { GLOAM_ARTIFACTS_URL, circuitArtifactFiles, type CeremonyKind, type PoolCircuit } from "@gloamtrade/sdk";
 
-const SOURCE = process.env.GLOAM_ARTIFACTS_SOURCE || "https://www.gloam.trade/circuits";
+const SOURCE = (process.env.GLOAM_ARTIFACTS_SOURCE || GLOAM_ARTIFACTS_URL).replace(/\/+$/, "");
 const CACHE = process.env.GLOAM_ARTIFACTS_DIR || join(tmpdir(), "gloam-mcp-circuits");
 
-export type CircuitName = "shield" | "transfer" | "unshield";
+export type CircuitName = PoolCircuit;
 
-async function ensure(file: string): Promise<string> {
-  mkdirSync(CACHE, { recursive: true });
+const sha256 = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+const checked = new Set<string>();
+
+async function ensure(file: string, expected: string): Promise<string> {
   const dest = join(CACHE, file);
-  if (existsSync(dest) && statSync(dest).size > 0) return dest;
-  const res = await fetch(`${SOURCE}/${file}`);
-  if (!res.ok) throw new Error(`Failed to fetch ${file} from ${SOURCE}: HTTP ${res.status}`);
-  writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
-  return dest;
+  if (checked.has(dest)) return dest;
+  mkdirSync(dirname(dest), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!existsSync(dest) || statSync(dest).size === 0) {
+      const res = await fetch(`${SOURCE}/${file}`);
+      if (!res.ok) throw new Error(`Failed to fetch ${file} from ${SOURCE}: HTTP ${res.status}`);
+      writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+    }
+    if (sha256(dest) === expected) {
+      checked.add(dest);
+      return dest;
+    }
+    rmSync(dest, { force: true });
+  }
+  throw new Error(`${file} from ${SOURCE} does not match its pinned SHA-256. Refusing to prove with it.`);
 }
 
-/** Local wasm + zkey paths for a circuit, downloading on first use. */
+/** Local wasm + zkey paths for a circuit and key set, downloading and checking on first use. */
 export async function circuitArtifacts(
-  name: CircuitName
+  name: CircuitName,
+  ceremony: CeremonyKind = "dev"
 ): Promise<{ wasm: string; zkey: string }> {
-  const [wasm, zkey] = await Promise.all([
-    ensure(`${name}.wasm`),
-    ensure(`${name}_final.zkey`),
-  ]);
+  const f = circuitArtifactFiles(name, ceremony);
+  const [wasm, zkey] = await Promise.all([ensure(f.wasm, f.sha256.wasm), ensure(f.zkey, f.sha256.zkey)]);
   return { wasm, zkey };
 }
 
 /** Shield circuit artifacts (deposit proof). */
-export function shieldArtifacts() {
-  return circuitArtifacts("shield");
+export function shieldArtifacts(ceremony: CeremonyKind = "dev") {
+  return circuitArtifacts("shield", ceremony);
 }
 
-/** Transfer circuit artifacts (private send; settles an x402 payment). */
-export function transferArtifacts() {
-  return circuitArtifacts("transfer");
+/** Transfer circuit artifacts (private send; settles an x402 or MPP payment, and sweeps). */
+export function transferArtifacts(ceremony: CeremonyKind = "dev") {
+  return circuitArtifacts("transfer", ceremony);
 }
 
 /** Unshield circuit artifacts (cash out). */
-export function unshieldArtifacts() {
-  return circuitArtifacts("unshield");
+export function unshieldArtifacts(ceremony: CeremonyKind = "dev") {
+  return circuitArtifacts("unshield", ceremony);
 }

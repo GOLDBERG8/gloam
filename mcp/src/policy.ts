@@ -14,10 +14,32 @@
  * Assets are matched by chain and contract address, never by the symbol a
  * payee writes in a 402 challenge, so a payment cannot slip past by relabeling
  * a token. Amounts are compared in raw units using each asset's real decimals.
+ *
+ * Mainnet and testnet are different chains, so a limit names one of them. A
+ * symbol on both (USDG, pathUSD, OUSD), or a token address on both (pathUSD and
+ * OUSD sit at the same address on Tempo mainnet and testnet), means the TESTNET
+ * asset unless the entry says "network": "robinhood-mainnet" / "tempo-mainnet".
+ * So a config written for testnet never starts approving real money by itself.
+ * Mainnet-only symbols (USDC.e, USDT0, GLOAM) and mainnet-only addresses (USDG
+ * on Robinhood Chain mainnet) name the mainnet asset directly.
  */
 import { formatUnits, isAddress, parseUnits, type Address } from "viem";
 import { z } from "zod";
-import { GLOAM_NETWORKS, NATIVE_ASSET, RH_USDG, TEMPO_PATHUSD } from "@gloamtrade/sdk";
+import {
+  GLOAM_NETWORKS,
+  GLOAM_TOKEN,
+  NATIVE_ASSET,
+  RH_MAINNET_CHAIN_ID,
+  RH_MAINNET_USDG,
+  RH_USDG,
+  TEMPO_MAINNET_CHAIN_ID,
+  TEMPO_OUSD,
+  TEMPO_PATHUSD,
+  TEMPO_USDCE,
+  TEMPO_USDT0,
+  networkName as sdkNetworkName,
+} from "@gloamtrade/sdk";
+import type { NetworkKey } from "./networks.js";
 
 export type SpendTool = "pay" | "send" | "shield";
 export const SPEND_TOOLS: SpendTool[] = ["pay", "send", "shield"];
@@ -31,7 +53,7 @@ const TOOL_WORDS: Record<SpendTool, string> = {
 /** One money-moving action an agent asked for, before it is signed. */
 export type Spend = {
   tool: SpendTool;
-  network: "robinhood" | "tempo";
+  network: NetworkKey;
   chainId: number;
   asset: Address;
   amountWei: bigint;
@@ -76,20 +98,35 @@ type KnownAsset = { symbol: string; chainId: number; address: Address; decimals:
 const RH = GLOAM_NETWORKS.robinhood.chainId;
 const TEMPO = GLOAM_NETWORKS.tempo.chainId;
 
+/** Chain id of each network a limit can name, mainnet or testnet (whether or not this build has its pool). */
+export const NETWORK_CHAIN_IDS: Record<NetworkKey, number> = {
+  robinhood: RH,
+  tempo: TEMPO,
+  "robinhood-mainnet": RH_MAINNET_CHAIN_ID,
+  "tempo-mainnet": TEMPO_MAINNET_CHAIN_ID,
+};
+
+// Testnet assets first: a symbol on both sides resolves to the testnet unless a network is named.
 export const KNOWN_ASSETS: KnownAsset[] = [
   { symbol: "ETH", chainId: RH, address: NATIVE_ASSET, decimals: 18 },
   { symbol: "USDG", chainId: RH, address: RH_USDG, decimals: 6 },
-  { symbol: "OUSD", chainId: TEMPO, address: "0x20c0000000000000000000006a37da5c996874be", decimals: 6 },
+  { symbol: "OUSD", chainId: TEMPO, address: TEMPO_OUSD, decimals: 6 },
   { symbol: "PathUSD", chainId: TEMPO, address: TEMPO_PATHUSD, decimals: 6 },
   { symbol: "AlphaUSD", chainId: TEMPO, address: "0x20c0000000000000000000000000000000000001", decimals: 6 },
   { symbol: "BetaUSD", chainId: TEMPO, address: "0x20c0000000000000000000000000000000000002", decimals: 6 },
   { symbol: "ThetaUSD", chainId: TEMPO, address: "0x20c0000000000000000000000000000000000003", decimals: 6 },
+  // Mainnet (real money): exactly what the mainnet pools list.
+  { symbol: "USDG", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_USDG, decimals: 6 },
+  { symbol: "GLOAM", chainId: RH_MAINNET_CHAIN_ID, address: GLOAM_TOKEN, decimals: 18 },
+  { symbol: "USDC.e", chainId: TEMPO_MAINNET_CHAIN_ID, address: TEMPO_USDCE, decimals: 6 },
+  { symbol: "pathUSD", chainId: TEMPO_MAINNET_CHAIN_ID, address: TEMPO_PATHUSD, decimals: 6 },
+  { symbol: "USDT0", chainId: TEMPO_MAINNET_CHAIN_ID, address: TEMPO_USDT0, decimals: 6 },
+  { symbol: "OUSD", chainId: TEMPO_MAINNET_CHAIN_ID, address: TEMPO_OUSD, decimals: 6 },
 ];
 
+/** "Robinhood Chain", "Tempo testnet" and so on; "any network" for a limit that names none. */
 export function networkName(chainId: number | null): string {
-  if (chainId === RH) return "Robinhood Chain";
-  if (chainId === TEMPO) return "Tempo";
-  return chainId == null ? "any network" : `chain ${chainId}`;
+  return chainId == null ? "any network" : sdkNetworkName(chainId);
 }
 
 /** The label for an asset an agent tried to move (known symbol, else a short address). */
@@ -101,7 +138,7 @@ export function assetLabel(chainId: number, asset: Address): string {
 // ------------------------------------------------------------------ config shape
 
 const amount = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
-const network = z.enum(["robinhood", "tempo"]);
+const network = z.enum(["robinhood", "tempo", "robinhood-mainnet", "tempo-mainnet"]);
 
 const assetEntry = z
   .object({
@@ -183,7 +220,7 @@ export function resolveAgent(agent: string, raw: AgentConfig, source: string): A
     let chainId: number | null;
     let decimals: number;
     let symbol: string;
-    const wantChain = entry.network ? GLOAM_NETWORKS[entry.network].chainId : null;
+    const wantChain = entry.network ? NETWORK_CHAIN_IDS[entry.network] : null;
     if (isAddress(k)) {
       known = KNOWN_ASSETS.find(
         (a) => a.address.toLowerCase() === k.toLowerCase() && (wantChain == null || a.chainId === wantChain)
@@ -236,6 +273,7 @@ const ENV_KEYS = [
   "GLOAM_LIMIT_RECIPIENTS",
   "GLOAM_LIMIT_EXPIRES",
   "GLOAM_LIMIT_TOOLS",
+  "GLOAM_LIMIT_NETWORK",
 ] as const;
 
 function list(v: string): string[] {
@@ -249,7 +287,8 @@ function list(v: string): string[] {
  * Load this server's policy from the environment:
  *   GLOAM_LIMITS=off            explicit opt-out (no limits, still logged)
  *   GLOAM_LIMITS_FILE=path      a JSON file with an "agents" map, keyed by GLOAM_AGENT_ID
- *   GLOAM_LIMIT_*               one agent's limits inline
+ *   GLOAM_LIMIT_*               one agent's limits inline (GLOAM_LIMIT_NETWORK
+ *                               names the network of every asset listed there)
  * With none of these, every spend is refused until the owner sets limits.
  */
 export function loadPolicy(env: Record<string, string | undefined>, readFile: (path: string) => string): LoadedPolicy {
@@ -301,8 +340,18 @@ export function loadPolicy(env: Record<string, string | undefined>, readFile: (p
 
   if (inline) {
     const source = "GLOAM_LIMIT_* environment";
+    const limitNetwork = env.GLOAM_LIMIT_NETWORK?.trim();
+    if (limitNetwork && !network.safeParse(limitNetwork).success) {
+      return {
+        mode: "invalid",
+        agent,
+        source,
+        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, robinhood or tempo.`,
+      };
+    }
+    const assetKeys = list(env.GLOAM_LIMIT_ASSETS ?? "");
     const raw: Record<string, unknown> = {
-      assets: list(env.GLOAM_LIMIT_ASSETS ?? ""),
+      assets: limitNetwork ? Object.fromEntries(assetKeys.map((k) => [k, { network: limitNetwork }])) : assetKeys,
       maxPerPayment: env.GLOAM_LIMIT_MAX_PER_PAYMENT?.trim() || undefined,
       maxPerDay: env.GLOAM_LIMIT_MAX_PER_DAY?.trim() || undefined,
       recipients:

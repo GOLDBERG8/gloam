@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { formatUnits, type Address, type Hex } from "viem";
 import type { ReceiveKey } from "@gloamtrade/sdk";
 import { withFileLock } from "./fileLock.js";
+import type { NetworkKey } from "./networks.js";
 
 type Env = Record<string, string | undefined>;
 
@@ -38,7 +39,7 @@ export type KeySource = "GLOAM_NOTE_KEY" | "signer";
 
 export type StoredNote = {
   handle: string;
-  network: "robinhood" | "tempo";
+  network: NetworkKey;
   chainId: number;
   pool: Address;
   asset: Address;

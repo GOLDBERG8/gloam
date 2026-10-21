@@ -107,10 +107,10 @@ export interface Signer {
 }
 
 /**
- * The agent's signer for a Gloam network (defaults to Robinhood).
+ * The agent's signer for a Gloam network (defaults to Robinhood Chain testnet).
  *
  * GLOAM_AGENT_PRIVATE_KEY is the agent's key. On its own the key signs as its
- * own address, holding its own funds (testnet). With GLOAM_TEMPO_ACCOUNT set,
+ * own address, holding its own funds. With GLOAM_TEMPO_ACCOUNT set,
  * the same key is a Tempo access key: on Tempo it signs for that account, and
  * the owner's AccountKeychain authorization (expiry, a periodic spending limit
  * and call scopes) is enforced by the protocol on every transaction, whatever
@@ -125,7 +125,7 @@ export function getSigner(net: McpNetwork = MCP_NETWORKS.robinhood, env: Env = p
   const key = agentPrivateKey(env)!;
   const publicClient = getPublicClient(net);
 
-  if (setup.mode === "access-key" && net.key === "tempo") {
+  if (setup.mode === "access-key" && net.family === "tempo") {
     const account = TempoAccount.fromSecp256k1(key, { access: setup.owner });
     const chain = tempoChainFor(net, env);
     return {

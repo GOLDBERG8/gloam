@@ -16,15 +16,15 @@ import {
   type AccessKeyPlan,
 } from "./accessKey.js";
 import { appendEnvFile, defaultEnvFilePath } from "./envFile.js";
-import { MCP_NETWORKS } from "./networks.js";
+import { MCP_NETWORKS, networkByKey, tempoAccessNetwork, type McpNetwork } from "./networks.js";
 import { packageVersion } from "./version.js";
 
 export { packageVersion };
 
 type Env = Record<string, string | undefined>;
 
-export const HELP = `gloam-mcp {version}: Gloam's MCP server for AI agents. Private stablecoin payments on Tempo
-(x402 and MPP), with spending limits, plus private execution on Robinhood Chain.
+export const HELP = `gloam-mcp {version}: Gloam's MCP server for AI agents. Private stablecoin payments on Tempo and
+Robinhood Chain (x402 and MPP), with spending limits. Mainnet (real money, beta) and testnet (free practice).
 
 Usage
   gloam-mcp                         Start the MCP server on stdio. This is what MCP clients run.
@@ -37,16 +37,21 @@ Settings
   Read from the environment, then from ~/.gloam/agent.env (GLOAM_ENV_FILE moves it). The
   environment wins. Only GLOAM_* lines are read from the file.
 
+  GLOAM_NETWORK             The network tools use when the agent names none: tempo-mainnet or
+                            robinhood-mainnet (real money), tempo or robinhood (testnet, the default).
+                            A mainnet here also puts the Tempo access key on Tempo mainnet.
   GLOAM_AGENT_PRIVATE_KEY   The agent's key. Without it, tools read and plan but never execute.
   GLOAM_TEMPO_ACCOUNT       Owner's Tempo account. With it, the key is an access key on Tempo and the
                             protocol enforces the owner's limits on it.
   GLOAM_NOTE_KEY            Key for the encrypted note store (openssl rand -hex 32). Back it up.
   GLOAM_LIMIT_*             Off-chain limits this server checks before it signs (see the README).
+                            GLOAM_LIMIT_NETWORK=tempo-mainnet makes them name mainnet assets.
+  GLOAM_RPC_URL_<chainId>   Use another RPC for a network, e.g. GLOAM_RPC_URL_4217 for Tempo mainnet.
 
 Docs: https://github.com/cryptoduke01/gloam/tree/main/mcp#readme
 `;
 
-export const ACCESS_KEY_HELP = `gloam-mcp authorize-access-key: an access key for the agent on Tempo.
+export const ACCESS_KEY_HELP = `gloam-mcp authorize-access-key: an access key for the agent on Tempo (mainnet or testnet).
 
 The owner's account authorizes the agent's key in Tempo's AccountKeychain with an expiry, a spending
 limit that resets each period, and call scopes (approve the Gloam pool, shield, private transfer).
@@ -54,18 +59,21 @@ The protocol enforces them on every transaction the key signs, so they hold even
 server or its host is compromised. This command prints what the owner signs. It never sends anything.
 
 Usage
-  gloam-mcp authorize-access-key --owner <address> --generate [--limit 25] [--period 1d] [--expires 30d]
+  gloam-mcp authorize-access-key --network tempo-mainnet --owner <address> --generate [--limit 25] [--period 1d] [--expires 30d]
   gloam-mcp authorize-access-key --owner <address> --key <address> [options]
   gloam-mcp authorize-access-key --check --owner <address> --key <address>
 
 Options
+  --network <name>      tempo-mainnet (real money) or tempo (testnet). Default: Tempo mainnet when
+                        GLOAM_NETWORK names a mainnet, else Tempo testnet. A key authorized on one
+                        does nothing on the other.
   --owner <address>     The owner's Tempo account (default: GLOAM_TEMPO_ACCOUNT)
   --generate            Make a new agent key and save it to the settings file (mode 600), with
                         GLOAM_TEMPO_ACCOUNT, a note-store key and matching off-chain limits.
                         The key is never printed.
   --key <address>       Authorize an existing key by address (default: GLOAM_AGENT_PRIVATE_KEY's address)
-  --limit <amount>      Spending limit, in PathUSD, or SYMBOL=amount (repeat for more stablecoins).
-                        Default 10 (PathUSD)
+  --limit <amount>      Spending limit in the network's default stablecoin (USDC.e on mainnet,
+                        PathUSD on testnet), or SYMBOL=amount (repeat for more stablecoins). Default 10
   --period <duration>   How often the limit resets: 1h, 1d, 7d, or "once" for a total. Default 1d
   --expires <when>      Duration (30d) or date (2026-12-31). Default 30d
   --env-file <path>     Settings file for --generate (default: ~/.gloam/agent.env or GLOAM_ENV_FILE)
@@ -75,6 +83,7 @@ Options
 `;
 
 interface Flags {
+  network?: string;
   owner?: string;
   key?: string;
   generate: boolean;
@@ -110,6 +119,9 @@ export function parseFlags(argv: string[]): Flags {
       return v;
     };
     switch (arg) {
+      case "--network":
+        f.network = value(arg);
+        break;
       case "--owner":
         f.owner = value(arg);
         break;
@@ -157,13 +169,23 @@ const json = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === "bigint"
 
 const LIMIT_KEYS = ["GLOAM_LIMITS", "GLOAM_LIMITS_FILE", "GLOAM_LIMIT_ASSETS", "GLOAM_LIMIT_MAX_PER_PAYMENT", "GLOAM_LIMIT_MAX_PER_DAY", "GLOAM_LIMIT_RECIPIENTS"];
 
+/** The Tempo network an access key is for: --network, else the one GLOAM_NETWORK implies. */
+function accessNetworkFrom(flag: string | undefined, env: Env): McpNetwork {
+  if (flag === undefined) return tempoAccessNetwork(env);
+  const v = flag.trim();
+  if (v === "tempo") return MCP_NETWORKS.tempo;
+  if (v === "tempo-mainnet") return networkByKey("tempo-mainnet");
+  throw new Error(`--network must be tempo-mainnet or tempo: access keys are a Tempo feature. Got "${flag}".`);
+}
+
 /** Off-chain limits that match the onchain ones, for a fresh setup. Null when they cannot be expressed as env vars. */
-function offchainLimitsFor(plan: AccessKeyPlan) {
+function offchainLimitsFor(plan: AccessKeyPlan, net: McpNetwork) {
   const amounts = new Set(plan.limits.map((l) => l.amount));
   if (amounts.size !== 1) return null;
   const [amount] = amounts;
   return [
     { key: "GLOAM_LIMIT_ASSETS", value: plan.limits.map((l) => l.symbol).join(","), comment: "Off-chain limits, checked by the server before it signs. The onchain cap is the hard one." },
+    ...(net.testnet ? [] : [{ key: "GLOAM_LIMIT_NETWORK", value: net.key, comment: "The assets above are the mainnet ones (real money)." }]),
     { key: "GLOAM_LIMIT_MAX_PER_PAYMENT", value: amount },
     { key: "GLOAM_LIMIT_MAX_PER_DAY", value: amount },
     { key: "GLOAM_LIMIT_RECIPIENTS", value: "any", comment: "Narrow this to the receive tags the agent should pay." },
@@ -184,7 +206,7 @@ export async function runAuthorizeAccessKey(
     out(ACCESS_KEY_HELP);
     return 0;
   }
-  const net = MCP_NETWORKS.tempo;
+  const net = accessNetworkFrom(f.network, env);
   const ownerRaw = f.owner ?? env.GLOAM_TEMPO_ACCOUNT?.trim();
   if (!ownerRaw) throw new Error("Give the owner's Tempo account with --owner <address> (or set GLOAM_TEMPO_ACCOUNT).");
   const owner = asAddress(ownerRaw, "--owner");
@@ -231,11 +253,12 @@ export async function runAuthorizeAccessKey(
     const entries: { key: string; value: string; comment?: string }[] = [
       { key: "GLOAM_AGENT_PRIVATE_KEY", value: generated.privateKey, comment: "Agent access key. Holds no funds; acts for GLOAM_TEMPO_ACCOUNT within the owner's onchain limits." },
       { key: "GLOAM_TEMPO_ACCOUNT", value: owner },
+      ...(net.testnet ? [] : [{ key: "GLOAM_NETWORK", value: net.key, comment: "Real money: tools default to Tempo mainnet, and the access key is checked there." }]),
     ];
     if (!env.GLOAM_NOTE_KEY?.trim()) {
       entries.push({ key: "GLOAM_NOTE_KEY", value: generated.noteKey, comment: "Encrypts the note store. Back it up with the store: without it the private balance cannot be opened." });
     }
-    const offchain = LIMIT_KEYS.some((k) => env[k]?.trim()) ? null : offchainLimitsFor(plan);
+    const offchain = LIMIT_KEYS.some((k) => env[k]?.trim()) ? null : offchainLimitsFor(plan, net);
     if (offchain) entries.push(...offchain);
     const { written, kept } = appendEnvFile(path, entries, `Added by gloam-mcp authorize-access-key, ${new Date(nowSec * 1000).toISOString()}`);
     notes.push(
@@ -247,6 +270,9 @@ export async function runAuthorizeAccessKey(
     if (kept.length) notes.push(`Left as they were in ${path}: ${kept.join(", ")}.`);
   } else if (!env.GLOAM_TEMPO_ACCOUNT?.trim()) {
     notes.push(`After the owner authorizes the key, set GLOAM_TEMPO_ACCOUNT=${owner} for the server (in ${defaultEnvFilePath(env)} or its MCP config) and restart it.`);
+  }
+  if (!generated && !net.testnet && env.GLOAM_NETWORK?.trim() !== net.key) {
+    notes.push(`This key is for ${net.name} (real money). Set GLOAM_NETWORK=${net.key} for the server so it checks the key there.`);
   }
 
   if (f.json) {

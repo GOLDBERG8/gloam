@@ -467,7 +467,9 @@ export function formatPlan(plan: AccessKeyPlan): string {
   L.push("");
   L.push("Then check it (read-only):");
   L.push("");
-  L.push(`   npx -y @gloamtrade/mcp authorize-access-key --check --owner ${plan.owner} --key ${plan.accessKey}`);
+  L.push(
+    `   npx -y @gloamtrade/mcp authorize-access-key --check${plan.network.chainId === MCP_NETWORKS.tempo.chainId ? "" : " --network tempo-mainnet"} --owner ${plan.owner} --key ${plan.accessKey}`
+  );
   L.push("");
   L.push("Revoke it at any time from the owner (a revoked key can never be authorized again):");
   L.push("");

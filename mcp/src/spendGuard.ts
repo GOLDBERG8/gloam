@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { formatUnits, type Address } from "viem";
-import { GLOAM_NETWORKS } from "@gloamtrade/sdk";
+import { networkForChainId } from "@gloamtrade/sdk";
 import {
   DAY_MS,
   KNOWN_ASSETS,
@@ -55,7 +55,7 @@ function decimalsOf(loaded: LoadedPolicy, chainId: number, asset: Address): numb
 /** Payments only ever go through Gloam's own pool on that network. */
 function poolRefusal(spend: Spend & { pool?: Address }): Refusal | null {
   if (!spend.pool) return null;
-  const net = Object.values(GLOAM_NETWORKS).find((n) => n.chainId === spend.chainId);
+  const net = networkForChainId(spend.chainId);
   if (net && net.pool.toLowerCase() === spend.pool.toLowerCase()) return null;
   return {
     code: "unknown_pool",
