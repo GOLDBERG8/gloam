@@ -18,7 +18,7 @@ export default function DocsComparePage() {
       glance={[
         { label: "Who holds a key", value: "only you" },
         { label: "Proofs made", value: "on your device" },
-        { label: "Networks", value: "Tempo · Robinhood Chain (testnet)" },
+        { label: "Networks", value: "Tempo · Robinhood Chain (mainnet)" },
         { label: "New cryptography", value: "none, by design" },
       ]}
       quickLinks={[
@@ -103,7 +103,7 @@ export default function DocsComparePage() {
               </td>
               <td>Only you</td>
               <td>One person is exposed</td>
-              <td>Yes, both testnets</td>
+              <td>Yes, mainnet on both</td>
               <td>Yes, a proof for one reader that expires</td>
               <td>Yes, with a payroll total proof</td>
               <td>Yes: x402, an MPP method, MCP</td>
@@ -215,8 +215,8 @@ export default function DocsComparePage() {
         them.
       </p>
       <p>
-        <strong>Where they win:</strong> years live, a public multi-party
-        ceremony, and external audits. <strong>Where Gloam differs:</strong>{" "}
+        <strong>Where they win:</strong> years live, a far bigger crowd of
+        notes, and external audits. <strong>Where Gloam differs:</strong>{" "}
         proofs for one reader that expire, payroll total proofs, agent payments,
         and Tempo and Robinhood Chain.
       </p>
@@ -243,17 +243,19 @@ export default function DocsComparePage() {
       <h2 id="behind">Where Gloam is behind</h2>
       <ul>
         <li>
-          <strong>Testnet only, for now.</strong> Testnet keys come from a
-          single-contributor dev ceremony. The multi-party ceremony for mainnet
-          is done, with 13 contributors, and mainnet deploys its final keys.
+          <strong>New on mainnet.</strong> Gloam went live on mainnet on 21
+          October 2026, on the final keys from a 13-contributor ceremony, with
+          beta deposit limits on what the pools take. It is beta software
+          handling real money.
         </li>
         <li>
-          <strong>Internal audits only.</strong> Several rounds, with fixes
-          deployed, and a full review before launch. An external audit is planned.
+          <strong>Internal review only.</strong> Several rounds, with fixes
+          deployed, and a review before launch that finished on 20 October with
+          no Critical or High findings open. An external audit is planned.
         </li>
         <li>
-          <strong>Small crowd.</strong> The testnet anonymity set is small, so
-          treat unlinkability as weak for now.
+          <strong>Small crowd.</strong> The mainnet pools are new, so the
+          anonymity set is thin at first. Treat unlinkability as weak for now.
         </li>
         <li>
           <strong>Forwarded proofs.</strong> A reader can still pass a proof on.

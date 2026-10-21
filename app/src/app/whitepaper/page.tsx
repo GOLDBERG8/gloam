@@ -15,26 +15,26 @@ export default function WhitepaperPage() {
   return (
     <DocsLayout
       title="Whitepaper"
-      lede="Private money on public chains. The technical and product thesis for Gloam: private stablecoin payments for people, teams and AI agents, private by default and provable on demand, on Tempo and Robinhood Chain testnets."
+      lede="Private money on public chains. The technical and product thesis for Gloam: private stablecoin payments for people, teams and AI agents, private by default and provable on demand, on Tempo and Robinhood Chain."
       glance={[
         { label: "Version", value: "0.5" },
         { label: "Status", value: "Public draft" },
-        { label: "Networks", value: "RH 46630 · Tempo 42431 (testnet)" },
+        { label: "Networks", value: "Mainnet RH 4663 · Tempo 4217; testnet 46630 · 42431" },
         { label: "Live", value: "Shield · pay · payroll · proofs" },
-        { label: "Private trade", value: "Built, off; new engine underway" },
-        { label: "Mainnet", value: "Not yet" },
+        { label: "Private trade", value: "Off; new engine underway" },
+        { label: "Mainnet", value: "Live since 21 Oct 2026, beta" },
       ]}
       quickLinks={[
         { href: "/docs", label: "Documentation" },
-        { href: "/app", label: "Testnet app" },
+        { href: "/app", label: "Open the app" },
         { href: "https://x.com/gloamtrade", label: "@gloamtrade" },
       ]}
     >
       <div className="rounded-[14px] bg-surface px-5 py-4 text-[14px] leading-relaxed text-mute">
         This document is a living public draft. It describes design targets,
-        shipped testnet capability, and intentional non-claims. It is not an
-        offer of securities, a guarantee of mainnet timelines, a promise of
-        absolute anonymity, or a solicitation to purchase anything.
+        shipped capability on mainnet and testnet, and intentional non-claims.
+        It is not an offer of securities, a guarantee of future timelines, a
+        promise of absolute anonymity, or a solicitation to purchase anything.
       </div>
 
       <h2 id="abstract">1. Abstract</h2>
@@ -140,8 +140,10 @@ export default function WhitepaperPage() {
           physical world, legal process, or operator error.
         </li>
         <li>
-          <strong>Testnet until ready.</strong> Production capital requires
-          production ceremonies, reviews, and operational maturity.
+          <strong>Real money only when ready.</strong> Production capital
+          requires production ceremonies, reviews, and operational maturity.
+          Mainnet opened on the final ceremony keys, after an internal review,
+          with beta deposit limits.
         </li>
       </ul>
 
@@ -294,23 +296,25 @@ export default function WhitepaperPage() {
         set oracle feeds. Setup has ended on both live pools, so every such
         change must be queued on-chain and can only run after a public 3-day
         delay. Users see a pending change before it takes effect and can cash
-        out first. On testnet the owner is a single wallet; moving it to a
-        multisig is an open mainnet decision.
+        out first. On mainnet the same delay applies to raising deposit limits
+        or adding an asset, while the owner can lower limits or close deposits
+        at once. At launch the owner is a single wallet on mainnet as on
+        testnet; a multisig is planned.
       </p>
 
       <FlowDiagram
-        title="Figure 3, User loop (testnet today)"
+        title="Figure 3, User loop"
         subtitle="Real contracts. No simulated private fills."
         steps={[
           {
             n: "1",
             title: "Connect",
-            body: "Wallet on Robinhood Chain (46630) or Tempo (42431) testnet.",
+            body: "Wallet on Robinhood Chain (4663) or Tempo (4217) mainnet, or on a testnet (46630, 42431) to practice.",
           },
           {
             n: "2",
             title: "Shield",
-            body: "Deposit ETH, USDG or faucet stocks (Robinhood Chain), or PathUSD (Tempo), into the vault.",
+            body: "Deposit USDG or $GLOAM (Robinhood Chain), or USDC.e, pathUSD, USDT0 or OUSD (Tempo), into the vault, under beta limits. Testnet also takes ETH and faucet stocks.",
           },
           {
             n: "3",
@@ -346,8 +350,9 @@ export default function WhitepaperPage() {
         Sealed swap (private trade) binds root, nullifier, two new commitments,
         assets, a public min-out floor, and rate numerators. Its circuit,
         verifier, and oracle-bound rate checks are built and tested, but it is
-        switched off: neither live pool has a sealed-swap verifier set, so
-        every swap call reverts. Its first design could leave the pool owing
+        switched off: neither testnet pool has a sealed-swap verifier set, so
+        every swap call reverts, and the mainnet pools have no sealed swap at
+        all. Its first design could leave the pool owing
         an asset it does not hold (audit H1). It stays off while we build a new
         engine for private trading, and any re-enable goes through the 3-day
         timelock.
@@ -355,8 +360,9 @@ export default function WhitepaperPage() {
       <p>
         Earlier pools on both chains, including a keccak-based Robinhood Chain
         pool, remain on-chain for history only and are superseded. The product
-        path is the Poseidon vault redeployed on 2026-09-29 with shield,
-        transfer, and unshield verifiers enabled (dev keys).
+        path on testnet is the Poseidon vault redeployed on 2026-09-29 with
+        shield, transfer, and unshield verifiers enabled (dev keys). Mainnet
+        runs new payments-only pools (ShieldPoolPayments) on the final keys.
       </p>
       <h3>6.1 Proofs shared with others</h3>
       <p>
@@ -486,7 +492,7 @@ export default function WhitepaperPage() {
             <tr>
               <td>Railgun</td>
               <td>Only the owner; viewing keys show the whole history</td>
-              <td>Years live, a public multi-party ceremony, external audits</td>
+              <td>Years live, a far bigger crowd of notes, external audits</td>
             </tr>
           </tbody>
         </table>
@@ -532,18 +538,18 @@ export default function WhitepaperPage() {
 
       <h2 id="product">10. Product surface</h2>
       <p>
-        The testnet application at{" "}
+        The application at{" "}
         <AppLink href="/app">gloam.trade/app</AppLink> provides:
       </p>
       <ul>
         <li>
-          Wallet connection restricted to Robinhood Chain testnet and Tempo
-          Moderato testnet
+          Wallet connection to Robinhood Chain and Tempo mainnet, and to
+          Robinhood Chain testnet and Tempo Moderato for practice
         </li>
-        <li>Portfolio with wallet balances, shielded balances, and faucet stocks</li>
+        <li>Portfolio with wallet balances, shielded balances, and faucet stocks on testnet</li>
         <li>
-          Stock tokens on Robinhood Chain held and sent privately, like any
-          other asset in the vault
+          Stock tokens on Robinhood Chain testnet held and sent privately, like
+          any other asset in the vault
         </li>
         <li>Public send and stock token transfer paths</li>
         <li>Shield deposits into the privacy vault</li>
@@ -575,12 +581,13 @@ export default function WhitepaperPage() {
       <h2 id="roadmap">11. Roadmap</h2>
       <ol>
         <li>
-          <strong>Live (testnet):</strong> public path, proof-bound shield,
-          unshield, private send with encrypted memos, the Gloam relay,
-          payroll, proofs of funds, payment, and payroll totals, private agent
-          payments, stock tokens held and sent privately, the Tempo
-          deployment, and pools with no admin withdraw and timelocked rule
-          changes.
+          <strong>Live on mainnet (beta):</strong> Robinhood Chain and Tempo,
+          since 21 October 2026, on the final ceremony keys: proof-bound
+          shield, unshield, private send, the Gloam relay, payroll, proofs of
+          funds, payment, and payroll totals, private agent payments, beta
+          deposit limits, and pools with no admin withdraw and timelocked rule
+          changes. The testnets add encrypted memos and stock tokens held and
+          sent privately, with test funds.
         </li>
         <li>
           <strong>Underway:</strong> a new engine for private trading. The
@@ -598,16 +605,21 @@ export default function WhitepaperPage() {
           engine.
         </li>
         <li>
-          <strong>Production gate:</strong> external review (audits so far are
-          internal), a multi-party trusted setup, incident process, mainnet
-          only after explicit readiness criteria.
+          <strong>Production gate:</strong> done before mainnet, the multi-party
+          trusted setup (13 contributors) and an internal review (no Critical or
+          High findings open on 20 October 2026). Still ahead: an external
+          audit, a multisig owner, and the incident process.
         </li>
       </ol>
 
       <h2 id="risks">12. Risks and limitations</h2>
       <ul>
         <li>
-          Smart contract and circuit bugs: audits so far are internal, with no
+          Beta software handling real money on mainnet; beta deposit limits cap
+          what the pools take
+        </li>
+        <li>
+          Smart contract and circuit bugs: reviews so far are internal, with no
           external audit yet
         </li>
         <li>Testnet runs on development proving keys from a single-contributor dev ceremony (mainnet uses the 13-contributor keys)</li>
@@ -617,26 +629,27 @@ export default function WhitepaperPage() {
         </li>
         <li>Browser-local note storage and user operational error</li>
         <li>
-          A payer can reclaim a direct payment until the payee moves it,
-          because the payer created the note and knows its key; a fix is in
-          progress
+          A payer can reclaim a direct payment until the payee claims it,
+          because the payer created the note and knows its key; claiming moves
+          it into a new note only the payee knows
         </li>
+        <li>The relayer is run by the Gloam team at launch; it can refuse or go down, never redirect</li>
         <li>
           A stablecoin issuer can freeze the vault contract; the answer is to
           screen deposits so flagged funds never enter
         </li>
         <li>A reader can forward a proof meant for them</li>
         <li>Regulatory and compliance uncertainty around privacy tools</li>
-        <li>Thin anonymity sets in early usage</li>
+        <li>Thin anonymity sets in early usage, on the new mainnet pools especially</li>
         <li>L2 and bridge operational risk of the underlying chain</li>
       </ul>
 
       <h2 id="non-claims">13. Explicit non-claims</h2>
       <p>
-        Gloam does not claim mainnet readiness, an external audit, insurance of
-        funds, legal immunity, or invisibility from investigation. Testnet
-        assets have no
-        real-world value. Nothing in this paper is investment advice.
+        Gloam is live on mainnet as beta software. It does not claim an
+        external audit, insurance of funds, legal immunity, or invisibility
+        from investigation. Testnet assets have no real-world value. Nothing in
+        this paper is investment advice.
       </p>
 
       <h2 id="closing">14. Closing</h2>
@@ -647,7 +660,7 @@ export default function WhitepaperPage() {
         exactly what is needed, without printing every private calculation to
         the street.
       </p>
-      <div className="t-label pt-4">gloam.trade · testnet · hello@gloam.trade · @gloamtrade</div>
+      <div className="t-label pt-4">gloam.trade · mainnet beta · hello@gloam.trade · @gloamtrade</div>
     </DocsLayout>
   );
 }

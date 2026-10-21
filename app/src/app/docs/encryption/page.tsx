@@ -30,7 +30,7 @@ export default function DocsEncryptionPage() {
         vault (share a payment tag).
         <br />
         <strong>Private trade</strong> = sell vault ETH for vault stock without
-        a public DEX hop (size privacy on by default).
+        a public DEX hop (built, and switched off for now).
         <br />
         <strong>Cash out</strong> = take it back to your open wallet with a
         proof that you own it.
@@ -48,7 +48,7 @@ export default function DocsEncryptionPage() {
           {
             n: "1",
             title: "You start public",
-            body: "ETH or stock tokens sit in your wallet. Explorers can show that balance.",
+            body: "Stablecoins or other tokens sit in your wallet. Explorers can show that balance.",
           },
           {
             n: "2",
@@ -63,7 +63,7 @@ export default function DocsEncryptionPage() {
           {
             n: "4",
             title: "You private-send, trade, or cash out",
-            body: "Private send splits a note into payment + change. Private trade swaps inside the vault. Cash out builds a proof and pays your open wallet.",
+            body: "Private send splits a note into payment + change. Private trade (switched off for now) swaps inside the vault. Cash out builds a proof and pays your open wallet.",
           },
         ]}
       />
@@ -89,9 +89,8 @@ export default function DocsEncryptionPage() {
 
       <p>
         Try it: <AppLink href="/app/vault?tab=shield">Shield</AppLink> →{" "}
-        <AppLink href="/app/vault?tab=move">Move</AppLink> (private send) or{" "}
-        <AppLink href="/app/vault?tab=trade&path=sealed">Private trade</AppLink> → cash out only
-        when you need the open wallet.
+        <AppLink href="/app/vault?tab=move">Move</AppLink> (private send) → cash
+        out only when you need the open wallet.
       </p>
     </DocsLayout>
   );

@@ -39,8 +39,8 @@ export default function DocsDataPage() {
           conversion and portfolio.
         </li>
         <li>
-          <strong>Memes (mainnet path)</strong>, DexScreener discovery is gated
-          off until mainnet product ships.
+          <strong>Memes</strong>, DexScreener discovery is not switched on in
+          the app.
         </li>
       </ul>
       <p>

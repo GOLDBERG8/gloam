@@ -163,11 +163,12 @@ export default function DocsProofsPage() {
       <h2>Limits worth knowing</h2>
       <ul>
         <li>
-          <strong>Testnet only.</strong> Proofs run on Robinhood Chain and Tempo
-          testnets with play money, using proving keys from a development
-          ceremony. The production ceremony closed on 17 October with 13
-          contributors, and mainnet uses its keys. The code was reviewed
-          internally before launch, and an external audit is planned. See the <Link href="/docs/production">production gate</Link>.
+          <strong>Mainnet and testnet use different keys.</strong> On Robinhood
+          Chain and Tempo mainnet, proofs use the final keys from the production
+          ceremony, which closed on 17 October with 13 contributors. On the
+          testnets they use development keys and test funds. The code was
+          reviewed internally before launch, and an external audit is planned.
+          See the <Link href="/docs/production">production gate</Link>.
         </li>
         <li>
           <strong>At least publishes spend markers.</strong> A proof of funds

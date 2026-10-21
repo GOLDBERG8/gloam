@@ -17,9 +17,9 @@ export default function DocsPayrollPage() {
       lede="Upload a list, pay everyone at once, and nobody sees who got what. Not even your wallet shows up, because Gloam sends each payment for you."
       glance={[
         { label: "Networks", value: "Robinhood Chain, Tempo" },
-        { label: "Pay in", value: "USDG, PathUSD, ETH" },
+        { label: "Pay in", value: "USDG, USDC.e and other stablecoins" },
         { label: "People per run", value: "Up to 200" },
-        { label: "Status", value: "Live on testnet" },
+        { label: "Status", value: "Live on mainnet and testnet" },
       ]}
       quickLinks={[
         { href: "/app/payroll", label: "Open payroll" },
@@ -65,19 +65,23 @@ export default function DocsPayrollPage() {
       <h2>Run your first payroll</h2>
       <ol>
         <li>
-          <strong>Get test money.</strong> On Robinhood Chain, claim test USDG
-          from the{" "}
+          <strong>Fund your wallet.</strong> On mainnet, hold USDG on Robinhood
+          Chain, or USDC.e, pathUSD, USDT0 or OUSD on Tempo. To practice first
+          on testnet, claim test USDG from the{" "}
           <a href="https://faucet.paxos.com/" target="_blank" rel="noreferrer">
             Paxos faucet
-          </a>
-          . On Tempo, use the faucet button in the app for PathUSD. See the{" "}
-          <Link href="/docs/testnet">testnet guide</Link>.
+          </a>{" "}
+          on Robinhood Chain, or use the faucet button in the app for PathUSD on
+          Tempo. See <Link href="/docs/testnet">practice on testnet</Link>.
         </li>
         <li>
           <strong>Add it privately.</strong> In{" "}
           <AppLink href="/app/vault?tab=shield">Vault, Shield</AppLink>, move the
-          total you want to pay into your private balance. One deposit that
-          covers the whole run is simplest.
+          total you want to pay into your private balance. On testnet, one
+          deposit that covers the whole run is simplest. On mainnet, beta limits
+          allow 500 per deposit (and 25,000 in total for each stablecoin), so
+          fund a bigger run with several deposits. Payments themselves are never
+          limited.
         </li>
         <li>
           <strong>Upload your list.</strong> In{" "}
@@ -118,7 +122,7 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
           <strong>A public 0x address</strong> is rejected on purpose: paying
           it would show the amount on the explorer.
         </li>
-        <li>Amounts are in the currency you pick, up to 6 decimals for USDG and PathUSD.</li>
+        <li>Amounts are in the currency you pick, up to 6 decimals for stablecoins.</li>
       </ul>
 
       <h2>Who sees what</h2>
@@ -198,7 +202,8 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
         Normally the wallet that sends a transaction is public. With Hide my
         wallet on, Gloam submits your private sends, cash outs and payment
         notices from its own account, so your wallet never appears next to
-        them. It is on by default in Payroll and in Vault, and free on testnet.
+        them. It is on by default in Payroll and in Vault. Private payments are
+        free; on mainnet a cash out costs 0.25%, kept by the vault.
       </p>
       <p>
         <strong>The relay cannot take or redirect money.</strong> Each payment

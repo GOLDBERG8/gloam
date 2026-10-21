@@ -6,28 +6,32 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 export const metadata: Metadata = {
   title: "Production gate",
   description:
-    "What must be true before Gloam leaves testnet, ceremony keys, audit, ops.",
+    "What was in place before Gloam took real money on mainnet, and what is still ahead: final ceremony keys, beta limits, timelock, internal review, external audit, multisig.",
 };
 
 export default function DocsProductionPage() {
   return (
     <DocsLayout
       title="Production gate"
-      lede="The checklist mainnet clears before real money goes in, and what is still ahead."
+      lede="What mainnet cleared before real money went in, and what is still ahead."
       glance={[
-        { label: "Today", value: "Testnet + dev keys" },
-        { label: "Ceremony", value: "Done, 13 people" },
-        { label: "Audit", value: "Internal; external planned" },
-        { label: "Mainnet", value: "21 Oct, 13:00 UTC" },
+        { label: "Mainnet", value: "Live since 21 Oct, 13:00 UTC" },
+        { label: "Keys", value: "Final, 13 contributors" },
+        { label: "Review", value: "Internal; external planned" },
+        { label: "Testnet", value: "Dev keys, test funds" },
       ]}
     >
       <h2>Why this page exists</h2>
       <p>
-        The app proves shield, unshield, and private send in the browser. That is
-        real cryptography. Testnet still runs on development keys, which are{" "}
-        <strong>not</strong> production-safe. The production trusted setup is
-        done (see the <a href="https://github.com/cryptoduke01/gloam/releases/tag/ceremony-final">transcript</a>), and its keys go
-        in with mainnet.
+        Mainnet is beta software handling real money, so we keep a plain list of
+        what had to be true before it opened, what is in place now, and what is
+        not done yet. The app proves shield, unshield, and private send in the
+        browser, and that is real cryptography. On mainnet the proofs use the
+        final keys from the production trusted setup (see the{" "}
+        <a href="https://github.com/cryptoduke01/gloam/releases/tag/ceremony-final">transcript</a>).
+        The testnets keep development keys, which are{" "}
+        <strong>not</strong> safe for real money, so they stay the free practice
+        network with test funds.
       </p>
 
       <FlowDiagram
@@ -36,22 +40,22 @@ export default function DocsProductionPage() {
           {
             n: "1",
             title: "Production ceremony (done)",
-            body: "Done 17 October: the public Hermez Powers of Tau, then 13 contributions to the six mainnet circuits, sealed with drand round 6561386. Transcript public. Next: the app's zkeys and the verifiers switch to these keys for mainnet.",
+            body: "Done 17 October: the public Hermez Powers of Tau, then 13 contributions to the six mainnet circuits, sealed with drand round 6561386. Transcript public. The mainnet verifiers and the app's mainnet proofs use these keys.",
           },
           {
             n: "2",
-            title: "Independent review",
-            body: "Contracts + circuits reviewed. Fix blockers. No “audit pending” mainnet.",
+            title: "Internal review (done)",
+            body: "Contracts and circuits reviewed internally before launch. The review finished on 20 October with no Critical or High findings open. An external audit is planned, not done.",
           },
           {
             n: "3",
-            title: "Ops + incident plan",
-            body: "Owner keys, pause/upgrade policy (or immutability choice), monitoring, disclosure channel.",
+            title: "Limits and timelock (in place)",
+            body: "Beta deposit limits cap what the pools take. Raising a limit, adding an asset or changing a verifier waits a public 3-day timelock. The owner can lower limits or close deposits at once.",
           },
           {
             n: "4",
-            title: "Mainnet deploy",
-            body: "New pool + verifiers on Robinhood mainnet. App points at production artifacts only.",
+            title: "Mainnet deploy (done)",
+            body: "New ShieldPoolPayments pools on Robinhood Chain and Tempo mainnet: payments only, no sealed swap. The app proves with the final keys there.",
           },
         ]}
       />
@@ -78,7 +82,30 @@ export default function DocsProductionPage() {
         <li>Destroy or never re-use toxic waste from the ceremony</li>
       </ul>
 
-      <h2>What is already hardened on testnet</h2>
+      <h2>Mainnet at launch</h2>
+      <ul>
+        <li>
+          <strong>Pools.</strong> <code>ShieldPoolPayments</code> on Robinhood
+          Chain (4663) and Tempo (4217). Addresses and assets are on{" "}
+          <Link href="/docs/chain#mainnet">Networks</Link>.
+        </li>
+        <li>
+          <strong>Beta deposit limits.</strong> Each stablecoin: 500 per deposit
+          and 25,000 in total. $GLOAM: 25,000 per deposit and 250,000 in total.
+          Cash outs and private payments are never limited.
+        </li>
+        <li>
+          <strong>No admin withdraw.</strong> No function lets the team take
+          pooled funds. Notes leave only through an unshield proof.
+        </li>
+        <li>
+          <strong>Fees.</strong> Deposits and private payments are free. A cash
+          out costs 0.25%. Half of Gloam&apos;s fees buy back $GLOAM; half of
+          that is burned and half goes to the treasury.
+        </li>
+      </ul>
+
+      <h2>What was hardened before mainnet</h2>
       <ul>
         <li>Real on-chain verifiers (no always-true mock on the funded pool)</li>
         <li>Browser prove path with artifact hash checks</li>
@@ -95,20 +122,35 @@ export default function DocsProductionPage() {
         </li>
       </ul>
 
-      <h2>What is still open product-wise</h2>
+      <h2>What is still ahead</h2>
       <ul>
         <li>
-          <strong>Re-enable sealed swaps</strong> after the H1 solvency fix (they
-          are disabled on-chain today)
+          <strong>External audit.</strong> Planned, not done. Until then the
+          beta limits cap how much the pools can hold.
+        </li>
+        <li>
+          <strong>Multisig owner.</strong> At launch one wallet is owner and
+          treasury (<code>0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8</code>). A
+          multisig is planned.
+        </li>
+        <li>
+          <strong>Relayer.</strong> The Gloam team runs it at launch. It only
+          submits already-proven transactions and pays gas; it cannot move or
+          redirect money. If it is down, you can send from your own wallet.
+        </li>
+        <li>
+          <strong>Anonymity set.</strong> The mainnet pools are new, so the
+          crowd of notes to hide among is thin at first. It grows with use.
+        </li>
+        <li>
+          <strong>Private trade.</strong> Off on mainnet (the mainnet pools have
+          no sealed swap) and on testnet, while we build a new engine for it
         </li>
         <li>
           <strong>Stronger key custody.</strong> Notes and receive keys are encrypted at rest, but
-          the key is device-bound; a wallet-bound or passphrase key is a mainnet
-          consideration
+          the key is device-bound; a wallet-bound or passphrase key is still open
         </li>
         <li>Stronger public-input privacy (rates / pair strategies)</li>
-        <li>Anonymity set growth (more users → better privacy)</li>
-        <li>Mainnet only after this gate</li>
       </ul>
 
       <p>

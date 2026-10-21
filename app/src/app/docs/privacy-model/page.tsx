@@ -15,7 +15,7 @@ export default function DocsPrivacyPage() {
   return (
     <DocsLayout
       title="What stays private"
-      lede="Robinhood Chain is a public ledger. Gloam adds a shielded pool on top. Privacy here means unlinkability and hidden holdings, not that transactions vanish from the explorer. Here is exactly what that does and does not hide."
+      lede="Robinhood Chain and Tempo are public ledgers. Gloam adds a shielded pool on top. Privacy here means unlinkability and hidden holdings, not that transactions vanish from the explorer. Here is exactly what that does and does not hide."
       glance={[
         { label: "Hidden", value: "the link, the bag" },
         { label: "Public", value: "deposits + exits" },
@@ -49,12 +49,12 @@ export default function DocsPrivacyPage() {
           {
             n: "✕",
             title: "Private trade (switched off)",
-            body: "Built, and switched off on-chain while we build a new engine for private trading. Do not rely on it yet.",
+            body: "Not on mainnet, where the pools take payments only, and switched off on testnet while we build a new engine for private trading.",
           },
           {
             n: "!",
             title: "Anonymity set",
-            body: "Unlinkability is only as strong as the crowd of notes to hide among. On a near-empty pool, an exit is traceable to your deposit.",
+            body: "Unlinkability is only as strong as the crowd of notes to hide among. The mainnet pools are new, and on a near-empty pool an exit is traceable to your deposit.",
           },
         ]}
       />
@@ -88,7 +88,7 @@ export default function DocsPrivacyPage() {
       <ul>
         <li>The link between your deposit and any later spend or exit</li>
         <li>How much you hold while it is in the vault</li>
-        <li>Who paid whom, and how much, on a private send (live on testnet)</li>
+        <li>Who paid whom, and how much, on a private send (live on mainnet and testnet)</li>
       </ul>
 
       <h2>What the public still sees</h2>
@@ -102,9 +102,10 @@ export default function DocsPrivacyPage() {
       <h2>The anonymity set is the whole game</h2>
       <p>
         A shielded pool hides you in a crowd. If you are the only note of your
-        size, an exit of that size is trivially yours. Today the testnet pool is
-        small, so treat unlinkability as weak until it fills up. This is true of
-        every shielded pool, Gloam included. We would rather say it than let you
+        size, an exit of that size is trivially yours. The mainnet pools are
+        brand new, so their crowd is thin at first, and the testnet pools are
+        small too. Treat unlinkability as weak until they fill up. This is true
+        of every shielded pool, Gloam included. We would rather say it than let you
         assume more privacy than you have.
       </p>
 
@@ -311,22 +312,25 @@ export default function DocsPrivacyPage() {
         rate limits each device and each network.
       </p>
 
-      <h2>Before mainnet</h2>
+      <h2>Before you put real money in</h2>
       <p>
-        Gloam is testnet only today, and there are honest gaps to know about before
-        you put real money in:
+        Mainnet is beta software handling real money. These are the honest gaps
+        to know about first:
       </p>
       <ul>
         <li>
-          <strong>Dev-ceremony proving keys on testnet.</strong> The testnet
-          setup had a single contributor. The multi-party trusted setup for
-          mainnet closed on 17 October with 13 contributors, and those keys go
-          live with mainnet.
+          <strong>Final keys on mainnet, dev keys on testnet.</strong> The
+          multi-party trusted setup closed on 17 October with 13 contributors,
+          and mainnet uses its final keys. The testnet setup had a single
+          contributor, so testnet is for practice only.
         </li>
         <li>
-          <strong>Internal audits only.</strong> Several rounds, with fixes
-          deployed, and a full review before launch. An external audit is planned;
-          until then, beta deposit limits cap how much the vault can hold.
+          <strong>Internal review only.</strong> Several rounds, with fixes
+          deployed, and a review before launch that finished on 20 October with
+          no Critical or High findings open. An external audit is planned; until
+          then, beta deposit limits cap how much each pool can hold: 500 per
+          deposit and 25,000 in total for each stablecoin, and 25,000 per deposit
+          and 250,000 in total for $GLOAM.
         </li>
         <li>
           <strong>A payer can take back a payment until it is claimed.</strong>{" "}
@@ -335,8 +339,9 @@ export default function DocsPrivacyPage() {
           longer touch it.
         </li>
         <li>
-          <strong>Small anonymity set.</strong> Few people use the testnet
-          pools, so unlinkability is weak for now.
+          <strong>Thin anonymity set.</strong> The mainnet pools are new, so
+          there are few notes to hide among at first, and unlinkability is weak
+          for now.
         </li>
         <li>
           <strong>Issuer freeze.</strong> A stablecoin issuer can freeze the
@@ -344,8 +349,8 @@ export default function DocsPrivacyPage() {
           never enter.
         </li>
         <li>
-          <strong>Private trade is switched off</strong> while we build a new
-          engine for private trading.
+          <strong>Private trade is off</strong> on mainnet and testnet while we
+          build a new engine for private trading.
         </li>
       </ul>
       <p>

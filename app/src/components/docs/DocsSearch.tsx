@@ -29,8 +29,8 @@ const PAGE_META: Record<string, PageMeta> = {
     headings: ["What is Gloam?", "Try it (2 minutes)", "What works today", "What does not work yet", "Read next"],
   },
   "/docs/quickstart": {
-    description: "From an empty project to a private balance on testnet in about ten minutes.",
-    keywords: ["install", "create gloam app", "first app", "hello world", "start building", "npm"],
+    description: "From an empty project to a private balance on mainnet or the free testnet in about ten minutes.",
+    keywords: ["install", "create gloam app", "first app", "hello world", "start building", "npm", "mainnet", "approve", "usdg", "circuit artifacts", "final keys"],
     headings: [
       "Fastest start",
       "What you need",
@@ -44,8 +44,8 @@ const PAGE_META: Record<string, PageMeta> = {
     ],
   },
   "/docs/testnet": {
-    description: "Wallet setup, test money, adding funds privately, paying and cashing out.",
-    keywords: ["faucet", "test money", "wallet", "metamask", "usdg", "pathusd", "launch day", "troubleshooting", "demo"],
+    description: "Practice for free with test funds: wallet setup, faucet, adding funds privately, paying and cashing out.",
+    keywords: ["testnet", "practice", "faucet", "test money", "test funds", "wallet", "metamask", "usdg", "pathusd", "troubleshooting", "demo", "46630"],
     headings: [
       "Demo video",
       "What you can do on testnet",
@@ -59,23 +59,24 @@ const PAGE_META: Record<string, PageMeta> = {
       "7. Trade paths",
       "7b. Private trade walkthrough",
       "8. Settings & backups",
-      "Launch-day checklist",
+      "Practice checklist",
       "Troubleshooting",
       "Safety & non-claims",
       "Read next",
     ],
   },
   "/docs/product": {
-    description: "Status board: what is live, what is next, and the rules we keep.",
-    keywords: ["status", "roadmap", "live", "shipping", "features"],
+    description: "Status board: what is live on mainnet and testnet, what is next, and the rules we keep.",
+    keywords: ["status", "roadmap", "live", "shipping", "features", "mainnet"],
     headings: ["Where things live", "Status (honest)", "Rules we will not break"],
   },
   "/docs/sdk": {
-    description: "Add private balances, payments and proofs to any app or agent.",
-    keywords: ["package", "npm", "typescript", "library", "integrate", "intents", "@gloamtrade/sdk"],
+    description: "Add private balances, payments and proofs to any app or agent, on mainnet or testnet.",
+    keywords: ["package", "npm", "typescript", "library", "integrate", "intents", "@gloamtrade/sdk", "mainnet", "testnet", "mainnetNetwork", "gloamNetworks", "cash out fee"],
     headings: [
       "What Gloam gives your app",
       "Install",
+      "Mainnet and testnet",
       "The model",
       "Quickstart: shield privately",
       "Intents: plan and exec",
@@ -87,9 +88,10 @@ const PAGE_META: Record<string, PageMeta> = {
   },
   "/docs/sdk/reference": {
     description: "Every export in @gloamtrade/sdk, with signatures and status.",
-    keywords: ["api", "functions", "exports", "signatures", "methods", "prover", "x402", "constants", "types"],
+    keywords: ["api", "functions", "exports", "signatures", "methods", "prover", "x402", "constants", "types", "mainnet", "mainnetNetwork", "gloamNetworks", "getGloamNetwork", "circuitArtifactUrls", "ceremonyForChainId", "cashOutFee", "CASH_OUT_FEE_BPS", "MAINNET_POOLS"],
     headings: [
       "Import",
+      "Networks and mainnet",
       "Intent builders",
       "Intent shape",
       "Notes",
@@ -146,11 +148,11 @@ const PAGE_META: Record<string, PageMeta> = {
   },
   "/docs/partners": {
     description: "Build on Gloam with an API key: relay payments, count deposits, check proofs and see your volume.",
-    keywords: ["partner", "partners", "api", "api key", "rest", "http", "integrate", "wallet", "app", "fees", "revenue", "volume", "bearer", "v1", "portal"],
+    keywords: ["partner", "partners", "api", "api key", "rest", "http", "integrate", "wallet", "app", "fees", "revenue", "volume", "bearer", "v1", "portal", "live key", "test key", "charged"],
     headings: [
       "How the program works",
       "What you can charge, and why",
-      "Testnet: nothing is charged",
+      "Partner fees: not charged yet",
       "Authentication and limits",
       "Responses and errors",
       "Relay a payment",
@@ -210,7 +212,7 @@ const PAGE_META: Record<string, PageMeta> = {
       "Private from the public, not from an operator",
       "What is new and what is not",
       "Security and compliance",
-      "Before mainnet",
+      "Before you put real money in",
     ],
   },
   "/docs/compare": {
@@ -227,7 +229,7 @@ const PAGE_META: Record<string, PageMeta> = {
     ],
   },
   "/docs/sealed-trade": {
-    description: "Trade from a private balance with the size kept private. Switched off while we build a new engine.",
+    description: "Trade from a private balance with the size kept private. Off on mainnet and testnet while we build a new engine.",
     keywords: ["swap", "trade", "exchange", "stocks", "stock tokens", "switched off", "engine", "dex"],
     headings: [
       "Why it is switched off",
@@ -241,10 +243,11 @@ const PAGE_META: Record<string, PageMeta> = {
     ],
   },
   "/docs/chain": {
-    description: "Robinhood Chain and Tempo: what runs where, and how to switch.",
-    keywords: ["robinhood", "tempo", "chain id", "rpc", "network", "46630", "42431", "explorer"],
+    description: "Robinhood Chain and Tempo, mainnet and testnet: chain IDs, RPCs, pools, assets and beta limits.",
+    keywords: ["robinhood", "tempo", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "46630", "42431", "explorer", "pool address", "beta limits", "deposit limit", "usdg", "usdc.e", "usdt0", "gloam token", "relayer", "fees"],
     headings: [
       "Two chains, one shielded pool design",
+      "Mainnet",
       "Robinhood Chain",
       "Tempo",
       "Switching networks in the app",
@@ -264,13 +267,14 @@ const PAGE_META: Record<string, PageMeta> = {
     ],
   },
   "/docs/production": {
-    description: "The checklist that has to pass before mainnet and real money.",
-    keywords: ["mainnet", "launch", "ceremony", "keys", "security", "audit", "checklist"],
+    description: "What was in place before mainnet took real money, and what is still ahead.",
+    keywords: ["mainnet", "launch", "ceremony", "keys", "security", "audit", "review", "multisig", "beta limits", "timelock", "checklist"],
     headings: [
       "Why this page exists",
       "Ceremony checklist (keys)",
-      "What is already hardened on testnet",
-      "What is still open product-wise",
+      "Mainnet at launch",
+      "What was hardened before mainnet",
+      "What is still ahead",
     ],
   },
   "/whitepaper": {

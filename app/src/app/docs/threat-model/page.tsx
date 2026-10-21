@@ -16,7 +16,7 @@ const ACTORS: { who: string; can: string; cannot: string }[] = [
   },
   {
     who: "The Gloam relay",
-    can: "See your IP address and the timing of the transactions it sends for you, and refuse to send one.",
+    can: "See your IP address and the timing of the transactions it sends for you, and refuse to send one. The Gloam team runs it at launch.",
     cannot: "Change a cash out's recipient or amount, which the proof binds, learn a note secret, or move money.",
   },
   {
@@ -26,7 +26,7 @@ const ACTORS: { who: string; can: string; cannot: string }[] = [
   },
   {
     who: "The Gloam team and contract owner",
-    can: "Change proof, price or rate rules after a 3-day public timelock, lower deposit limits at once on the mainnet vault, and change the web app you load.",
+    can: "Change proof, price or rate rules, raise deposit limits or add assets after a 3-day public timelock, lower deposit limits or close deposits at once on the mainnet vault, and change the web app you load.",
     cannot: "Move pooled funds. There is no admin withdraw, and no rule change takes effect without 3 days of public notice.",
   },
   {
@@ -56,8 +56,8 @@ const ACTORS: { who: string; can: string; cannot: string }[] = [
   },
   {
     who: "Whoever ran the trusted setup",
-    can: "On testnet, forge proofs if they kept the setup's secret, and so drain the pool.",
-    cannot: "Do the same at mainnet, provided one contributor to the multi-party ceremony is honest.",
+    can: "On testnet, where the dev keys had one contributor, forge proofs if they kept its secret, and so drain the test pool.",
+    cannot: "Do the same on mainnet, provided one of the 13 contributors to the mainnet ceremony destroyed their secret.",
   },
 ];
 
@@ -67,7 +67,7 @@ export default function DocsThreatModelPage() {
       title="Threat model"
       lede="Who we defend against, what each of them can and cannot do, what we assume, and the gaps we know about. Written for security researchers. If you just want to know what an explorer shows, start with What stays private."
       glance={[
-        { label: "Network", value: "Testnet today" },
+        { label: "Network", value: "Mainnet, in beta" },
         { label: "Bounty", value: "None yet, credit by name" },
         { label: "Report to", value: "hello@gloam.trade" },
         { label: "Fork tests", value: "Welcome" },
@@ -117,8 +117,9 @@ export default function DocsThreatModelPage() {
       <p>
         A shielded pool hides you in a crowd. If you deposit 137 and someone cashes out
         137 an hour later, an observer will guess it was you, and the proof cannot stop
-        that. The crowd is small on testnet, so treat unlinkability as weak until more
-        people use the vault. Splitting amounts and waiting before you cash out help.
+        that. The mainnet vaults are brand new, so the crowd is thin at first: treat
+        unlinkability as weak until more people use them. The testnet crowd is small
+        too. Splitting amounts and waiting before you cash out help.
       </p>
 
       <h3>The relay</h3>
@@ -136,11 +137,13 @@ export default function DocsThreatModelPage() {
       <p>
         After setup, the owner can change how proofs, prices or rates are checked only
         by queueing the change on-chain, where anyone can see it, and running it three
-        days later. A harmful change, such as a bad verifier, gives everyone three days to
-        cash out first. On the mainnet vault the owner can also lower deposit limits at
-        once, down to zero. That can stop new deposits during an incident, never
-        withdrawals or private sends. The owner is a single wallet today. Mainnet moves it
-        to a multisig.
+        days later. On mainnet the same delay applies to raising deposit limits or
+        adding an asset. A harmful change, such as a bad verifier, gives everyone three
+        days to cash out first. On the mainnet vault the owner can also lower deposit
+        limits at once, down to zero. That can stop new deposits during an incident,
+        never withdrawals or private sends. At launch the owner, which is also the
+        treasury, is a single wallet (<code>0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8</code>).
+        A multisig is planned.
       </p>
 
       <h3>The web app</h3>
@@ -188,26 +191,40 @@ export default function DocsThreatModelPage() {
       <h2 id="gaps">Known gaps</h2>
       <ul>
         <li>
+          <strong>Beta software with real money.</strong> Mainnet is new. Beta deposit
+          limits cap what each pool can take while it is young.
+        </li>
+        <li>
+          <strong>Internal review only.</strong> Several internal rounds, with fixes
+          deployed. The pre-mainnet review finished on 20 October 2026 with no
+          Critical or High findings open. An external audit is planned, not done.
+        </li>
+        <li>
+          <strong>Thin anonymity set.</strong> The mainnet pools are new, so there are
+          few notes to hide among at first. Few people use the testnet vaults either.
+        </li>
+        <li>
           <strong>Dev-ceremony keys on testnet.</strong> Testnet proving keys had one
-          contributor. The multi-party ceremony for mainnet is done, with 13
-          contributors, and mainnet uses its keys.
-        </li>
-        <li>
-          <strong>Internal audits only.</strong> Several internal rounds, with fixes
-          deployed. No external audit yet.
-        </li>
-        <li>
-          <strong>Small anonymity set.</strong> Few people use the testnet vaults.
+          contributor, so testnet is for practice only. Mainnet uses the final keys
+          from the 13-contributor ceremony.
         </li>
         <li>
           <strong>Read metadata.</strong> Checking whether a specific payment was spent
           goes through a public RPC, which can tie your IP address to that payment.
         </li>
         <li>
-          <strong>Single-wallet owner.</strong> Moves to a multisig at mainnet.
+          <strong>Single-wallet owner.</strong> One wallet is owner and treasury at
+          launch. A multisig is planned.
         </li>
         <li>
-          <strong>Private trade is off.</strong> Its accounting needs a redesign before it
+          <strong>Team-run relayer.</strong> The Gloam team runs the relayer at launch.
+          It only submits already-proven transactions and pays gas, so it cannot move
+          or redirect money, but it can refuse or go down. You can then send from your
+          own wallet.
+        </li>
+        <li>
+          <strong>Private trade is off.</strong> The mainnet pools have no sealed swap,
+          and on testnet it is switched off. Its accounting needs a redesign before it
           comes back.
         </li>
       </ul>

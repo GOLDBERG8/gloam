@@ -7,19 +7,19 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 export const metadata: Metadata = {
   title: "Private pay on RH",
   description:
-    "How Gloam private pay compares to Solana private send and Zcash, and what is live on Robinhood Chain testnet.",
+    "How Gloam private pay compares to Solana private send and Zcash, and what is live on Robinhood Chain mainnet and testnet.",
 };
 
 export default function DocsPrivatePayPage() {
   return (
     <DocsLayout
       title="Private pay on Robinhood Chain"
-      lede="Yes, Solana-style “pay like public send” is possible on RH. Gloam is building that path with vault proofs + receive tags + on-chain memos."
+      lede="Yes, Solana-style “pay like public send” is possible on RH. Gloam does it with vault proofs and receive tags, live on mainnet and testnet."
       glance={[
         { label: "Chain", value: "RH EVM" },
         { label: "Direct", value: "Receive tag" },
         { label: "Discovery", value: "Memo + scan" },
-        { label: "Also", value: "Private trade" },
+        { label: "Private trade", value: "Off for now" },
       ]}
     >
       <h2>Why Solana private send “feels” like public send</h2>
@@ -52,7 +52,7 @@ export default function DocsPrivatePayPage() {
           {
             n: "3",
             title: "Encrypted package",
-            body: "Ticket sealed to their tag (gloam2t). Optional: post as on-chain memo for Scan inbox.",
+            body: "Ticket sealed to their tag (gloam2t). Optional, where the network has a memo board: post as on-chain memo for Scan inbox.",
           },
           {
             n: "4",
@@ -129,24 +129,23 @@ export default function DocsPrivatePayPage() {
         </li>
         <li>
           <strong>Gloam</strong> = private rails for{" "}
-          <em>RH stock tokens / RWA / ETH</em>, hold, private pay, and private
-          trade (testnet live) next to open settlement on the same chain RH
-          cares about.
+          <em>stablecoins and $GLOAM on RH mainnet</em> (and stock tokens on
+          testnet): hold and pay privately next to open settlement on the same
+          chain. Private trade is switched off for now.
         </li>
       </ul>
       <p>What still gates a full Zcash-class experience:</p>
       <ul>
-        <li>Mainnet on the production keys (the trusted setup itself is done)</li>
+        <li>A bigger anonymity set: the mainnet pools are new</li>
         <li>Stronger public-input privacy on trade rates / pair</li>
-        <li>Anonymity set / usage</li>
-        <li>Audit before real money</li>
+        <li>Private trade on a new engine</li>
+        <li>An external audit (mainnet launched after an internal review)</li>
       </ul>
 
       <h2>Try it</h2>
       <p>
         <AppLink href="/app/vault?tab=move">Move</AppLink>, private pay ·{" "}
-        <AppLink href="/app/vault?tab=trade&path=sealed">Private trade</AppLink>, size
-        privacy on ·{" "}
+        <Link href="/docs/sealed-trade">Private trade</Link> (switched off) ·{" "}
         <Link href="/docs/privacy-model">Privacy model</Link>.
       </p>
     </DocsLayout>

@@ -77,7 +77,7 @@ const SURFACE = [
   {
     icon: <IconBalance />,
     title: "Private balances",
-    body: "Move ETH or stablecoins into a balance only the holder can see or spend.",
+    body: "Move stablecoins into a balance only the holder can see or spend.",
     fn: "buildShieldBoundIntent",
   },
   {
@@ -107,35 +107,44 @@ const SURFACE = [
   {
     icon: <IconChains />,
     title: "Two chains, one core",
-    body: "The same circuits and the same calls on Robinhood Chain and Tempo. Pick a pool, keep the code.",
-    fn: "TEMPO_SEALED_VAULT",
+    body: "The same circuits and the same calls on Robinhood Chain and Tempo, mainnet and testnet. Pick a network, keep the code.",
+    fn: "gloamNetworks",
   },
 ];
 
 const PAY_SNIPPET = `import {
+  mainnetNetwork,
   buildShieldBoundIntent,
   buildPrivateSendIntent,
   relayIntent,
   artifactProver,
+  circuitArtifactUrls,
   syncTree,
-  SEALED_VAULT,
+  TEMPO_USDCE,
 } from "@gloamtrade/sdk";
+
+// Tempo mainnet, real money. GLOAM_NETWORKS.tempo is the free testnet.
+const net = mainnetNetwork("tempo");
+if (!net) throw new Error("Tempo mainnet pool not published yet");
+const target = { chainId: net.chainId, poolAddress: net.pool, asset: TEMPO_USDCE };
 
 // 1. Add money privately. Sign deposit.exec from your own wallet.
 // Keep deposit.note.secret: it is the only key to this balance.
 const deposit = await buildShieldBoundIntent({
-  amountWei: parseEther("0.01"),
-  prover: artifactProver({ wasm: "shield.wasm", zkey: "shield_final.zkey" }),
+  ...target,
+  amountWei: parseUnits("10", 6),
+  prover: artifactProver(circuitArtifactUrls("shield", net.chainId)),
 });
 
 // 2. Pay privately from that balance. The rest comes back as change.
-const tree = await syncTree(publicClient, { pool: SEALED_VAULT });
+const tree = await syncTree(publicClient, { pool: net.pool, fromBlock: net.deployBlock });
 const send = await buildPrivateSendIntent({
+  ...target,
   secretHex: deposit.note.secret,
-  amountInWei: parseEther("0.01"),
-  amountPayWei: parseEther("0.004"),
+  amountInWei: parseUnits("10", 6),
+  amountPayWei: parseUnits("4", 6),
   path: await tree.pathForCommitment(deposit.note.commitment),
-  prove: artifactProver({ wasm: "transfer.wasm", zkey: "transfer_final.zkey" }),
+  prove: artifactProver(circuitArtifactUrls("transfer", net.chainId)),
 });
 
 // 3. Send it through the relay. Your wallet never shows up.
@@ -187,20 +196,27 @@ const CASHOUT_SNIPPET = `import {
   buildUnshieldIntent,
   relayIntent,
   artifactProver,
+  circuitArtifactUrls,
+  cashOutFee,
   syncTree,
-  SEALED_VAULT,
 } from "@gloamtrade/sdk";
 
-const tree = await syncTree(publicClient, { pool: SEALED_VAULT });
+const tree = await syncTree(publicClient, { pool: net.pool, fromBlock: net.deployBlock });
 
 // Cash out to any public wallet. The recipient is fixed inside the proof.
 const exit = await buildUnshieldIntent({
+  chainId: net.chainId,
+  poolAddress: net.pool,
+  asset: TEMPO_USDCE,
   secretHex: note.secret,
-  amountWei: parseEther("0.004"),
+  amountWei: parseUnits("6", 6),
   to: "0xYourPublicWallet",
   path: await tree.pathForCommitment(note.commitment),
-  prove: artifactProver({ wasm: "unshield.wasm", zkey: "unshield_final.zkey" }),
+  prove: artifactProver(circuitArtifactUrls("unshield", net.chainId)),
 });
+
+// On mainnet the pool keeps cashOutFee(amount), 0.25%, and pays the rest.
+const fee = cashOutFee(parseUnits("6", 6));
 
 // The relay can submit it or refuse it. It cannot send it anywhere else.
 const hash = await relayIntent(exit);`;
@@ -224,7 +240,7 @@ const MCP_CONFIG = `{
   "mcpServers": {
     "gloam": {
       "command": "npx",
-      "args": ["-y", "tsx", "/path/to/gloam/mcp/src/index.ts"]
+      "args": ["-y", "@gloamtrade/mcp"]
     }
   }
 }`;
@@ -490,7 +506,8 @@ export default function SdkPage() {
                 <h2 className="t-display-m mt-4 max-w-[14ch]">One command to a working app</h2>
                 <p className="mt-4 max-w-[44ch] text-[15px] leading-relaxed text-mute">
                   Scaffolds a Next.js app already wired to the SDK, with private
-                  balances and payments working on testnet from the first run.
+                  balances and payments working on the free testnet from the
+                  first run.
                 </p>
               </div>
               <div className="mt-10">
@@ -547,12 +564,12 @@ export default function SdkPage() {
             <div className="grid grid-cols-1 gap-10 sm:grid-cols-3">
               {[
                 {
-                  title: "Testnet today",
-                  body: "Live on Robinhood Chain testnet and Tempo Moderato, with play money.",
+                  title: "Mainnet, in beta",
+                  body: "Live on Robinhood Chain and Tempo mainnet with real money, under beta deposit limits. The testnets stay open for free practice.",
                 },
                 {
                   title: "Keys",
-                  body: "Testnet proofs use development keys. The production ceremony is done, with 13 contributors, and mainnet uses its final keys. It was reviewed internally before launch, and an external audit is planned.",
+                  body: "Mainnet proofs use the final keys from the 13-contributor ceremony; testnet proofs use development keys. Reviewed internally before launch; an external audit is planned.",
                 },
                 {
                   title: "Nothing faked",

@@ -26,7 +26,8 @@ export type GlanceRow = { label: string; value: string };
 
 const DEFAULT_QUICK_LINKS = [
   { href: "/app", label: "Open the app" },
-  { href: "/docs/testnet", label: "Testnet guide" },
+  { href: "/docs/chain", label: "Networks" },
+  { href: "/docs/testnet", label: "Practice on testnet" },
   { href: "/docs/payroll", label: "Private payroll" },
   { href: "/docs/privacy-model", label: "What stays private" },
   { href: "/whitepaper", label: "Whitepaper" },

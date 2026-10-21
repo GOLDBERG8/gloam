@@ -5,17 +5,17 @@ import { DocsLayout } from "@/components/DocsLayout";
 export const metadata: Metadata = {
   title: "Partner program and API",
   description:
-    "Add private payments to your app with a Gloam API key, set your own fee, and see attributed volume and commissions. Full v1 API reference with curl examples. Testnet: nothing is charged.",
+    "Add private payments to your app with a Gloam API key, set your own fee, and see attributed volume and commissions. Full v1 API reference with curl examples. Partner fees are not charged yet, on mainnet or testnet.",
 };
 
 const ERRORS: [string, number | string, string][] = [
-  ["missing_key", 401, "No Authorization header. Send Authorization: Bearer gloam_test_..."],
+  ["missing_key", 401, "No Authorization header. Send Authorization: Bearer gloam_live_... (mainnet) or gloam_test_... (testnet)"],
   ["invalid_key", 401, "Not a Gloam key, or a key that was revoked or rotated."],
   ["key_env_mismatch", 403, "A live key on a testnet, or a test key on a mainnet."],
   ["rate_limited", 429, "Over 300 requests in a minute for this key. Retry-After says when to retry."],
   ["invalid_json", 400, "The body is not a JSON object."],
   ["bad_request", 400, "A relay field is malformed (proof, root, nullifier, commitments, asset, to, amount, memo). Relayed memos are capped at 2,048 bytes."],
-  ["network", 400, "chainId is not a network the relay serves (46630 or 42431)."],
+  ["network", 400, "chainId is not a network the relay serves (4663 or 4217 on mainnet, 46630 or 42431 on testnet)."],
   ["bad_action", 400, "action is not transfer, unshield or memo."],
   ["screened", 403, "A cash out to a sanctioned address. The relay says nothing more."],
   ["asset_policy", 403, "On Tempo, the token issuer's policy blocks this cash out."],
@@ -41,12 +41,12 @@ export default function DocsPartnersPage() {
   return (
     <DocsLayout
       title="Partner program and API"
-      lede="Add private payments to your app with one API key. You set your own fee, and every payment your key brings in is counted to you as it happens. On testnet nothing is charged."
+      lede="Add private payments to your app with one API key. You set your own fee, and every payment your key brings in is counted to you as it happens. Partner fees are not charged yet, on mainnet or testnet."
       glance={[
         { label: "Base URL", value: "https://gloam.trade/api/v1" },
         { label: "Auth", value: "Bearer API key" },
         { label: "Format", value: "JSON, version 1" },
-        { label: "Charged", value: "Nothing on testnet" },
+        { label: "Partner fees", value: "Not charged yet" },
       ]}
       quickLinks={[
         { href: "/partners", label: "Partner program" },
@@ -123,19 +123,25 @@ export default function DocsPartnersPage() {
         earlier ones keep the fee they were counted with.
       </p>
 
-      <h2>Testnet: nothing is charged</h2>
+      <h2>Partner fees: not charged yet</h2>
       <p>
-        Gloam runs on Robinhood Chain testnet and Tempo testnet. Today the portal
-        records what your key brought in and the fee your setting would have earned,
-        and every figure is labeled that way. No fee is taken from anyone, and every
-        API response says <code>&quot;charged&quot;: false</code>.
+        Gloam runs on Robinhood Chain and Tempo mainnet, and on their testnets.
+        On every network, the portal records what your key brought in and the fee
+        your setting would have earned, and every figure is labeled that way. No
+        partner fee is taken from anyone, and every API response says{" "}
+        <code>&quot;charged&quot;: false</code>.
       </p>
       <p>
-        Taking a fee for real needs a fee output inside the zero-knowledge circuits
-        and the vault contract, so the fee is part of the proof and nobody can skip
-        or change it. That is part of the mainnet ceremony and audit (see the{" "}
-        <Link href="/docs/production">production gate</Link>). Until then, a
-        dashboard figure is an attribution count, not money owed.
+        Gloam&apos;s own fee is separate. On mainnet a cash out costs 0.25%, kept
+        by the vault; deposits and private payments are free. Your partner fee is
+        not added on top of that yet.
+      </p>
+      <p>
+        Taking a partner fee for real needs a fee output inside the
+        zero-knowledge circuits and the vault contract, so the fee is part of the
+        proof and nobody can skip or change it. The mainnet pools do not have
+        that yet (see the <Link href="/docs/production">production gate</Link>).
+        Until then, a dashboard figure is an attribution count, not money owed.
       </p>
       <p>
         USD figures use $1 for stablecoins and the live ETH price at the time of the
@@ -145,8 +151,8 @@ export default function DocsPartnersPage() {
       <h2>Authentication and limits</h2>
       <p>
         Send the key in the <code>Authorization</code> header on every call except
-        the index at <code>GET /api/v1</code>. Test keys (<code>gloam_test_</code>)
-        work on testnets; live keys (<code>gloam_live_</code>) open with mainnet.
+        the index at <code>GET /api/v1</code>. Live keys (<code>gloam_live_</code>)
+        work on the mainnets; test keys (<code>gloam_test_</code>) on the testnets.
         Keep the key on your server: the API sends no CORS headers, so browsers on
         other sites cannot call it.
       </p>
@@ -209,22 +215,24 @@ export default function DocsPartnersPage() {
         refuse a payment, never redirect it.
       </p>
       <pre>
-        <code>{`# a private payment (transfer): counted as a private payment, flat fee
+        <code>{`# a live key on mainnet (4663, 4217), a test key on testnet (46630, 42431)
+
+# a private payment (transfer): counted as a private payment, flat fee
 curl https://gloam.trade/api/v1/relay \\
   -H "Authorization: Bearer $GLOAM_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "chainId": 46630,
+    "chainId": 4663,
     "action": "transfer",
     "proof": "0x...", "root": "0x...", "nullifier": "0x...",
     "commitments": ["0x...", "0x..."]
   }'
 
 # a cash out (unshield): counted with its public token and amount
-  -d '{ "chainId": 42431, "action": "unshield", "proof": "0x...", "root": "0x...",
+  -d '{ "chainId": 4217, "action": "unshield", "proof": "0x...", "root": "0x...",
         "nullifier": "0x...", "asset": "0x20c0...", "to": "0xRecipient", "amount": "250000000" }'
 
-# a payment message (memo): relayed, not counted
+# a payment message (memo, on testnet): relayed, not counted
   -d '{ "chainId": 46630, "action": "memo", "paymentCommitment": "0x...", "memo": "0x..." }'`}</code>
       </pre>
       <pre>
@@ -232,12 +240,12 @@ curl https://gloam.trade/api/v1/relay \\
   "v": 1, "ok": true,
   "data": {
     "hash": "0x9c1e...",
-    "chainId": 46630, "network": "robinhood", "action": "transfer",
+    "chainId": 4663, "network": "robinhood-mainnet", "action": "transfer",
     "attribution": {
       "recorded": true,
       "kind": "private_payment",
       "activity": {
-        "id": "act_...", "kind": "private_payment", "network": "robinhood",
+        "id": "act_...", "kind": "private_payment", "network": "robinhood-mainnet",
         "txHash": "0x9c1e...", "ts": 1791302400000,
         "asset": null, "amount": null, "volumeUsd": null,
         "feeUsd": 0.05, "feeToken": null, "feeBasis": "$0.05 per private payment"
@@ -268,9 +276,9 @@ curl https://gloam.trade/api/v1/relay \\
         <code>{`curl https://gloam.trade/api/v1/deposits \\
   -H "Authorization: Bearer $GLOAM_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{ "chainId": 46630, "txHash": "0x..." }'
+  -d '{ "chainId": 4663, "txHash": "0x..." }'
 
-# 201: { "v": 1, "ok": true, "data": { "activity": { "kind": "deposit", "symbol": "USDG", "amount": "1000000000", ... }, "charged": false } }`}</code>
+# 201: { "v": 1, "ok": true, "data": { "activity": { "kind": "deposit", "symbol": "USDG", "amount": "250000000", ... }, "charged": false } }`}</code>
       </pre>
 
       <h2>Your volume and fees</h2>
@@ -295,8 +303,10 @@ curl https://gloam.trade/api/v1/relay \\
 
       <h2>Vaults and the leaf list</h2>
       <p>
-        <code>GET /api/v1/vaults</code> (or <code>/vaults/robinhood</code>,{" "}
-        <code>/vaults/tempo</code>) gives each network&apos;s vault address, the
+        <code>GET /api/v1/vaults</code> (or one network:{" "}
+        <code>/vaults/robinhood-mainnet</code>, <code>/vaults/tempo-mainnet</code>,{" "}
+        <code>/vaults/robinhood</code>, <code>/vaults/tempo</code>) gives each
+        network&apos;s vault address, the
         tokens it takes, whether the relay is up, and a fresh read of the tree size
         and root, plus <code>leafCapacity</code> and <code>leavesLeft</code> for
         how much room the note tree has.
@@ -309,11 +319,11 @@ curl https://gloam.trade/api/v1/relay \\
         <code>syncTree</code> does the same from the chain.
       </p>
       <pre>
-        <code>{`curl https://gloam.trade/api/v1/vaults/tempo \\
+        <code>{`curl https://gloam.trade/api/v1/vaults/tempo-mainnet \\
   -H "Authorization: Bearer $GLOAM_API_KEY"
 
-# data.vault: { "network": "tempo", "chainId": 42431, "pool": "0x841D...",
-#   "assets": [ { "symbol": "OUSD", ... } ], "relay": { "enabled": true, ... },
+# data.vault: { "network": "tempo-mainnet", "chainId": 4217, "pool": "0x...",
+#   "assets": [ { "symbol": "USDC.e", ... } ], "relay": { "enabled": true, ... },
 #   "chain": { "block": "37...", "leafCount": 412, "root": "0x..." } }`}</code>
       </pre>
 
@@ -321,8 +331,8 @@ curl https://gloam.trade/api/v1/relay \\
       <p>
         <code>POST /api/v1/proofs/verify</code> checks a proof of funds (
         <code>gloamfunds1:</code>), proof of payment (<code>gloampay1:</code>),
-        payroll total (<code>gloamroll1:</code>) or balance disclosure (
-        <code>gloamdisc1:</code>) on the server, with the same checks the{" "}
+        payroll total (<code>gloamroll1:</code>) or exact balance (
+        <code>gloambal1:</code>) on the server, with the same checks the{" "}
         <Link href="/verify">/verify</Link> page runs: the zero-knowledge proof, who
         it was made for, that it points at Gloam&apos;s own vault, that its plain
         fields match, and the live chain checks. <code>ok</code> is true only when
@@ -337,7 +347,7 @@ curl https://gloam.trade/api/v1/relay \\
 # data: { "format": "gloamfunds1", "kind": "funds", "ok": true, "expired": false,
 #   "checks": [ { "label": "The proof checks out", "state": "pass", ... },
 #               { "label": "Made for \\"Acme Bank\\"", "state": "pass", ... }, ... ],
-#   "claims": { "chainId": 46630, "asset": "0x7E95...", "threshold": "1000000000", ... } }`}</code>
+#   "claims": { "chainId": 4663, "asset": "0x5fc5...", "threshold": "1000000000", ... } }`}</code>
       </pre>
 
       <h2>Payment request links</h2>
@@ -352,10 +362,10 @@ curl https://gloam.trade/api/v1/relay \\
         <code>{`curl https://gloam.trade/api/v1/payment-requests \\
   -H "Authorization: Bearer $GLOAM_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{ "to": "gloamr1.AbC...", "network": "robinhood", "asset": "USDG",
+  -d '{ "to": "gloamr1.AbC...", "network": "robinhood-mainnet", "asset": "USDG",
         "amount": "1250", "note": "Invoice 042", "name": "Acme" }'
 
-# 201: data.url = "https://gloam.trade/app/vault?tab=move&mode=pay#to=gloamr1...&amount=1250&asset=0x7E95..."`}</code>
+# 201: data.url = "https://gloam.trade/app/vault?tab=move&mode=pay#to=gloamr1...&amount=1250&asset=0x5fc5..."`}</code>
       </pre>
 
       <h2>Public figures</h2>
@@ -379,7 +389,7 @@ const gloam = new GloamApiClient({ apiKey: process.env.GLOAM_API_KEY! });
 
 await gloam.me();                                   // test the key
 const { hash, attribution } = await gloam.relay(sendIntent);
-await gloam.attributeDeposit({ chainId: 46630, txHash });
+await gloam.attributeDeposit({ chainId: 4663, txHash });
 const report = await gloam.verifyProof(proofText);
 const { url } = await gloam.paymentRequest({ to, asset: "USDG", amount: "25" });
 

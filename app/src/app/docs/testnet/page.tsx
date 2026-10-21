@@ -8,38 +8,40 @@ import { PAXOS_FAUCET_URL } from "@/lib/tokens";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 
 export const metadata: Metadata = {
-  title: "Testnet guide",
+  title: "Practice on testnet",
   description:
-    "Full Gloam public testnet guide, wallet setup, faucet, shield, private pay, cash out, trade, demo video, and troubleshooting on Robinhood Chain.",
+    "Practice with Gloam for free on testnet before you use real money on mainnet: wallet setup, faucet, shield, private pay, cash out, demo video, and troubleshooting on Robinhood Chain testnet and Tempo Moderato.",
 };
 
 export default function DocsTestnetPage() {
   return (
     <DocsLayout
-      title="Testnet guide"
-      lede="Everything you need to use Gloam on Robinhood Chain testnet, from wallet setup to private pay. Bookmark this page for launch day."
+      title="Practice on testnet"
+      lede="Testnet is Gloam's free practice network. Same app and same steps as mainnet, with test funds that have no real value. Try a deposit, a private payment and a cash out here first."
       glance={[
         { label: "App", value: "/app" },
         { label: "Chain ID", value: "46630" },
         { label: "Network", value: "RH testnet" },
         { label: "Vault", value: "Live, dev keys" },
         { label: "Keys", value: "Dev ceremony" },
-        { label: "Value", value: "Play money only" },
+        { label: "Value", value: "Test funds only" },
       ]}
       quickLinks={[
-        { href: "/app", label: "Open testnet app" },
+        { href: "/app", label: "Open the app" },
+        { href: "/docs/chain", label: "Mainnet networks" },
         { href: "/docs/payroll", label: "Private payroll" },
-        { href: "/docs/sealed-trade", label: "Sealed trade docs" },
         { href: "/docs/privacy-model", label: "Privacy model" },
         { href: "https://x.com/gloamtrade", label: "@gloamtrade" },
         { href: "mailto:hello@gloam.trade", label: "hello@gloam.trade" },
       ]}
     >
       <div className="rounded-[14px] bg-surface px-5 py-4 text-[14px] leading-relaxed text-mute">
-        Testnet is experimental. Assets have no real-world value. Development
-        proving keys are used. Do not use real funds or treat this as a security
-        audit. For product status, see{" "}
-        <Link href="/docs/product">what ships when</Link>.
+        Testnet is for practice. Its assets have no real-world value, and its
+        proofs use development keys. For real money, pick Robinhood Chain or
+        Tempo mainnet in the app&apos;s network selector; mainnet uses the final
+        keys from the 13-contributor ceremony. Test funds never move to
+        mainnet. Network details:{" "}
+        <Link href="/docs/chain">Networks</Link>.
       </div>
 
       <h2 id="demo">Demo video</h2>
@@ -75,7 +77,7 @@ export default function DocsTestnetPage() {
         >
           @gloamtrade
         </a>{" "}
-        for go-live updates.
+        for updates.
       </p>
 
       <h2 id="what-you-get">What you can do on testnet</h2>
@@ -100,12 +102,12 @@ export default function DocsTestnetPage() {
           {
             n: "4",
             title: "Private rails",
-            body: "Private send (Move) and private trade (size privacy on). Cash out only when you want a public exit.",
+            body: "Private send (Move). Cash out only when you want a public exit.",
           },
           {
             n: "5",
             title: "Trade paths",
-            body: "Prefer Private trade (no DEX). Via market needs a pool. Wallet path is fully public.",
+            body: "Private trade is switched off for now. Via market needs a pool. Wallet path is fully public.",
           },
         ]}
       />
@@ -132,7 +134,7 @@ export default function DocsTestnetPage() {
           >
             @gloamtrade
           </a>{" "}
-          for open time, incidents, and demo clips.
+          for incidents and demo clips.
         </li>
       </ul>
 
@@ -142,9 +144,11 @@ export default function DocsTestnetPage() {
         <AppLink href="/app">
           <strong>/app</strong>
         </AppLink>
-       , click <strong>Connect wallet</strong>, then use{" "}
-        <strong>Add / switch RH testnet</strong> if the wallet is on the wrong
-        chain. Gloam targets:
+       , pick <strong>Robinhood Chain testnet</strong> in the network
+        selector, click <strong>Connect wallet</strong>, then use{" "}
+        <strong>Switch to Robinhood Chain</strong> if the wallet is on the wrong
+        chain. A wallet set to &quot;Robinhood Chain&quot; is often on mainnet
+        (4663), which is real money. The testnet is:
       </p>
       <ul>
         <li>
@@ -168,7 +172,7 @@ export default function DocsTestnetPage() {
           </a>
         </li>
         <li>
-          <strong>Native currency</strong>, ETH (testnet only)
+          <strong>Native currency</strong>, test ETH (no real value)
         </li>
       </ul>
       <p>
@@ -361,13 +365,14 @@ export default function DocsTestnetPage() {
           Export / import before clearing cache or switching browsers.
         </li>
         <li>
-          Dev proving keys: proofs are for testnet only, not production
-          ceremony keys. See{" "}
+          Testnet proofs use the dev keys. Mainnet proofs use the final keys
+          from the 13-contributor ceremony, so a testnet proof never checks out
+          on mainnet. See the{" "}
           <Link href="/docs/production">production gate</Link>.
         </li>
       </ul>
 
-      <h2 id="checklist">Launch-day checklist</h2>
+      <h2 id="checklist">Practice checklist</h2>
       <ol>
         <li>Wallet on chain ID 46630</li>
         <li>Faucet ETH (+ stocks if needed)</li>
@@ -375,6 +380,11 @@ export default function DocsTestnetPage() {
         <li>Private send to yourself or a friend + import package</li>
         <li>Optional: cash out dust once (public amount, intentional)</li>
         <li>Export note backup (Settings)</li>
+        <li>
+          Ready for real money? Pick a mainnet in the network selector and start
+          small. Beta limits cap each deposit (see{" "}
+          <Link href="/docs/chain#mainnet">Networks</Link>).
+        </li>
         <li>
           Report bugs to <a href="mailto:hello@gloam.trade">hello@gloam.trade</a> or{" "}
           <a
@@ -391,8 +401,9 @@ export default function DocsTestnetPage() {
       <h2 id="troubleshooting">Troubleshooting</h2>
       <ul>
         <li>
-          <strong>Wrong network</strong>, use Add / switch RH testnet; chain
-          ID must be 46630.
+          <strong>Wrong network</strong>, pick Robinhood Chain testnet in the
+          network selector and use Switch to Robinhood Chain; chain ID must be
+          46630 (4663 is mainnet).
         </li>
         <li>
           <strong>Proof stuck / failed</strong>, reload, try a smaller note,
@@ -419,16 +430,11 @@ export default function DocsTestnetPage() {
           <strong>RPC rate limits</strong>, wait and retry; public RH RPC is
           shared.
         </li>
-        <li>
-          <strong>App shows countdown</strong>, public open is timed; follow
-          @gloamtrade or read this guide until unlock. Founders may use early
-          access if issued.
-        </li>
       </ul>
 
       <h2 id="safety">Safety & non-claims</h2>
       <ul>
-        <li>No mainnet funds. No investment advice.</li>
+        <li>Testnet holds no real funds. No investment advice.</li>
         <li>
           Privacy tools reduce public visibility; they do not make you invisible
           to law enforcement or fix bad OPSEC.
@@ -442,7 +448,10 @@ export default function DocsTestnetPage() {
       <h2 id="next">Read next</h2>
       <ul>
         <li>
-          <AppLink href="/app">Open the testnet app</AppLink>
+          <AppLink href="/app">Open the app</AppLink>
+        </li>
+        <li>
+          <Link href="/docs/chain">Networks: mainnet and testnet</Link>
         </li>
         <li>
           <Link href="/docs/encryption">How shield works</Link>

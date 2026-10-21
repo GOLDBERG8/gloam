@@ -7,7 +7,7 @@ import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
 export const metadata: Metadata = {
   title: "Docs",
   description:
-    "Gloam docs: private money on public chains, on Robinhood Chain and Tempo, explained simply. Private balances, payments, payroll, and what works on testnet.",
+    "Gloam docs: private money on public chains, on Robinhood Chain and Tempo, explained simply. Private balances, payments, payroll, on mainnet and on the free testnet.",
 };
 
 export default function DocsOverviewPage() {
@@ -25,35 +25,40 @@ export default function DocsOverviewPage() {
       </p>
       <p>
         It runs on <strong>Tempo</strong> and <strong>Robinhood Chain</strong>{" "}
-        testnets. You put money into a shared vault (“shield”), pay privately
-        inside it, and cash out with a real proof. Proofs are made on your
-        device, and nobody else holds a key. See{" "}
+        mainnet, with real money, and on their testnets for free practice. You
+        put money into a shared vault (“shield”), pay privately inside it, and
+        cash out with a real proof. Proofs are made on your device, and nobody
+        else holds a key. See{" "}
         <Link href="/docs/compare">how Gloam compares</Link>.
       </p>
       <p>
-        Right now everything is <strong>testnet</strong>, play money,{" "}
-        <strong>development proving keys</strong>. No real dollars. The
-        production trusted setup is done, with 13 contributors, and its final
-        keys go live with mainnet.
+        Mainnet is <strong>beta software handling real money</strong>. It uses
+        the final keys from a 13-contributor trusted setup, and beta deposit
+        limits cap what goes in. The code was reviewed internally before
+        launch; an external audit is planned. Deposits and private payments are
+        free, and cashing out costs 0.25%. The testnets keep{" "}
+        <strong>development proving keys</strong> and test funds with no real
+        value. Details: <Link href="/docs/chain">Networks</Link>.
       </p>
 
       <PoolPicture title="One picture" />
 
       <h2 id="try">Try it (2 minutes)</h2>
       <p>
-        Full walkthrough:{" "}
+        Want to practice first? Use the free testnet:{" "}
         <Link href="/docs/testnet">
-          <strong>Testnet guide</strong>
+          <strong>Practice on testnet</strong>
         </Link>
         .
       </p>
       <ol>
         <li>
           Open <AppLink href="/app">/app</AppLink>, connect a wallet, and pick a
-          network (Robinhood Chain or Tempo).
+          network: Robinhood Chain or Tempo mainnet for real money, or a testnet
+          to practice with test funds.
         </li>
         <li>
-          <AppLink href="/app/vault?tab=shield">Shield</AppLink> a tiny amount of testnet funds.
+          <AppLink href="/app/vault?tab=shield">Shield</AppLink> a small amount.
         </li>
         <li>
           <AppLink href="/app/vault?tab=move">Move</AppLink> to pay a Gloam address or cash
@@ -87,12 +92,17 @@ export default function DocsOverviewPage() {
       <ul>
         <li>Connect wallet, portfolio, markets</li>
         <li>
-          Send public balances (ETH and stock tokens on Robinhood Chain,
-          stablecoins on Tempo)
+          Mainnet on Robinhood Chain and Tempo, with the final ceremony keys and
+          beta deposit limits
         </li>
         <li>
-          Shield into the vault (ETH and stock tokens on Robinhood Chain, PathUSD
-          on Tempo)
+          Send public balances (stablecoins and ETH, plus stock tokens on
+          Robinhood Chain testnet)
+        </li>
+        <li>
+          Shield into the vault: USDG and $GLOAM on Robinhood Chain mainnet;
+          USDC.e, pathUSD, USDT0 and OUSD on Tempo mainnet; test ETH, stock
+          tokens and stablecoins on the testnets
         </li>
         <li>
           Private send to a Gloam address, or by claim link with an optional
@@ -129,16 +139,17 @@ export default function DocsOverviewPage() {
       <h2 id="not-yet">What does not work yet</h2>
       <ul>
         <li>
-          <Link href="/docs/sealed-trade">Private trade</Link>: built, and
-          switched off on-chain while we build a new engine for it. Stock
-          tokens can already be held and sent privately
+          <Link href="/docs/sealed-trade">Private trade</Link>: off on mainnet
+          and testnet while we build a new engine for it. Stock tokens can
+          already be held and sent privately on testnet
         </li>
         <li>
           <Link href="/docs/data">On-chain price oracles</Link> (no Chainlink /
           Pyth / RedStone wired)
         </li>
         <li>
-          <Link href="/docs/production">Production proving keys and mainnet</Link>
+          <Link href="/docs/production">An external audit and a multisig owner</Link>{" "}
+          (both planned)
         </li>
         <li>Ethereum expansion (roadmap)</li>
       </ul>
@@ -146,7 +157,10 @@ export default function DocsOverviewPage() {
       <h2 id="read-next">Read next</h2>
       <ul>
         <li>
-          <Link href="/docs/testnet">Testnet guide (full)</Link>
+          <Link href="/docs/chain">Networks: mainnet and testnet</Link>
+        </li>
+        <li>
+          <Link href="/docs/testnet">Practice on testnet</Link>
         </li>
         <li>
           <Link href="/docs/encryption">How shield works (simple)</Link>

@@ -5,7 +5,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 export const metadata: Metadata = {
   title: "API reference",
   description:
-    "The complete @gloamtrade/sdk surface: intent builders, note and prover primitives, incremental Merkle tree, sealed-rate math, and constants. One barrel import.",
+    "The complete @gloamtrade/sdk surface: intent builders, mainnet and testnet networks, note and prover primitives, incremental Merkle tree, sealed-rate math, and constants. One barrel import.",
 };
 
 export default function DocsSdkReferencePage() {
@@ -38,8 +38,153 @@ export default function DocsSdkReferencePage() {
   buildShieldBoundIntent, buildUnshieldIntent, buildPrivateSendIntent,
   makeBoundNotePoseidon, artifactProver,
   syncTree, IncrementalMerkleTreePoseidon,
+  mainnetNetwork, gloamNetworks, circuitArtifactUrls, cashOutFee,
   SEALED_VAULT, NATIVE_ASSET,
 } from "@gloamtrade/sdk";`}</code>
+      </pre>
+
+      {/* ─────────────────────────  networks  ───────────────────────── */}
+      <h2 id="networks">Networks and mainnet</h2>
+      <p>
+        New in 0.1.0, and additive: every testnet export works as before. A{" "}
+        <code>GloamNetwork</code> carries <code>key</code>, <code>label</code>,{" "}
+        <code>chainId</code>, <code>pool</code> and <code>deployBlock</code>, and
+        now also <code>testnet</code>, <code>ceremony</code> (
+        <code>&quot;dev&quot; | &quot;production&quot;</code>),{" "}
+        <code>rpcUrl</code>, <code>explorerUrl</code>, <code>chain</code> (a viem{" "}
+        <code>Chain</code>) and <code>assets</code> (symbol, address, decimals
+        and the beta <code>depositLimit</code>).
+      </p>
+      <div className="overflow-x-auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Export</th>
+              <th>What it gives you</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <code>mainnetNetwork(chain)</code>
+              </td>
+              <td>
+                <code>chain</code> is <code>&quot;robinhood&quot;</code> or{" "}
+                <code>&quot;tempo&quot;</code>. A mainnet <code>GloamNetwork</code>,
+                or <code>null</code> until its pool is published
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>gloamNetworks()</code>
+              </td>
+              <td>Every network Gloam runs on right now: mainnets with a pool first, then the testnets</td>
+            </tr>
+            <tr>
+              <td>
+                <code>getGloamNetwork(key)</code>
+              </td>
+              <td>
+                One network by key: <code>&quot;robinhood-mainnet&quot;</code>,{" "}
+                <code>&quot;tempo-mainnet&quot;</code>, <code>&quot;robinhood&quot;</code>{" "}
+                or <code>&quot;tempo&quot;</code>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>GLOAM_NETWORKS</code>
+              </td>
+              <td>
+                <code>.robinhood</code> and <code>.tempo</code> stay the testnets,
+                unchanged for older code
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>MAINNET_POOLS</code>
+              </td>
+              <td>The one place each mainnet pool and deploy block is set; null until published</td>
+            </tr>
+            <tr>
+              <td>
+                <code>ceremonyForChainId(chainId)</code>
+              </td>
+              <td>
+                Which keys a chain&apos;s verifiers hold: <code>&quot;production&quot;</code>{" "}
+                (the final keys) on mainnet, <code>&quot;dev&quot;</code> on the testnets
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>circuitArtifactUrls(circuit, chainId)</code>
+              </td>
+              <td>
+                <code>{"{ wasm, zkey }"}</code> URLs on{" "}
+                <code>https://www.gloam.trade/circuits</code> for that chain&apos;s
+                keys (mainnet under <code>/circuits/final/</code>). Mainnet proofs
+                must use the final keys
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>CASH_OUT_FEE_BPS</code> / <code>cashOutFee(amount)</code>
+              </td>
+              <td>
+                <code>25</code> (0.25%) / what the pool keeps on a mainnet cash out
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>RH_MAINNET_CHAIN_ID</code> / <code>TEMPO_MAINNET_CHAIN_ID</code>
+              </td>
+              <td>
+                <code>4663</code> / <code>4217</code>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>RH_TESTNET_CHAIN_ID</code> / <code>TEMPO_TESTNET_CHAIN_ID</code>
+              </td>
+              <td>
+                <code>46630</code> / <code>42431</code>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>RH_MAINNET_USDG</code>, <code>GLOAM_TOKEN</code>
+              </td>
+              <td>Robinhood Chain mainnet pool assets (native ETH is not one)</td>
+            </tr>
+            <tr>
+              <td>
+                <code>TEMPO_USDCE</code>, <code>TEMPO_PATHUSD</code>,{" "}
+                <code>TEMPO_USDT0</code>, <code>TEMPO_OUSD</code>
+              </td>
+              <td>Tempo mainnet pool assets, 6 decimals each</td>
+            </tr>
+            <tr>
+              <td>
+                <code>RH_USDG</code>
+              </td>
+              <td>Test USDG on Robinhood Chain testnet</td>
+            </tr>
+            <tr>
+              <td>
+                <code>MAINNET_POSEIDON_T3</code>
+              </td>
+              <td>The Poseidon library both mainnet pools use</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <pre>
+        <code>{`const net = mainnetNetwork("robinhood");     // null until the pool is published
+if (!net) throw new Error("not published yet");
+
+net.testnet;                                  // false: real money
+net.ceremony;                                 // "production"
+circuitArtifactUrls("unshield", net.chainId); // the final keys
+cashOutFee(500_000_000n);                     // what the pool keeps on a 500 USDG cash out`}</code>
       </pre>
 
       {/* ─────────────────────────  builders  ───────────────────────── */}
@@ -121,17 +266,19 @@ export default function DocsSdkReferencePage() {
       </div>
       <p>
         <code>buildPrivateTradeIntent</code> produces a valid intent, but the
-        on-chain sealed-swap path is disabled pending the H1 solvency work. The
-        builder is here so you can wire it ahead of the flip.
+        on-chain sealed-swap path is disabled on testnet pending the H1 solvency
+        work, and the mainnet pools have no sealed swap at all. Private trade is
+        not live anywhere; a new engine for it is being built.
       </p>
 
       <h3>Parameters</h3>
       <pre>
         <code>{`interface ShieldIntentParams {
   amountWei: bigint;          // wei (native) or token base units
-  asset?: Address;            // default NATIVE_ASSET (zero address)
-  chainId?: number;           // default RH_TESTNET_CHAIN_ID
-  poolAddress?: Address;      // default SEALED_VAULT
+  asset?: Address;            // default NATIVE_ASSET (zero address, testnet only)
+  chainId?: number;           // default RH_TESTNET_CHAIN_ID; pass a mainnet one explicitly
+  poolAddress?: Address;      // default: the pool for chainId (refused for a mainnet
+                              // chain whose pool is not in the SDK yet)
   agentAddress?: Address | null;
 }
 interface ShieldBoundIntentParams extends ShieldIntentParams {
@@ -441,7 +588,10 @@ fieldToBytes32(field: bigint | string): Hex`}</code>
               <td>
                 <code>SEALED_VAULT</code>
               </td>
-              <td>The hardened C1/C2/C3 pool, the default deposit target</td>
+              <td>
+                The hardened C1/C2/C3 pool on Robinhood Chain testnet, the default
+                deposit target when no chain is given
+              </td>
             </tr>
             <tr>
               <td>
@@ -459,7 +609,7 @@ fieldToBytes32(field: bigint | string): Hex`}</code>
               <td>
                 <code>NATIVE_ASSET</code>
               </td>
-              <td>Zero address, meaning native ETH</td>
+              <td>Zero address, meaning native ETH (a pool asset on testnet only)</td>
             </tr>
             <tr>
               <td>
@@ -467,6 +617,14 @@ fieldToBytes32(field: bigint | string): Hex`}</code>
               </td>
               <td>
                 <code>46630</code> / <code>4663</code>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>TEMPO_TESTNET_CHAIN_ID</code> / <code>TEMPO_MAINNET_CHAIN_ID</code>
+              </td>
+              <td>
+                <code>42431</code> / <code>4217</code>
               </td>
             </tr>
             <tr>
@@ -488,17 +646,22 @@ fieldToBytes32(field: bigint | string): Hex`}</code>
       </div>
       <p>
         The default <code>SEALED_VAULT</code> is the hardened pool, never the
-        retired <code>0x4F38</code> deployment. Pass <code>poolAddress</code> to
-        any builder to override it.
+        retired <code>0x4F38</code> deployment. Pass <code>chainId</code> (and
+        optionally <code>poolAddress</code>) to any builder to target another
+        network. Mainnet pools come from <code>MAINNET_POOLS</code>; see{" "}
+        <a href="#networks">Networks and mainnet</a>.
       </p>
 
       <h2>Guardrails</h2>
       <p>
-        Robinhood Chain testnet <code>46630</code> with dev-ceremony keys. Real
-        proofs only, never a mock. Note secrets are the sole spend authority:
-        persist and protect them. See the <Link href="/docs/quickstart">quickstart</Link>{" "}
-        to put this together, or <Link href="/docs/production">the production
-        gate</Link> for what mainnet still needs.
+        Mainnet (<code>4663</code>, <code>4217</code>) is beta software handling
+        real money, on the final ceremony keys, with beta deposit limits and a
+        0.25% cash-out fee. The testnets (<code>46630</code>, <code>42431</code>)
+        run on dev-ceremony keys with test funds. Real proofs only, never a mock.
+        Note secrets are the sole spend authority: persist and protect them. See
+        the <Link href="/docs/quickstart">quickstart</Link> to put this together,
+        or <Link href="/docs/production">the production gate</Link> for what is
+        done and what is still ahead.
       </p>
     </DocsLayout>
   );

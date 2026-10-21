@@ -7,18 +7,18 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 export const metadata: Metadata = {
   title: "Private trade",
   description:
-    "What private trade means on Gloam, why it is switched off on-chain while we build a new engine for it, and how stock tokens can already be held and sent privately today.",
+    "What private trade means on Gloam, why it is off on mainnet and switched off on testnet while we build a new engine for it, and how stock tokens can already be held and sent privately on testnet.",
 };
 
 export default function DocsSealedTradePage() {
   return (
     <DocsLayout
       title="Private trade"
-      lede="Trade one asset for another from your private balance, with your size kept private. It is built, and switched off on-chain while we build a new engine for private trading. Stock tokens can already be held and sent privately today."
+      lede="Trade one asset for another from your private balance, with your size kept private. It is not live anywhere: the mainnet pools take payments only, and on testnet the built version is switched off while we build a new engine for private trading. Stock tokens can already be held and sent privately on testnet."
       glance={[
-        { label: "Status", value: "Built, switched off" },
+        { label: "Mainnet", value: "Off, payments only" },
+        { label: "Testnet", value: "Built, switched off" },
         { label: "Next", value: "New engine underway" },
-        { label: "Live today", value: "hold + send stock tokens" },
         { label: "Fake fills", value: "Never" },
       ]}
     >
@@ -35,18 +35,25 @@ export default function DocsSealedTradePage() {
         both amounts private, but no tokens move, so the pool ends up owing{" "}
         <code>assetOut</code> it does not physically hold (audit H1). Rather
         than ship an insolvent swap or reveal your size to fix the accounting,
-        the on-chain verifier is set to zero and the swap is off. Turning it on
-        again goes through the 3-day timelock. Shield, private send and cash out
-        are live and solvent in the meantime.
+        the on-chain verifier on the testnet pools is set to zero and the swap
+        is off. Turning it on again there goes through the 3-day timelock.
+        Shield, private send and cash out are live and solvent in the meantime.
+      </p>
+      <p>
+        <strong>On mainnet there is nothing to switch on.</strong> The mainnet
+        pools (<code>ShieldPoolPayments</code>) take payments only and have no
+        sealed swap at all. Private trading comes to mainnet only with the new
+        engine.
       </p>
 
       <h2 id="stock-tokens">Stock tokens today</h2>
       <p>
-        On Robinhood Chain you can already{" "}
+        On Robinhood Chain testnet you can already{" "}
         <AppLink href="/app/vault?tab=shield">shield</AppLink> stock tokens (TSLA, AMZN, PLTR,
         NFLX and AMD on testnet), hold them privately, and{" "}
         <AppLink href="/app/vault?tab=move">send them privately</AppLink>. Trading them
-        privately is the part that waits for the new engine.
+        privately is the part that waits for the new engine. Stock tokens are
+        not on mainnet.
       </p>
 
       <h2>How the built version works (switched off)</h2>
@@ -142,8 +149,10 @@ export default function DocsSealedTradePage() {
           a sealed trade does not fail for empty <code>deposited</code>.
         </li>
         <li>
-          <strong>Production ceremony keys</strong>, multi-party proving keys
-          before any mainnet value.
+          <strong>Production keys for trading</strong>. The 13-contributor
+          ceremony covered the payment and proof circuits that mainnet uses, not
+          the trading circuit, so a trading engine needs multi-party keys of its
+          own before it touches real money.
         </li>
         <li>
           <strong>Ethereum expansion</strong>, same private rails where the
@@ -186,8 +195,8 @@ export default function DocsSealedTradePage() {
       </ul>
 
       <p>
-        Private trade is switched off on-chain, so the trade panel shows it as
-        disabled until the new engine is ready. Available today: the{" "}
+        Private trade is off on mainnet and switched off on-chain on testnet,
+        so the trade panel shows it as disabled until the new engine is ready. Available today: the{" "}
         <AppLink href="/app/vault?tab=trade&path=vault">from-vault adapter</AppLink> (honest,
         not sealed), and <AppLink href="/app/vault?tab=move">Move</AppLink> to hold and send
         privately.

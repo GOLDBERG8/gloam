@@ -7,7 +7,7 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 export const metadata: Metadata = {
   title: "What ships when",
   description:
-    "Gloam product status, what is live on testnet, what is next, what we will not fake.",
+    "Gloam product status: what is live on mainnet and testnet, what is next, what we will not fake.",
 };
 
 export default function DocsProductPage() {
@@ -22,7 +22,7 @@ export default function DocsProductPage() {
         { label: "X", value: "@gloamtrade" },
       ]}
       quickLinks={[
-        { href: "/app", label: "Open testnet" },
+        { href: "/app", label: "Open the app" },
         { href: "/whitepaper", label: "Whitepaper" },
         { href: "https://x.com/gloamtrade", label: "@gloamtrade" },
       ]}
@@ -39,7 +39,11 @@ export default function DocsProductPage() {
           <strong>Docs</strong>, gloam.trade/docs
         </li>
         <li>
-          <strong>Testnet guide</strong>, {" "}
+          <strong>Networks</strong>, {" "}
+          <Link href="/docs/chain">gloam.trade/docs/chain</Link>
+        </li>
+        <li>
+          <strong>Practice on testnet</strong>, {" "}
           <Link href="/docs/testnet">gloam.trade/docs/testnet</Link>
         </li>
         <li>
@@ -53,13 +57,18 @@ export default function DocsProductPage() {
         steps={[
           {
             n: "●",
+            title: "Mainnet",
+            body: "Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC. Payments only, final ceremony keys, beta deposit limits. Deposits and private payments are free; a cash out costs 0.25%.",
+          },
+          {
+            n: "●",
             title: "Public path",
-            body: "Connect, portfolio, send ETH, send faucet stocks, markets.",
+            body: "Connect, portfolio, send stablecoins and ETH. Faucet stocks and markets on testnet.",
           },
           {
             n: "●",
             title: "Shield",
-            body: "Deposit stablecoins (USDG on Robinhood Chain, OUSD and PathUSD on Tempo), ETH or Robinhood Chain stock tokens into the vault.",
+            body: "Mainnet: USDG and $GLOAM on Robinhood Chain; USDC.e, pathUSD, USDT0 and OUSD on Tempo, under beta deposit limits. Testnet: also test ETH and Robinhood Chain stock tokens.",
           },
           {
             n: "●",
@@ -104,17 +113,17 @@ export default function DocsProductPage() {
           {
             n: "!",
             title: "Private trade (switched off)",
-            body: "Built, and switched off on-chain while we build a new engine for private trading. Trading mixes many people's orders, so it needs its own design.",
+            body: "Off on mainnet, where the pools take payments only, and switched off on testnet while we build a new engine for private trading. Trading mixes many people's orders, so it needs its own design.",
           },
           {
             n: "○",
-            title: "Mainnet path",
-            body: "The multi-party key ceremony is done and the code was reviewed internally before launch. An external audit is planned.",
+            title: "External audit + multisig",
+            body: "Reviewed internally before launch, with no Critical or High findings open on 20 October. An external audit is planned, and the owner moves from one wallet to a multisig.",
           },
           {
             n: "○",
             title: "Ethereum expansion",
-            body: "Same private rails on Ethereum after RH testnet rails are solid.",
+            body: "Same private rails on Ethereum once the mainnet rails are solid.",
           },
         ]}
       />
@@ -123,7 +132,10 @@ export default function DocsProductPage() {
       <ul>
         <li>No fake “private success” screens</li>
         <li>No claims past what the contracts actually do</li>
-        <li>Testnet until audits and production keys exist for real money</li>
+        <li>
+          Real money only on the final ceremony keys, under beta limits, and
+          with what is still ahead said plainly
+        </li>
       </ul>
 
       <p>

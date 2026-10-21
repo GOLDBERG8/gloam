@@ -5,24 +5,25 @@ import { DocsLayout } from "@/components/DocsLayout";
 export const metadata: Metadata = {
   title: "Quickstart",
   description:
-    "Shield your first private balance on Robinhood Chain in under ten minutes with @gloamtrade/sdk: install, prove, deposit, cash out.",
+    "Shield your first private balance on Robinhood Chain or Tempo in about ten minutes with @gloamtrade/sdk: install, prove, deposit, cash out. On mainnet, or on the free testnet.",
 };
 
 export default function DocsQuickstartPage() {
   return (
     <DocsLayout
       title="Quickstart"
-      lede="Go from an empty project to a real private balance on Robinhood Chain testnet in under ten minutes. Every step below runs: no mocks, real Groth16 proofs."
+      lede="Go from an empty project to a real private balance in about ten minutes, on mainnet or on the free testnet. Every step below runs: no mocks, real Groth16 proofs."
       glance={[
         { label: "Time", value: "~10 minutes" },
         { label: "Runtime", value: "browser or node" },
-        { label: "Chain", value: "RH testnet 46630" },
+        { label: "Chain", value: "RH mainnet 4663, or testnet 46630" },
         { label: "You end with", value: "a spendable private note" },
       ]}
       quickLinks={[
         { href: "/docs/sdk/reference", label: "API reference" },
         { href: "/docs/sdk", label: "SDK overview" },
-        { href: "/docs/testnet", label: "Testnet + faucet" },
+        { href: "/docs/chain", label: "Networks" },
+        { href: "/docs/testnet", label: "Practice on testnet" },
         { href: "/docs/agents", label: "Build a private agent" },
       ]}
     >
@@ -45,13 +46,19 @@ cd my-private-app && npm install && npm run dev`}</code>
           TypeScript source, transpiled by your bundler.
         </li>
         <li>
-          A funded testnet account. Point a wallet at Robinhood Chain testnet
-          (chain id <code>46630</code>) and get test ETH. See the{" "}
-          <Link href="/docs/testnet">testnet guide</Link>.
+          <strong>For mainnet (real money):</strong> USDG on Robinhood Chain
+          (chain id <code>4663</code>) plus a little ETH for gas, or USDC.e,
+          pathUSD, USDT0 or OUSD on Tempo (<code>4217</code>), where gas is paid
+          in stablecoins. Beta limits cap each stablecoin deposit at 500. See{" "}
+          <Link href="/docs/chain#mainnet">Networks</Link>.
         </li>
         <li>
-          The shield circuit artifacts, <code>shield.wasm</code> and{" "}
-          <code>shield_final.zkey</code> (step 2).
+          <strong>To practice first:</strong> a wallet on Robinhood Chain
+          testnet (<code>46630</code>) with test ETH. See{" "}
+          <Link href="/docs/testnet">practice on testnet</Link>.
+        </li>
+        <li>
+          The circuit artifacts for your chain (step 2).
         </li>
       </ul>
 
@@ -67,26 +74,26 @@ npm install snarkjs   # peer, for proving`}</code>
 
       <h2>2. Get the circuit artifacts</h2>
       <p>
-        Shielding into the hardened pool requires a proof, so you need the shield
-        circuit&apos;s <code>wasm</code> and <code>zkey</code>. The reference app
-        serves them from <code>app/public/circuits/</code>:
+        Every deposit and spend needs a proof, so you need each circuit&apos;s{" "}
+        <code>wasm</code> and <code>zkey</code>. The keys depend on the
+        network: mainnet uses the final keys from the 13-contributor ceremony,
+        the testnets use development keys, and a proof made with the wrong set
+        does not verify. <code>circuitArtifactUrls(circuit, chainId)</code>{" "}
+        returns the right <code>{"{ wasm, zkey }"}</code> for a chain, served
+        from <code>https://www.gloam.trade/circuits</code> (mainnet keys live
+        under <code>/circuits/final/</code>).
       </p>
-      <ul>
-        <li>
-          <code>shield.wasm</code>: the witness generator
-        </li>
-        <li>
-          <code>shield_final.zkey</code>: the proving key
-        </li>
-        <li>
-          <code>shield_vkey.json</code>: the verifying key (only for{" "}
-          <Link href="/docs/sdk/disclosure">disclosure verification</Link>)
-        </li>
-      </ul>
+      <pre>
+        <code>{`import { circuitArtifactUrls } from "@gloamtrade/sdk";
+
+circuitArtifactUrls("shield", 4663);   // final keys, Robinhood Chain mainnet
+circuitArtifactUrls("shield", 46630);  // dev keys, Robinhood Chain testnet`}</code>
+      </pre>
       <p>
-        In <strong>node</strong>, pass file paths. In the <strong>browser</strong>,
-        host the files and pass URLs (for example <code>/circuits/shield.wasm</code>).
-        Same artifacts either way.
+        You can also host the files yourself and pass them to{" "}
+        <code>artifactProver({"{ wasm, zkey }"})</code>: file paths in{" "}
+        <strong>node</strong>, URLs in the <strong>browser</strong>. Just keep
+        mainnet on the final keys.
       </p>
 
       <h2>3. Shield your first note</h2>
@@ -95,31 +102,41 @@ npm install snarkjs   # peer, for proving`}</code>
         (a Poseidon commitment binding your secret to the amount and asset) and
         generates the shield proof. You sign the resolved call. The{" "}
         <code>note.secret</code> it returns is your only spend authority, so persist
-        it.
+        it. On mainnet the Robinhood Chain pool takes USDG and $GLOAM, not native
+        ETH, so you approve the token first.
       </p>
       <pre>
-        <code>{`import { buildShieldBoundIntent, artifactProver } from "@gloamtrade/sdk";
-import { createWalletClient, http, parseEther, defineChain } from "viem";
+        <code>{`import {
+  mainnetNetwork, buildShieldBoundIntent, artifactProver,
+  circuitArtifactUrls, RH_MAINNET_USDG,
+} from "@gloamtrade/sdk";
+import { createWalletClient, createPublicClient, http, parseUnits, erc20Abi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-const rhTestnet = defineChain({
-  id: 46630,
-  name: "Robinhood Chain testnet",
-  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-  rpcUrls: { default: { http: ["<RH_TESTNET_RPC>"] } },
-});
+// Robinhood Chain mainnet: real money. null until the pool is published.
+const net = mainnetNetwork("robinhood");
+if (!net) throw new Error("Robinhood Chain mainnet pool not published yet");
 
 const account = privateKeyToAccount(process.env.PRIVATE_KEY as \`0x\${string}\`);
-const wallet = createWalletClient({ account, chain: rhTestnet, transport: http() });
+const wallet = createWalletClient({ account, chain: net.chain, transport: http(net.rpcUrl) });
+const publicClient = createPublicClient({ chain: net.chain, transport: http(net.rpcUrl) });
 
-// mint the note + generate the shield proof
+const amount = parseUnits("25", 6);   // 25 USDG (6 decimals); beta cap is 500 per deposit
+
+// mint the note + generate the shield proof with this chain's keys
 const intent = await buildShieldBoundIntent({
-  amountWei: parseEther("0.001"),
-  prover: artifactProver({
-    wasm: "./shield.wasm",        // URL in the browser
-    zkey: "./shield_final.zkey",
-  }),
+  chainId: net.chainId,
+  poolAddress: net.pool,
+  asset: RH_MAINNET_USDG,
+  amountWei: amount,
+  prover: artifactProver(circuitArtifactUrls("shield", net.chainId)),
 });
+
+// the pool pulls USDG with transferFrom, so approve it first
+const approval = await wallet.writeContract({
+  address: RH_MAINNET_USDG, abi: erc20Abi, functionName: "approve", args: [net.pool, amount],
+});
+await publicClient.waitForTransactionReceipt({ hash: approval });
 
 // sign + broadcast shieldBound(asset, amount, commitment, proof)
 const hash = await wallet.writeContract({
@@ -127,7 +144,7 @@ const hash = await wallet.writeContract({
   abi: SHIELD_BOUND_ABI,
   functionName: intent.exec.fn,   // "shieldBound"
   args: intent.exec.args,
-  value: intent.exec.valueWei,    // the deposit for native ETH, 0n for tokens
+  value: intent.exec.valueWei,    // 0n for tokens
 });
 
 // PERSIST THIS. Losing it loses the funds.
@@ -148,6 +165,17 @@ saveSecret(intent.note.commitment, intent.note.secret);`}</code>
   outputs: [],
 }] as const;`}</code>
       </pre>
+      <p>
+        <strong>Practice on testnet with the same code.</strong> Use{" "}
+        <code>GLOAM_NETWORKS.robinhood</code> (Robinhood Chain testnet,{" "}
+        <code>46630</code>) as <code>net</code>, and either shield test ETH
+        (leave out <code>asset</code>, skip the approve, and the deposit goes
+        in <code>valueWei</code>) or test USDG (<code>RH_USDG</code>).{" "}
+        <code>circuitArtifactUrls</code> hands you the dev keys there. On Tempo,
+        use <code>mainnetNetwork(&quot;tempo&quot;)</code> with{" "}
+        <code>TEMPO_USDCE</code>, or <code>GLOAM_NETWORKS.tempo</code> to
+        practice.
+      </p>
 
       <h2>4. Confirm it landed</h2>
       <p>
@@ -175,23 +203,33 @@ saveSecret(intent.note.commitment, intent.note.secret);`}</code>
         <code>syncTree</code> replays every leaf-inserting event in order (so the
         root matches even after transfers); <code>buildUnshieldIntent</code>{" "}
         builds the witness and proof. The amount, asset, and recipient become
-        public on exit; the source note stays unlinkable via the nullifier.
+        public on exit; the source note stays unlinkable via the nullifier. On
+        mainnet a cash out costs 0.25%: <code>cashOutFee(amount)</code> is what
+        the pool keeps.
       </p>
       <pre>
-        <code>{`import { buildUnshieldIntent, artifactProver, syncTree, SEALED_VAULT } from "@gloamtrade/sdk";
+        <code>{`import {
+  buildUnshieldIntent, artifactProver, circuitArtifactUrls, syncTree, cashOutFee,
+} from "@gloamtrade/sdk";
 
 // rebuild the pool tree, then get this note's membership path by commitment
-const synced = await syncTree(publicClient, { pool: SEALED_VAULT, fromBlock });
-const path = await synced.pathForCommitment(note.commitment);
+const synced = await syncTree(publicClient, { pool: net.pool, fromBlock: net.deployBlock });
+const path = await synced.pathForCommitment(intent.note.commitment);
 if (!path) throw new Error("note not found in the tree yet");
 
 const exit = await buildUnshieldIntent({
-  secretHex: note.secret,
-  amountWei: parseEther("0.001"),
+  chainId: net.chainId,
+  poolAddress: net.pool,
+  asset: RH_MAINNET_USDG,
+  secretHex: intent.note.secret,
+  amountWei: amount,
   to: account.address,
   path,
-  prove: artifactProver({ wasm: "./unshield.wasm", zkey: "./unshield_final.zkey" }),
+  prove: artifactProver(circuitArtifactUrls("unshield", net.chainId)),
 });
+
+// mainnet: the pool keeps cashOutFee(amount), 0.25%, and pays the rest to "to"
+console.log("fee", cashOutFee(amount));
 
 await wallet.writeContract({
   address: exit.exec.poolAddress,
@@ -205,7 +243,8 @@ await wallet.writeContract({
       <ul>
         <li>
           <Link href="/docs/sdk/reference">API reference</Link>: every builder,
-          the note and prover primitives, merkle, rates, and constants.
+          the network helpers, the note and prover primitives, merkle, rates,
+          and constants.
         </li>
         <li>
           <Link href="/docs/private-pay">Private pay</Link>: send inside the
@@ -223,10 +262,12 @@ await wallet.writeContract({
 
       <h2>Honesty</h2>
       <p>
-        Robinhood Chain testnet only, with dev-ceremony proving keys. Everything
-        here is real: real proofs, real on-chain state, no mocks. Sealed swaps
-        are disabled pending the H1 solvency work. Mainnet runs on the production
-        ceremony&apos;s keys after an internal review; an external audit is planned. See{" "}
+        Mainnet is beta software handling real money. It runs on the final keys
+        from the 13-contributor ceremony, under beta deposit limits, after an
+        internal review; an external audit is planned. The testnets run on
+        dev-ceremony keys with test funds. Everything here is real: real proofs,
+        real on-chain state, no mocks. Private trade is off on mainnet (the
+        mainnet pools have no sealed swap) and on testnet. See{" "}
         <Link href="/docs/production">the production gate</Link>.
       </p>
     </DocsLayout>

@@ -5,14 +5,14 @@ import { DocsLayout } from "@/components/DocsLayout";
 export const metadata: Metadata = {
   title: "Agents",
   description:
-    "Give an AI agent private execution on Robinhood Chain: shield, pay, and disclose end to end via @gloamtrade/sdk and the @gloamtrade/mcp server, under policy.",
+    "Give an AI agent private payments on Robinhood Chain and Tempo: shield, pay, and disclose end to end via @gloamtrade/sdk and the @gloamtrade/mcp server, under policy.",
 };
 
 export default function DocsAgentsPage() {
   return (
     <DocsLayout
       title="Build a private agent"
-      lede="Give an AI agent a private execution surface on Robinhood Chain. It shields, pays, and proves holdings end to end, with size and strategy hidden and signing under policy."
+      lede="Give an AI agent a private execution surface on Robinhood Chain and Tempo. It shields, pays, and proves holdings end to end, with size and strategy hidden and signing under policy."
       glance={[
         { label: "SDK", value: "@gloamtrade/sdk" },
         { label: "Server", value: "@gloamtrade/mcp (MCP)" },
@@ -97,8 +97,8 @@ export default function DocsAgentsPage() {
                 <code>gloam_info</code> / <code>gloam_networks</code>
               </td>
               <td>
-                What Gloam is; each network&apos;s vault, assets (OUSD on Tempo, USDG
-                on Robinhood Chain), explorers and faucets
+                What Gloam is; each network&apos;s vault, assets and explorer, on
+                mainnet and testnet, with faucets for the testnets
               </td>
             </tr>
             <tr>
@@ -182,12 +182,24 @@ const hash = await wallet.writeContract({
 // persist intent.note.secret in the agent's note store, keyed by commitment`}</code>
       </pre>
       <p>
+        That snippet runs on the free testnet, the SDK default. For real money,
+        pass a mainnet network (<code>mainnetNetwork(&quot;tempo&quot;)</code> or{" "}
+        <code>&quot;robinhood&quot;</code>), its stablecoin as <code>asset</code>,
+        and prove with <code>circuitArtifactUrls(&quot;shield&quot;, net.chainId)</code>{" "}
+        so the final keys are used. See the <Link href="/docs/quickstart">quickstart</Link>.
+      </p>
+      <p>
         From there the agent can cash out, pay a receive tag, or prove a balance
         to a counterparty with a <Link href="/docs/sdk/disclosure">disclosure</Link>,
         all with the same core.
       </p>
 
       <h2>The MCP server</h2>
+      <p>
+        Run it on your own machine with <code>npx -y @gloamtrade/mcp</code>. It
+        signs there, under the spending limits below, and keeps keys and note
+        secrets off the model.
+      </p>
       <p>
         <code>@gloamtrade/mcp</code> exposes Gloam as tools to any MCP client. It keeps
         two phases separate on purpose: planning tools build an unsigned intent
@@ -391,8 +403,9 @@ const hash = await wallet.writeContract({
       <h2>Policy and key custody</h2>
       <p>
         Signing keys live <strong>server-side only</strong> and never enter a
-        model context or a log. For production, swap the testnet key for a Turnkey
-        server wallet with policy the agent cannot override: spend caps, an
+        model context or a log. Before an agent holds real money on mainnet,
+        swap the test key for a Turnkey server wallet with policy the agent
+        cannot override: spend caps, an
         allow-list of contracts and markets, and size privacy always on. An
         out-of-policy action is refused, not quietly clamped.
       </p>
@@ -400,11 +413,13 @@ const hash = await wallet.writeContract({
       <h2>Honesty</h2>
       <p>
         No fabricated fills, ever. If a private path is not live, the tool says so
-        and returns a plan rather than a fake success. Sealed swaps are currently
-        disabled pending the H1 solvency work; shield, private send, cash out, and
-        disclosure are live and proof-gated. Testnet runs on dev-ceremony keys.
-        The production ceremony is done and mainnet uses its keys. The code was
-        reviewed internally before launch, and an external audit is planned.
+        and returns a plan rather than a fake success. Private trade is off: the
+        mainnet pools have no sealed swap, and on testnet it is disabled pending
+        the H1 solvency work. Shield, private send, cash out, and disclosure are
+        live and proof-gated. Mainnet uses the final keys from the 13-contributor
+        ceremony; testnet runs on dev-ceremony keys. The code was reviewed
+        internally before launch, and an external audit is planned. Mainnet is
+        beta software with real money, so start an agent on small limits.
       </p>
     </DocsLayout>
   );
