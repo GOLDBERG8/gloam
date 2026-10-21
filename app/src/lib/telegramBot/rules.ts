@@ -791,13 +791,14 @@ export type ReplyPolicy = {
   mainnetLive?: boolean;
 };
 
-/** A link the helper may share: the website, the group, the X account, $GLOAM's page on Orynth. */
+/** A link the helper may share: the website, the group, the X account, $GLOAM's pages on Orynth, DEX Screener and CoinGecko. */
 function linkAllowed(link: string): boolean {
   const { host, path } = hostOf(link);
   if (host === "gloam.trade") return true;
   if (host === "x.com" || host === "twitter.com") return /^\/gloamtrade(?:[/?#]|$)/i.test(path);
   if (host === "orynth.dev") return /^\/projects\/gloam(?:[/?#]|$)/i.test(path);
   if (host === "dexscreener.com") return path.toLowerCase().startsWith(`/robinhood/${GLOAM_TOKEN.address.toLowerCase()}`);
+  if (host === "coingecko.com") return /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?coins\/gloam(?:[/?#]|$)/i.test(path);
   return isGroupLink(host, path);
 }
 

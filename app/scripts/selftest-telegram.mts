@@ -94,6 +94,7 @@ const {
 const { botConfig, handleUpdate } = await import("../src/lib/telegramBot/bot");
 const { DEFAULT_DAILY_DMS, systemPrompt, teamSystemPrompt, userPrompt } = await import("../src/lib/telegramBot/answer");
 const { knowledgeBlock } = await import("../src/lib/telegramBot/knowledge");
+const { isMainnetLive } = await import("../src/lib/mainnet");
 const { personaName } = await import("../src/lib/telegramBot/persona");
 const { DM_TTL_SEC, IMAGES_PER_HOUR, dmHistory, listBugReports, readLast24h, rememberOwnerChat, takeImageSlot } = await import(
   "../src/lib/telegramBot/store"
@@ -1327,7 +1328,14 @@ await test("payment codes: one friendly heads-up a day, never a delete; addresse
   assert.equal(deletes().length, 0);
   assert.equal(sends().length, 1);
   const tip = String(sends()[0]!.body.text);
-  assert.ok(tip.startsWith("Quick heads-up, Hal: fine here, it's testnet play money."));
+  // the tip reads differently once mainnet is live (lib/mainnet), so check the one that applies now
+  assert.ok(
+    tip.startsWith(
+      isMainnetLive()
+        ? "Quick heads-up, Hal: testnet codes are fine here, but a mainnet payment code or claim link is real money"
+        : "Quick heads-up, Hal: fine here, it's testnet play money."
+    )
+  );
   assert.ok(tip.includes("pay the person's Gloam address instead"));
   assert.ok(!/[—\p{Extended_Pictographic}]/u.test(tip));
   await handleUpdate(upd(inTopic(TOPIC.general, `another one ${CLAIM}`, hal)));

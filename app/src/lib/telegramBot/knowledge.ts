@@ -24,6 +24,7 @@ export const GLOAM_TOKEN = {
   page: "gloam.trade/token",
   orynth: "orynth.dev/projects/gloam",
   chart: "dexscreener.com/robinhood/0xDcD885F5c60b3aD49F6D58718696417314e8724d",
+  coingecko: "coingecko.com/en/coins/gloam",
 };
 
 /** Links the helper may share. Anything else in a reply is dropped. */
@@ -32,11 +33,13 @@ export const OFFICIAL_LINKS = [
   `${GLOAM_TOKEN.page} (the $GLOAM token: contract, supply, uses and roadmap)`,
   `${GLOAM_TOKEN.orynth} (where $GLOAM launched and trades, on Orynth)`,
   `${GLOAM_TOKEN.chart} ($GLOAM's chart on DEX Screener)`,
+  `${GLOAM_TOKEN.coingecko} ($GLOAM's page on CoinGecko)`,
   "gloam.trade/app (the testnet app)",
   "gloam.trade/docs (docs; the testnet guide is gloam.trade/docs/testnet)",
   "gloam.trade/verify (check a proof, no wallet needed)",
   "gloam.trade/testers (apply to be a tester)",
   "gloam.trade/transparency (what anyone can see about the vault)",
+  "gloam.trade/blog/live-on-mainnet (the mainnet launch post)",
   "X: @gloamtrade (x.com/gloamtrade), for news",
   "Email: hello@gloam.trade, for anything private",
   "The community group: t.me/gloamhq",
@@ -92,7 +95,7 @@ $GLOAM, THE GLOAM TOKEN (from gloam.trade/token)
 - Where it trades: Uniswap pools on Robinhood Chain. The chart is on DEX Screener at ${GLOAM_TOKEN.chart} (GeckoTerminal has it too).
 - "Update dex", "dex paid" or "DEX update" means the team paying DEX Screener to add the logo, links and banner to the token's page there. DEX is paid: the team paid for the DEX Screener profile on Oct 19, DEX Screener approved it, and the logo, links and banner are on the chart page. Answer "yes, DEX is paid" and give the chart link.
 - Never give or guess a price, market cap, holder count or prediction, never tell anyone to buy or sell, and never promise gains. For live numbers, point to the chart or ${GLOAM_TOKEN.orynth}. It is not financial advice.
-- Listings and visibility, what's done (Oct 19): the DEX Screener profile is paid and live, with logo, links and banner; GeckoTerminal tracks the pools; the contract is verified on RobinScan (Etherscan's Robinhood explorer) and Sourcify; the Orynth page is refreshed. More listings (like CoinGecko) are being worked on. Never promise a specific listing or date.
+- Listings and visibility, what's done: $GLOAM is listed on CoinGecko (since Oct 21, ${GLOAM_TOKEN.coingecko}); the DEX Screener profile is paid and live, with logo, links and banner; GeckoTerminal tracks the pools; the contract is verified on RobinScan (Etherscan's Robinhood explorer) and Sourcify; the Orynth page is refreshed. More listings are being worked on. Never promise a specific listing or date.
 - Buy alerts: you post every $GLOAM buy, whatever the size, in the group's Buys topic (amount, value, price, market cap, buyer, transaction). General stays for chat. Live trades are also on the chart link.
 - Airdrop for testnet users: nothing is decided; any change is announced on X @gloamtrade first. Tester rewards are separate: paid privately through Gloam after testing, not a token and not an airdrop.
 `;
@@ -254,8 +257,41 @@ function mainnetLiveFacts(): string {
     "- On mainnet, a plain payment code or claim link is real money: send it privately to the one person, or pay their Gloam address so the payment is sealed to them.",
     "- Fees on mainnet: adding money and private payments are free; a cash out costs 0.25% of its amount, shown before you confirm. Partner API fees are not charged yet. Cash outs and private payments are never limited.",
     "- Security: Gloam had an internal review before launch, finished on 20 October 2026 with no Critical or High findings open. An external audit is planned and has not been done, so never say Gloam is audited. Mainnet is beta software handling real money: say so plainly when someone asks if it is safe.",
-    "- At launch the owner and treasury is one wallet (a multisig is planned), and the Gloam team runs the relay. The relay only submits payments already proven in the browser and pays their network fee; it cannot move or redirect money. Raising limits or adding assets waits a public three-day timelock; the owner can lower limits or close deposits at once.",
+    "- At launch the owner and the fee wallet are one wallet; the cash-out fees are moving to a dedicated treasury wallet, a change that waits the public three-day timelock (a multisig is planned). The Gloam team runs the relay. The relay only submits payments already proven in the browser and pays their network fee; it cannot move or redirect money. Raising limits, adding assets or changing where fees go waits a public three-day timelock; the owner can lower limits or close deposits at once.",
     "- The mainnet vaults are new, so their crowd is still small: treat privacy there as weaker for now too.",
+    "",
+    "MAINNET QUICK START (real money)",
+    "1. Open gloam.trade/app and pick a mainnet in the network selector: on a computer it is at the top of the sidebar; on a phone tap the menu button, it is the first thing in the menu. It shows Mainnet, real money or Testnet, play money.",
+    "2. Connect a wallet (a browser wallet, or a wallet app on a phone) on the same chain the app shows.",
+    "3. Get money onto that chain: you already hold USDG (Robinhood Chain) or a Tempo stablecoin, or use Bring money over, or swap ETH to USDG (both below).",
+    "4. Vault > Add: Add privately. The amount shows on the deposit, like any deposit, then your balance is private.",
+    "5. Pay someone's Gloam address, or make a claim link, from Vault > Pay > Send privately. Keep Hide my wallet on.",
+    "6. Turn on Recovery in Settings, or save a backup (Copy backup or Download), so a new device never loses your balance.",
+    "",
+    "GETTING MONEY IN ON MAINNET",
+    "- Bring money over (the bridge, powered by Relay): on Vault > Add, the Money on another chain? card, button Bring money over. It brings money from 24 chains, or straight from an exchange (pick the chain you withdraw on): Ethereum, Base, BNB Chain, Bitcoin, Arbitrum, Tron, Polygon, Optimism and more. You pick the chain and token and an amount, get a one-time deposit address with a QR, and send exactly that amount to it. It lands in your own wallet as USDG on Robinhood Chain, or as USDC on Tempo (listed in the vault as USDC.e). From 1 to 25,000 dollars at a time; the bridge fee and arrival time show first; usually a minute or two, Bitcoin waits for its confirmations. Bridging is public, like any deposit. Send only that token on that chain to that address, once.",
+    "- When it arrives, the panel shows Add it privately. Adding to the private balance is always a separate step you confirm yourself, because the deposit proof is made in your browser; nobody can do it for you, which is what keeps it self-custodial.",
+    "- If the balance on Add still shows the old number after a bridge or swap, tap the refresh icon next to Balance. The app also reads it again by itself a few seconds after money lands.",
+    "- Swap ETH to USDG (Robinhood Chain mainnet only): Bring money over opens on Swap to USDG, and the ETH row in Portfolio Holdings has a Swap to USDG button. Type an amount or tap 25%, 50%, 75% or Max (Max keeps a little ETH back for gas). It shows the live price as you type: what you get, the rate, the least you get, the swap fee and the network fee (a few cents of ETH). Review the swap, then confirm once in your wallet. It is a public swap in your own wallet, powered by Relay, then Add it privately.",
+    "- Getting onto Robinhood Chain from nothing: bridge from another chain or an exchange with Bring money over. The app's wallet button offers Switch to Robinhood Chain, which adds the chain to the wallet.",
+    "",
+    "BUYBACKS (the current state; overrides any line below)",
+    "- Buybacks have not started yet. Cash-out fees switched on with mainnet. Before the first buyback, the fees move to their own treasury wallet so every buyback can be followed on-chain; that change waits a public three-day timelock on the contracts. After it, buybacks run on a regular schedule and the team posts each one's transaction. Half of Gloam's fees are set to buy $GLOAM; half of what is bought is burned, half goes to the treasury. Never give a buyback date, amount or size, and never say buybacks are live.",
+    "",
+    "CLAIM LINKS ON MAINNET",
+    "- To claim: open the link, connect a wallet on the chain it names (Robinhood Chain for most), and tap Claim and secure. Or open Vault > Pay > Receive and paste it under Claim a payment: the box takes the whole link, the code alone, or a message with the link in it.",
+    "- A claim link is like cash: whoever claims it first keeps it. Send it privately to the one person, never in a public post, and send it as text, never as a screenshot.",
+    "- \"This link is missing its payment\": the link was cut off before it reached them (copied by hand, or an old link a chat app cut at its dot). The money is safe with the sender; ask them to send the full link again. Links made since 21 October write the dot as %2E so chat apps keep them whole.",
+    "- \"That isn't a whole Gloam payment\" or \"This payment code is damaged\": what was pasted is not a complete code, often because it was copied from a screenshot. Ask the sender to send the link again as text.",
+    "- A sender can take back a link nobody has claimed yet, from Sent links under Send privately (Take back).",
+    "",
+    "SAFETY",
+    "- Gloam and its team never DM first, and never ask for a seed phrase, private key, passkey or a claim link. Anyone who does is a scammer.",
+    "- Copycat GLOAM tokens exist. The only real one is the contract address in the token part; any other is fake.",
+    "",
+    "MORE ON MAINNET",
+    "- Phones: everything works on a phone. If Connect stays on Connecting, it resets by itself after a few seconds; tap Connect again.",
+    "- Builders and AI agents: the Gloam MCP server is on the official MCP Registry, the SDK is @gloamtrade/sdk, and both default to testnet until you pick mainnet. Docs at gloam.trade/docs, proofs checked at gloam.trade/verify, vault totals at gloam.trade/transparency.",
   ];
   return lines.join("\n");
 }
@@ -276,14 +312,20 @@ function liveSwaps(): [string, string][] {
     [
       "$GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees switch on and half of them start buying back $GLOAM; the first holder vote, in the open.",
       rh
-        ? `$GLOAM listed in the mainnet pool; Gloam live on mainnet (${names}); shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees on, and half of them buy back $GLOAM. Next: the first holder vote, in the open.`
-        : `$GLOAM listed in the mainnet pool; Gloam live on mainnet (${names}); fees on, and half of them buy back $GLOAM. Next: shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); the first holder vote, in the open.`,
+        ? `$GLOAM listed in the mainnet pool; Gloam live on mainnet (${names}); shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees on; $GLOAM listed on CoinGecko. Next: fees move to a dedicated treasury wallet and buybacks start; the first holder vote, in the open.`
+        : `$GLOAM listed in the mainnet pool; Gloam live on mainnet (${names}); fees on; $GLOAM listed on CoinGecko. Next: shield $GLOAM in the Robinhood Chain pool (25,000 per deposit, 250,000 in total during beta); fees move to a dedicated treasury wallet and buybacks start; the first holder vote, in the open.`,
     ],
     ["gloam.trade/app (the testnet app)", "gloam.trade/app (the app: mainnet and testnet)"],
     // fees, the relay and what you can do read as now, not as "at mainnet"
     ["- Fees at mainnet:", "- Fees on mainnet:"],
-    ["Half of Gloam's fees buy back $GLOAM once fees switch on at mainnet", "Half of Gloam's fees buy back $GLOAM"],
-    ["half of Gloam's fees buy $GLOAM from the market once fees switch on at mainnet.", "half of Gloam's fees buy $GLOAM from the market."],
+    [
+      "Half of Gloam's fees buy back $GLOAM once fees switch on at mainnet",
+      "Half of Gloam's fees are set to buy back $GLOAM (buybacks have not started yet, see BUYBACKS)",
+    ],
+    [
+      "half of Gloam's fees buy $GLOAM from the market once fees switch on at mainnet.",
+      "half of Gloam's fees are set to buy $GLOAM from the market. They have not started yet: see BUYBACKS at the top.",
+    ],
     ["From mainnet a cash out carries a 0.25% fee", "On mainnet a cash out carries a 0.25% fee"],
     ["(2) Buybacks: at mainnet, adding money", "(2) Buybacks: on mainnet, adding money"],
     [
