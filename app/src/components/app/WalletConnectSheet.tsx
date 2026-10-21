@@ -152,7 +152,7 @@ export function WalletConnectSheet({ open, onClose }: { open: boolean; onClose: 
         transition={{ duration: 0.2 }}
       />
       <motion.div
-        className="relative z-[1] w-full max-w-[420px] rounded-t-[24px] bg-panel px-6 pb-[max(24px,env(safe-area-inset-bottom))] pt-6 shadow-pop sm:rounded-[24px] sm:px-7 sm:pb-7"
+        className="relative z-[1] max-h-[92dvh] w-full max-w-[420px] overflow-y-auto rounded-t-[24px] bg-panel px-6 pb-[max(24px,env(safe-area-inset-bottom))] pt-6 shadow-pop sm:rounded-[24px] sm:px-7 sm:pb-7"
         initial={reduce ? false : { opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 420, damping: 36 }}

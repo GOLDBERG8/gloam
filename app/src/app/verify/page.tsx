@@ -562,7 +562,7 @@ export default function VerifyPage() {
                     placeholder="gloamfunds1:…"
                     rows={6}
                     spellCheck={false}
-                    className="tnum mt-2 w-full resize-y break-all rounded-xl border border-line-strong bg-panel px-4 py-3.5 text-[14px] leading-relaxed text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-foreground focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--foreground)_12%,transparent)]"
+                    className="tnum mt-2 w-full resize-y break-all rounded-xl border border-line-strong bg-panel px-4 py-3.5 text-[16px] leading-relaxed sm:text-[14px] text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-foreground focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--foreground)_12%,transparent)]"
                   />
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                     <p className="text-[12.5px] text-faint">

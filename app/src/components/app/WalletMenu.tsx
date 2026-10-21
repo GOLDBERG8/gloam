@@ -388,7 +388,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
           }`}
         >
           <AddressSeal address={address} size={32} />
-          <span className="tnum text-[13px] font-medium">
+          <span className="tnum whitespace-nowrap text-[13px] font-medium">
             {shortAddress(address)}
           </span>
           <ChevronGlyph

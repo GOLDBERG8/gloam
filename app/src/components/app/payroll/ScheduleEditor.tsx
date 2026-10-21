@@ -217,7 +217,7 @@ export function ScheduleEditor({
         transition={{ duration: 0.2 }}
       />
       <motion.div
-        className="relative z-[1] flex max-h-[min(92vh,820px)] w-full max-w-[600px] flex-col overflow-hidden bg-panel shadow-pop max-sm:rounded-t-[22px] sm:rounded-[24px]"
+        className="relative z-[1] flex max-h-[min(92dvh,820px)] w-full max-w-[600px] flex-col overflow-hidden bg-panel shadow-pop max-sm:rounded-t-[22px] sm:rounded-[24px]"
         initial={reduce ? false : { opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 420, damping: 36 }}

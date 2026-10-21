@@ -344,7 +344,7 @@ export function SendView() {
               aria-label="Close"
               onClick={() => setShowPreview(false)}
             />
-            <div className="relative z-[1] max-h-[min(90vh,640px)] w-full max-w-[400px] overflow-y-auto rounded-[24px] bg-panel p-6 shadow-pop sm:p-8">
+            <div className="relative z-[1] max-h-[min(90dvh,640px)] w-full max-w-[400px] overflow-y-auto rounded-[24px] bg-panel p-6 shadow-pop sm:p-8">
               <p className="t-label">Review</p>
               <h2
                 id="send-review-title"

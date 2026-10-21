@@ -152,7 +152,7 @@ export function ProveTotal({
       <motion.div
         ref={panelRef}
         tabIndex={-1}
-        className="relative z-[1] flex max-h-[min(92vh,860px)] w-full max-w-[600px] flex-col overflow-hidden bg-panel shadow-pop outline-none max-sm:rounded-t-[22px] sm:rounded-[24px]"
+        className="relative z-[1] flex max-h-[min(92dvh,860px)] w-full max-w-[600px] flex-col overflow-hidden bg-panel shadow-pop outline-none max-sm:rounded-t-[22px] sm:rounded-[24px]"
         initial={reduce ? false : { opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 420, damping: 36 }}

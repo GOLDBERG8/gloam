@@ -89,7 +89,7 @@ export function SuccessModal({
         transition={{ type: "spring", stiffness: 420, damping: 34 }}
       >
         <SealedField tone="soft" />
-        <div className="relative max-h-[min(88vh,680px)] overflow-y-auto overflow-x-hidden px-6 pb-6 pt-9 text-center sm:px-8 sm:pb-8">
+        <div className="relative max-h-[min(88dvh,680px)] overflow-y-auto overflow-x-hidden px-6 pb-6 pt-9 text-center sm:px-8 sm:pb-8">
           <motion.div
             className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-sealed-soft text-sealed"
             initial={reduce ? false : { scale: 0.7, opacity: 0 }}

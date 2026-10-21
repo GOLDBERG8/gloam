@@ -220,7 +220,8 @@ export function AppShell({
       {/* mobile top bar */}
       <header className="gl-mobilebar sticky top-0 z-40 border-b border-line bg-background/90 backdrop-blur-xl">
         <div className="flex h-14 items-center justify-between gap-2 px-4">
-          <Logo size={22} />
+          {/* Under 360px wide the mark alone, so the wallet and menu still fit on one line. */}
+          <Logo size={22} className="max-[359px]:[&>span]:hidden" />
           <div className="flex items-center gap-1.5">
             <WalletMenu />
             <button

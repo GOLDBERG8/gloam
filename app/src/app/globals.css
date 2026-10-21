@@ -898,6 +898,15 @@ html[data-theme="dark"],
   
 }
 
+/* Phones: iOS zooms the page into any text field under 16px when it is
+   focused, and leaves it zoomed. App fields are 16px there. Unlayered, so it
+   beats the smaller text-[..] sizes some fields keep on desktop. */
+@media (max-width: 639.98px) {
+  .gl-input {
+    font-size: 16px;
+  }
+}
+
 /* Invoice: printing (Download PDF) shows only the sheet, in full colour. */
 @media print {
   @page {

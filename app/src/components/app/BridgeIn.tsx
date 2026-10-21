@@ -441,7 +441,7 @@ function BridgeSheet({
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search chains or tokens"
               aria-label="Search chains or tokens"
-              className="h-12 w-full rounded-xl border border-line bg-panel px-3.5 text-[15px] text-foreground outline-none placeholder:text-faint focus:border-foreground/40"
+              className="h-12 w-full rounded-xl border border-line bg-panel px-3.5 text-[16px] text-foreground sm:text-[15px] outline-none placeholder:text-faint focus:border-foreground/40"
             />
             <ul className="mt-3 grid gap-1">
               {matches.map((c) => (
@@ -589,7 +589,7 @@ function BridgeSheet({
                   spellCheck={false}
                   value={refundTo}
                   onChange={(e) => setRefundTo(e.target.value.trim())}
-                  className="tnum mt-1.5 h-12 w-full rounded-xl border border-line bg-panel px-3.5 text-[14px] text-foreground outline-none focus:border-foreground/40"
+                  className="tnum mt-1.5 h-12 w-full rounded-xl border border-line bg-panel px-3.5 text-[16px] text-foreground sm:text-[14px] outline-none focus:border-foreground/40"
                 />
                 <p className="mt-1.5 text-[12px] text-mute">If the transfer fails, the money goes back here.</p>
               </div>

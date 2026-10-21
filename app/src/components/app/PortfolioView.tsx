@@ -716,7 +716,7 @@ export function PortfolioView() {
                   {nativeWei > BigInt(0) && (
                     // The gas coin. Robinhood Chain mainnet's pool does not take it, so it
                     // shows here without an add button.
-                    <li className="flex min-h-[64px] items-center gap-3 max-sm:px-5 py-3 transition-colors hover:bg-surface/60 sm:px-6">
+                    <li className="flex min-h-[64px] flex-wrap items-center gap-x-3 gap-y-2.5 max-sm:px-5 py-3 transition-colors hover:bg-surface/60 sm:flex-nowrap sm:px-6">
                       <div className="flex min-w-0 flex-1 items-center gap-3">
                         <TokenLogo id="eth" symbol={nativeSymbol} size={34} />
                         <div className="min-w-0">
@@ -733,7 +733,7 @@ export function PortfolioView() {
                           </p>
                         )}
                       </div>
-                      <div className="w-[200px] justify-end gap-1 max-sm:hidden sm:flex">
+                      <div className="flex justify-end gap-1 max-sm:w-full max-sm:justify-start max-sm:pl-[46px] max-sm:empty:hidden sm:w-[200px]">
                         {shieldLive && supportsNativeShield(network.chainId) ? (
                           <Link href="/app/shield" className="btn btn-ghost btn-sm">
                             Add privately
@@ -748,7 +748,7 @@ export function PortfolioView() {
                   {positions.map((p) => (
                     <li
                       key={p.id}
-                      className="flex min-h-[64px] items-center gap-3 max-sm:px-5 py-3 transition-colors hover:bg-surface/60 sm:px-6"
+                      className="flex min-h-[64px] flex-wrap items-center gap-x-3 gap-y-2.5 max-sm:px-5 py-3 transition-colors hover:bg-surface/60 sm:flex-nowrap sm:px-6"
                     >
                       <div className="flex min-w-0 flex-1 items-center gap-3">
                         <TokenLogo id={p.id} symbol={p.symbol} size={34} />
@@ -778,7 +778,7 @@ export function PortfolioView() {
                           </p>
                         )}
                       </div>
-                      <div className="w-[200px] justify-end gap-1 max-sm:hidden sm:flex">
+                      <div className="flex justify-end gap-1 max-sm:w-full max-sm:justify-start max-sm:pl-[46px] max-sm:empty:hidden sm:w-[200px]">
                         {shieldLive && (
                           <Link href="/app/shield" className="btn btn-ghost btn-sm">
                             Add privately
