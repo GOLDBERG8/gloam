@@ -37,6 +37,8 @@ export interface BridgeChain {
   kind: BridgeChainKind;
   /** Relay needs an API key for deposit addresses from this chain. */
   needsKey?: boolean;
+  /** The network's own chain: a swap the wallet signs, not a deposit address. */
+  swap?: boolean;
   tokens: BridgeToken[];
 }
 
@@ -88,6 +90,31 @@ export const BRIDGE_DESTINATIONS: Record<ChainFamily, BridgeDestination> = {
   },
 };
 
+/**
+ * The gas coin on a network's own chain, swapped by Relay into the pool's
+ * stablecoin in the same wallet. Same chain, so the wallet signs one swap
+ * instead of sending to a deposit address, which costs far less: a live quote
+ * on 2026-10-21 gave 2.490 USDG for 0.001 ETH this way, 2.441 through an address.
+ */
+export const SWAP_SOURCES: Partial<Record<ChainFamily, BridgeChain>> = {
+  robinhood: {
+    id: 4663,
+    name: "Robinhood Chain",
+    kind: "evm",
+    swap: true,
+    tokens: [{ symbol: "ETH", address: "0x0000000000000000000000000000000000000000", decimals: 18, logo: "/brand/tokens/eth.png" }],
+  },
+};
+
+/** The swap on this network's own chain, when it has one: mainnet only, since Relay swaps real money. */
+export function swapSource(network: Pick<GloamNetwork, "family" | "chainId">): BridgeChain | null {
+  const s = SWAP_SOURCES[network.family];
+  return s && s.id === network.chainId ? s : null;
+}
+
+/** ETH kept back by Max, so the swap itself can still pay its network fee. */
+export const SWAP_GAS_RESERVE_WEI = BigInt(200_000_000_000_000);
+
 /** Dollar limits for one bridge, checked against Relay's own dollar value of the deposit. */
 export const BRIDGE_MIN_USD = 1;
 export const BRIDGE_MAX_USD = 25_000;
@@ -119,7 +146,9 @@ export function validRefundAddress(kind: BridgeChainKind, v: string): boolean {
 
 export type BridgeQuote = {
   requestId: string;
+  /** Empty for a swap, which the wallet signs as `tx` instead. */
   depositAddress: string;
+  tx: { to: string; data: string; value: string; chainId: number } | null;
   send: { amount: string; symbol: string; chain: string; chainId: number; logo: string; usd: number | null };
   receive: { amount: string; minimum: string; symbol: string; chain: string; logo: string };
   feeUsd: number;

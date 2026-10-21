@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatEth } from "@/lib/chain";
 import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
+import { SwapToStableButton } from "./BridgeIn";
 import { faucetFor } from "@/lib/faucet";
 import { useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
@@ -171,6 +173,7 @@ function EmptyState({ title, body, action }: { title: string; body?: string; act
 
 export function PortfolioView() {
   const { address, isConnected, chainId } = useAppAccount();
+  const router = useRouter();
   const { network } = useNetwork();
   const onProduct = chainId === network.chainId;
   // Test funds exist on the testnets only; a mainnet has no faucet.
@@ -731,10 +734,13 @@ export function PortfolioView() {
                         )}
                       </div>
                       <div className="w-[200px] justify-end gap-1 max-sm:hidden sm:flex">
-                        {shieldLive && supportsNativeShield(network.chainId) && (
+                        {shieldLive && supportsNativeShield(network.chainId) ? (
                           <Link href="/app/shield" className="btn btn-ghost btn-sm">
                             Add privately
                           </Link>
+                        ) : (
+                          // Where the pool doesn't take the gas coin, swap it into the one it does.
+                          <SwapToStableButton recipient={address ?? undefined} onArrived={() => router.push("/app/shield")} />
                         )}
                       </div>
                     </li>

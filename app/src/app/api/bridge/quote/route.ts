@@ -8,6 +8,7 @@ import {
   BRIDGE_MIN_USD,
   bridgeChain,
   bridgeToken,
+  swapSource,
   validRefundAddress,
   type BridgeQuote,
 } from "@/lib/bridge";
@@ -49,11 +50,13 @@ export async function POST(req: Request) {
     return fail(400, "Send the details as JSON.");
   }
 
-  const chain = bridgeChain(Number(body.chainId));
+  if (typeof body.network !== "string" || !isNetworkKey(body.network)) return fail(400, "Pick Robinhood Chain or Tempo.");
+  const network = getNetwork(body.network);
+  const dest = BRIDGE_DESTINATIONS[network.family];
+  const swap = swapSource(network);
+  const chain = swap && Number(body.chainId) === swap.id ? swap : bridgeChain(Number(body.chainId));
   const token = chain && typeof body.symbol === "string" ? bridgeToken(chain, body.symbol) : null;
   if (!chain || !token) return fail(400, "Pick where the money is coming from.");
-  if (typeof body.network !== "string" || !isNetworkKey(body.network)) return fail(400, "Pick Robinhood Chain or Tempo.");
-  const dest = BRIDGE_DESTINATIONS[getNetwork(body.network).family];
 
   const recipient = typeof body.recipient === "string" ? body.recipient : "";
   if (!isAddress(recipient)) return fail(400, "Connect a wallet to receive the money.");
@@ -86,7 +89,8 @@ export async function POST(req: Request) {
       method: "POST",
       headers: { "content-type": "application/json", ...(apiKey ? { "x-api-key": apiKey } : {}) },
       body: JSON.stringify({
-        user: chain.kind === "evm" ? "0x000000000000000000000000000000000000dEaD" : refundTo,
+        // A swap is signed by the person's own wallet, so Relay builds it for that wallet.
+        user: chain.swap ? recipient : chain.kind === "evm" ? "0x000000000000000000000000000000000000dEaD" : refundTo,
         recipient,
         originChainId: chain.id,
         destinationChainId: dest.chainId,
@@ -94,7 +98,7 @@ export async function POST(req: Request) {
         destinationCurrency: dest.token.address,
         amount: amount.toString(),
         tradeType: "EXACT_INPUT",
-        useDepositAddress: true,
+        useDepositAddress: !chain.swap,
         refundTo,
         appFees: appFees(),
       }),
@@ -108,7 +112,7 @@ export async function POST(req: Request) {
   const data = (await res.json().catch(() => null)) as Record<string, any> | null;
   const step = data?.steps?.[0];
   const out = data?.details?.currencyOut;
-  if (!res.ok || !step?.depositAddress || !step?.requestId || !out) {
+  if (!res.ok || (!chain.swap && !step?.depositAddress) || !step?.requestId || !out) {
     const msg = typeof data?.message === "string" ? data.message : "";
     return fail(502, /amount|too (low|small)|insufficient/i.test(msg) ? "That amount is too small to bridge. Try a little more." : "The bridge couldn't make a route right now. Try again.");
   }
@@ -118,10 +122,31 @@ export async function POST(req: Request) {
     return fail(400, `Bridge between $${BRIDGE_MIN_USD} and $${BRIDGE_MAX_USD.toLocaleString("en-US")} at a time. That's about $${usdIn.toFixed(2)}.`);
   }
 
+  // The swap the wallet will sign: one plain transaction on this chain, sending
+  // exactly the amount asked for. Anything else is refused rather than signed.
+  let tx: BridgeQuote["tx"] = null;
+  if (chain.swap) {
+    const item = step.items?.[0]?.data;
+    const ok =
+      data?.steps?.length === 1 &&
+      step.kind === "transaction" &&
+      step.items?.length === 1 &&
+      item &&
+      Number(item.chainId) === chain.id &&
+      typeof item.to === "string" &&
+      isAddress(item.to) &&
+      typeof item.data === "string" &&
+      /^0x[0-9a-fA-F]*$/.test(item.data) &&
+      BigInt(item.value ?? 0) === amount;
+    if (!ok) return fail(502, "The swap couldn't make a route right now. Try again.");
+    tx = { to: item.to, data: item.data, value: amount.toString(), chainId: chain.id };
+  }
+
   const feeUsd = ["relayer", "app"].reduce((sum, k) => sum + Number(data?.fees?.[k]?.amountUsd ?? 0), 0);
   const quote: BridgeQuote = {
     requestId: String(step.requestId),
-    depositAddress: String(step.depositAddress),
+    depositAddress: chain.swap ? "" : String(step.depositAddress),
+    tx,
     send: {
       amount: amountText,
       symbol: token.symbol,

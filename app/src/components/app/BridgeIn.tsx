@@ -3,17 +3,21 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
+import { formatUnits, parseUnits, type Address, type Hex } from "viem";
 import {
   BRIDGE_CHAINS,
   BRIDGE_DESTINATIONS,
   BRIDGE_MAX_USD,
   BRIDGE_MIN_USD,
+  SWAP_GAS_RESERVE_WEI,
   chainLogo,
+  swapSource,
   type BridgeChain,
   type BridgeQuote,
   type BridgeStatus,
 } from "@/lib/bridge";
-import { MAINNET_ENABLED } from "@/lib/networks";
+import { useAppBalance, useAppSendTransaction, useAppTxReceipt } from "@/lib/demo";
+import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
 import { useNetwork } from "./NetworkProvider";
 
 const noopSubscribe = () => () => {};
@@ -56,6 +60,7 @@ function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
 export function BridgeInCard({ recipient, onArrived }: { recipient?: string; onArrived?: (amount: string) => void }) {
   const { network } = useNetwork();
   const dest = BRIDGE_DESTINATIONS[network.family];
+  const swap = swapSource(network);
   const [open, setOpen] = useState(false);
   const featured = FEATURED.filter((id) => CHAINS.some((c) => c.id === id));
 
@@ -73,6 +78,7 @@ export function BridgeInCard({ recipient, onArrived }: { recipient?: string; onA
       </p>
       <p className="mt-1.5 text-[12.5px] leading-relaxed text-mute">
         It lands in your wallet on {dest.chain} as {dest.token.symbol}. Then you add it here privately.
+        {swap && ` Holding ${swap.tokens[0]!.symbol} on ${swap.name}? Swap it to ${dest.token.symbol} here too.`}
       </p>
       <button type="button" disabled={!recipient} onClick={() => setOpen(true)} className="btn btn-ghost btn-sm mt-4">
         {recipient ? "Bring money over" : "Connect a wallet first"}
@@ -92,23 +98,59 @@ export function BridgeInCard({ recipient, onArrived }: { recipient?: string; onA
   );
 }
 
+/**
+ * "Swap to USDG" beside the gas coin in Holdings, on a chain where Relay swaps
+ * it in place. Renders nothing elsewhere.
+ */
+export function SwapToStableButton({ recipient, onArrived }: { recipient?: string; onArrived?: (amount: string) => void }) {
+  const { network } = useNetwork();
+  const swap = swapSource(network);
+  const [open, setOpen] = useState(false);
+  if (!swap || !recipient) return null;
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost btn-sm">
+        Swap to {BRIDGE_DESTINATIONS[network.family].token.symbol}
+      </button>
+      <BridgeSheet
+        open={open}
+        recipient={recipient}
+        startOnSwap
+        onClose={() => setOpen(false)}
+        onArrived={(amount) => {
+          setOpen(false);
+          onArrived?.(amount);
+        }}
+      />
+    </>
+  );
+}
+
 function BridgeSheet({
   open,
   recipient,
+  startOnSwap = false,
   onClose,
   onArrived,
 }: {
   open: boolean;
   recipient: string;
+  /** Open on the same-chain swap instead of the first bridge chain. */
+  startOnSwap?: boolean;
   onClose: () => void;
   onArrived: (amount: string) => void;
 }) {
   const { network } = useNetwork();
   const dest = BRIDGE_DESTINATIONS[network.family];
+  const swap = swapSource(network);
+  // The swap on this chain comes first: it is the cheapest way in for ETH already here.
+  const chains = useMemo(() => (swap ? [swap, ...CHAINS] : CHAINS), [swap]);
   const reduce = useReducedMotion();
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
-  const [chain, setChain] = useState<BridgeChain>(CHAINS[0]!);
-  const [symbol, setSymbol] = useState(CHAINS[0]!.tokens[0]!.symbol);
+  const [chosen, setChain] = useState<BridgeChain>(() => (startOnSwap && swap) || chains[0]!);
+  // A network switch can leave the old chain's swap picked; the first entry stands in for it.
+  const chain = chosen.swap && chosen.id !== swap?.id ? chains[0]! : chosen;
+  const [symbol, setSymbol] = useState(() => ((startOnSwap && swap) || chains[0]!).tokens[0]!.symbol);
   const [picking, setPicking] = useState(false);
   const [search, setSearch] = useState("");
   const [amount, setAmount] = useState("");
@@ -120,14 +162,27 @@ function BridgeSheet({
 
   const matches = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return CHAINS;
-    return CHAINS.filter((c) => c.name.toLowerCase().includes(q) || c.tokens.some((t) => t.symbol.toLowerCase().includes(q)));
-  }, [search]);
+    if (!q) return chains;
+    return chains.filter((c) => c.name.toLowerCase().includes(q) || c.tokens.some((t) => t.symbol.toLowerCase().includes(q)));
+  }, [search, chains]);
+
+  // The swap: the wallet's ETH on this chain, the transaction it signs, and its receipt.
+  const swapping = Boolean(chain.swap);
+  const { data: gasCoin } = useAppBalance({
+    address: recipient as Address,
+    chainId: (swap?.id ?? network.chainId) as GloamChainId,
+    enabled: open && swapping,
+  });
+  const send = useAppSendTransaction();
+  const receipt = useAppTxReceipt({ hash: send.data, chainId: (swap?.id ?? network.chainId) as GloamChainId });
+  const resetSend = send.reset;
 
   const reset = useCallback(() => {
     setStage({ kind: "form", error: null });
     setStatus(null);
-  }, []);
+    resetSend();
+  }, [resetSend]);
+
 
   useEffect(() => {
     if (!open) return;
@@ -146,7 +201,7 @@ function BridgeSheet({
   }, [open, onClose, picking]);
 
   // Follow the transfer while the address is on screen and it isn't finished.
-  const requestId = stage.kind === "address" ? stage.quote.requestId : null;
+  const requestId = stage.kind === "address" && !stage.quote.tx ? stage.quote.requestId : null;
   const finished = status?.stage === "done" || status?.stage === "failed" || status?.stage === "refunded";
   useEffect(() => {
     if (!open || !requestId || finished) return;
@@ -194,6 +249,7 @@ function BridgeSheet({
       }
       const quote = json.data;
       setStage({ kind: "address", quote, qr: null });
+      if (quote.tx) return;
       void import("qrcode")
         .then((QR) => QR.toDataURL(quote.depositAddress, { margin: 1, width: 400, errorCorrectionLevel: "M" }))
         .then((qr) => setStage((s) => (s.kind === "address" && s.quote.requestId === quote.requestId ? { ...s, qr } : s)))
@@ -215,10 +271,29 @@ function BridgeSheet({
     }
   }
 
+  function signSwap(quote: BridgeQuote) {
+    if (!quote.tx) return;
+    send.sendTransaction({
+      to: quote.tx.to as Address,
+      data: quote.tx.data as Hex,
+      value: BigInt(quote.tx.value),
+      chainId: quote.tx.chainId as GloamChainId,
+    });
+  }
+
   if (!open || !mounted) return null;
 
   const amountNum = Number(amount);
-  const amountOk = token.stable ? amountNum >= BRIDGE_MIN_USD && amountNum <= BRIDGE_MAX_USD : amountNum > 0;
+  const amountWei = (() => {
+    try {
+      return /^\d+(\.\d+)?$/.test(amount) ? parseUnits(amount, token.decimals) : null;
+    } catch {
+      return null;
+    }
+  })();
+  const overBalance = swapping && gasCoin != null && amountWei != null && amountWei > gasCoin.value;
+  const maxWei = gasCoin != null && gasCoin.value > SWAP_GAS_RESERVE_WEI ? gasCoin.value - SWAP_GAS_RESERVE_WEI : BigInt(0);
+  const amountOk = (token.stable ? amountNum >= BRIDGE_MIN_USD && amountNum <= BRIDGE_MAX_USD : amountNum > 0) && !overBalance;
   const refundOk = chain.kind === "evm" || refundTo.trim().length > 20;
   const refundName = ADDRESS_NAME[chain.kind] ?? chain.name;
 
@@ -247,12 +322,14 @@ function BridgeSheet({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 id="bridge-title" className="text-[20px] font-medium tracking-[-0.01em] text-foreground">
-              {picking ? "Where is the money?" : "Bring money over"}
+              {picking ? "Where is the money?" : swapping ? `Swap to ${dest.token.symbol}` : "Bring money over"}
             </h2>
             <p className="mt-1.5 text-[13.5px] leading-relaxed text-mute">
               {picking
                 ? `${CHAINS.length} chains. Sending from an exchange works too: pick the chain you withdraw on.`
-                : `From another chain or an exchange, into your wallet on ${dest.chain}.`}
+                : swapping
+                  ? `Swap ${token.symbol} for ${dest.token.symbol} in your wallet on ${dest.chain}.`
+                  : `From another chain or an exchange, into your wallet on ${dest.chain}.`}
             </p>
           </div>
           <button
@@ -307,7 +384,11 @@ function BridgeSheet({
                     <ChainLogo id={c.id} size={32} />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] text-foreground">{c.name}</span>
-                      <span className="block truncate text-[12.5px] text-mute">{c.tokens.map((t) => t.symbol).join(", ")}</span>
+                      <span className="block truncate text-[12.5px] text-mute">
+                        {c.swap
+                          ? `Swap ${c.tokens.map((t) => t.symbol).join(", ")} to ${dest.token.symbol}, in this wallet`
+                          : c.tokens.map((t) => t.symbol).join(", ")}
+                      </span>
                     </span>
                   </button>
                 </li>
@@ -376,10 +457,30 @@ function BridgeSheet({
                 <TokenMark src={token.logo} size={20} />
                 <span className="text-[14px] text-mute">{token.symbol}</span>
               </div>
-              <p className="mt-1.5 text-[12px] text-mute">
-                {token.stable
-                  ? `From ${BRIDGE_MIN_USD} to ${BRIDGE_MAX_USD.toLocaleString("en-US")} ${token.symbol}.`
-                  : `Up to about $${BRIDGE_MAX_USD.toLocaleString("en-US")} worth. It arrives as ${dest.token.symbol}.`}
+              {swapping && gasCoin != null && (
+                <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[12px] text-mute">
+                  <span className="tnum">
+                    In your wallet: {trimAmount(formatUnits(gasCoin.value, token.decimals))} {token.symbol}
+                  </span>
+                  {maxWei > BigInt(0) && (
+                    <button
+                      type="button"
+                      onClick={() => setAmount(trimAmount(formatUnits(maxWei, token.decimals)))}
+                      className="font-medium text-foreground underline-offset-2 hover:underline"
+                    >
+                      Max
+                    </button>
+                  )}
+                </p>
+              )}
+              <p className={`mt-1.5 text-[12px] ${overBalance ? "text-danger" : "text-mute"}`}>
+                {overBalance
+                  ? `That's more ${token.symbol} than this wallet holds.`
+                  : token.stable
+                    ? `From ${BRIDGE_MIN_USD} to ${BRIDGE_MAX_USD.toLocaleString("en-US")} ${token.symbol}.`
+                    : swapping
+                      ? `Keep a little ${token.symbol} for network fees. It arrives as ${dest.token.symbol} in this wallet.`
+                      : `Up to about $${BRIDGE_MAX_USD.toLocaleString("en-US")} worth. It arrives as ${dest.token.symbol}.`}
               </p>
             </div>
 
@@ -411,15 +512,35 @@ function BridgeSheet({
               disabled={!amountOk || !refundOk || stage.kind === "loading"}
               className="btn btn-ink btn-lg btn-block"
             >
-              {stage.kind === "loading" ? "Getting an address…" : "Get a deposit address"}
+              {stage.kind === "loading"
+                ? swapping
+                  ? "Getting a price…"
+                  : "Getting an address…"
+                : swapping
+                  ? "Review the swap"
+                  : "Get a deposit address"}
             </button>
             <p className="text-center text-[12px] leading-relaxed text-mute">
-              Bridging is public, like any deposit. Powered by Relay.
+              {swapping ? "Swapping is public, like any deposit." : "Bridging is public, like any deposit."} Powered by Relay.
             </p>
           </form>
         )}
 
-        {!picking && stage.kind === "address" && (
+        {!picking && stage.kind === "address" && stage.quote.tx && (
+          <SwapReview
+            quote={stage.quote}
+            hash={send.data}
+            pending={send.isPending}
+            error={send.error}
+            landed={receipt.isSuccess}
+            waitFailed={receipt.isError}
+            onSign={() => signSwap(stage.quote)}
+            onArrived={onArrived}
+            onReset={reset}
+          />
+        )}
+
+        {!picking && stage.kind === "address" && !stage.quote.tx && (
           <div className="mt-5" aria-live="polite">
             <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-relaxed text-foreground">
               Send exactly
@@ -536,5 +657,139 @@ function StatusLine({ status, quote }: { status: BridgeStatus | null; quote: Bri
       />
       {text}
     </p>
+  );
+}
+
+/** At most six decimals, trailing zeros dropped, rounded down so Max never asks for more than is there. */
+function trimAmount(text: string): string {
+  const [whole, frac = ""] = text.split(".");
+  const f = frac.slice(0, 6).replace(/0+$/, "");
+  return f ? `${whole}.${f}` : whole!;
+}
+
+/** Two decimals, rounded down, so "Add it privately" never asks for more than arrived. */
+function floor2(text: string): string {
+  return (Math.floor(Number(text) * 100) / 100).toFixed(2);
+}
+
+function SwapReview({
+  quote,
+  hash,
+  pending,
+  error,
+  landed,
+  waitFailed,
+  onSign,
+  onArrived,
+  onReset,
+}: {
+  quote: BridgeQuote;
+  hash: Hex | undefined;
+  pending: boolean;
+  error: Error | null;
+  landed: boolean;
+  waitFailed: boolean;
+  onSign: () => void;
+  onArrived: (amount: string) => void;
+  onReset: () => void;
+}) {
+  const cancelled = error && /reject|denied|cancel/i.test(error.message);
+  const line = landed
+    ? `Swapped. Your ${quote.receive.symbol} is in your wallet on ${quote.receive.chain}.`
+    : waitFailed
+      ? "Sent. It's taking a while to confirm; check your wallet's activity."
+      : hash
+        ? "Swapping…"
+        : pending
+          ? "Confirm the swap in your wallet…"
+          : null;
+  return (
+    <div className="mt-5" aria-live="polite">
+      <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-relaxed text-foreground">
+        Swap
+        <TokenMark src={quote.send.logo} size={18} />
+        <span className="tnum font-medium">
+          {quote.send.amount} {quote.send.symbol}
+        </span>
+        on
+        <ChainLogo id={quote.send.chainId} size={18} />
+        {quote.send.chain}
+        {quote.send.usd !== null && <span className="tnum text-mute">(about ${quote.send.usd.toFixed(2)})</span>}
+      </p>
+
+      <dl className="mt-4 divide-y divide-line text-[14px]">
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">You get about</dt>
+          <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
+            <TokenMark src={quote.receive.logo} size={18} />
+            {Number(quote.receive.amount).toFixed(2)} {quote.receive.symbol}
+          </dd>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">At least</dt>
+          <dd className="tnum text-right text-foreground">
+            {Number(quote.receive.minimum).toFixed(2)} {quote.receive.symbol}
+          </dd>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Swap fee</dt>
+          <dd className="tnum text-right text-foreground">
+            {quote.feeUsd < 0.01 ? "Under a cent" : `about $${quote.feeUsd.toFixed(2)}`}
+          </dd>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Network fee</dt>
+          <dd className="text-right text-foreground">A few cents of {quote.send.symbol}</dd>
+        </div>
+      </dl>
+
+      {line && (
+        <p
+          className={`mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] ${
+            landed ? "text-sealed" : "text-foreground"
+          }`}
+        >
+          <span
+            aria-hidden
+            className={`h-2 w-2 shrink-0 rounded-full ${landed ? "bg-sealed" : "animate-pulse bg-foreground/50"}`}
+          />
+          {line}
+        </p>
+      )}
+
+      {error && !hash && (
+        <p role="alert" className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
+          {cancelled ? "You cancelled it in your wallet. Nothing moved." : error.message.split("\n")[0]}
+        </p>
+      )}
+
+      {landed ? (
+        <button
+          type="button"
+          onClick={() => onArrived(floor2(quote.receive.minimum))}
+          className="btn btn-ink btn-lg btn-block mt-4"
+        >
+          Add it privately
+        </button>
+      ) : (
+        <>
+          {!hash && (
+            <button type="button" onClick={onSign} disabled={pending} className="btn btn-ink btn-lg btn-block mt-4">
+              {pending ? "Waiting for your wallet…" : "Swap in your wallet"}
+            </button>
+          )}
+          {!pending && !hash && (
+            <button type="button" onClick={onReset} className="btn btn-ghost btn-sm mt-3">
+              Start over
+            </button>
+          )}
+        </>
+      )}
+      {!hash && (
+        <p className="mt-3 text-[12px] leading-relaxed text-mute">
+          Prices move. If a minute passes before you sign, start over for a fresh price.
+        </p>
+      )}
+    </div>
   );
 }
