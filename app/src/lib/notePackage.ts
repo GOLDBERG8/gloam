@@ -288,9 +288,13 @@ export async function decodeNotePackage(
   }
 
   if (s.startsWith(PREFIX_PLAIN)) {
-    const plain = utf8Decode(b64urlDecode(s.slice(PREFIX_PLAIN.length)));
-    const pack = expandCompact(JSON.parse(plain) as Record<string, unknown>);
-    if (!pack?.secret || !pack.amountWei) throw new Error("Invalid payment package.");
+    const body = s.slice(PREFIX_PLAIN.length);
+    const pack = readPlainBody(body) ?? readRepairedBody(body);
+    if (!pack) {
+      throw new Error(
+        "This payment code is damaged, often when it is copied from a screenshot. Ask the sender to send the link as text and paste the whole link."
+      );
+    }
     return pack;
   }
 
@@ -306,6 +310,81 @@ export async function decodeNotePackage(
   throw new Error(
     "That isn't a whole Gloam payment. Paste the full claim link, or the code that starts with gloam1, gloam1e or gloam2t. If the sender's message cut it off, ask them to send it again."
   );
+}
+
+/** A plain code's body as a package, or null when it does not read as one. */
+function readPlainBody(body: string): NotePackage | null {
+  try {
+    const pack = expandCompact(JSON.parse(utf8Decode(b64urlDecode(body))) as Record<string, unknown>);
+    return pack?.secret && pack.amountWei ? pack : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A plain code whose letters changed case, read with the case put back. The
+ * money fields come back exactly; the note's own capitals are a guess, so the
+ * note is left out, and the addresses are written in small letters, which
+ * every check accepts, instead of a checksum casing that may be off.
+ */
+function readRepairedBody(body: string): NotePackage | null {
+  const pack = readPlainBody(repairLetterCase(body));
+  if (!pack) return null;
+  const { note: _guessed, message: _alsoGuessed, ...rest } = pack;
+  void _guessed;
+  void _alsoGuessed;
+  return { ...rest, pool: pack.pool.toLowerCase() as Address, asset: pack.asset.toLowerCase() as Address, secret: pack.secret.toLowerCase() as Hex, commitment: pack.commitment.toLowerCase() as Hex };
+}
+
+const B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/**
+ * How much a decoded byte looks like a package's JSON. Secrets and commitments
+ * are small-letter hex, so those digits and the JSON punctuation score highest;
+ * capital hex (checksummed addresses) and other text less; anything else nothing.
+ */
+function jsonish(byte: number): number {
+  const ch = String.fromCharCode(byte);
+  if (/[0-9a-f"{}:,]/.test(ch)) return 6;
+  if (/[xA-F]/.test(ch)) return 3;
+  if (/[a-zA-Z .!'-]/.test(ch)) return 1;
+  return byte >= 0x20 && byte < 0x7f ? 0 : -6;
+}
+
+/**
+ * A plain code with its letters' case changed on the way (a phone's text
+ * recognition, an app that lowercases links) still holds every bit except
+ * which letters were capitals. Each group of four characters decodes to three
+ * bytes on its own, so try the capitals and small letters of each group and
+ * keep the one that reads most like the package's JSON. A wrong guess cannot
+ * spend anything: the claim checks the code's secret against its commitment.
+ */
+function repairLetterCase(body: string): string {
+  let out = "";
+  for (let i = 0; i < body.length; i += 4) {
+    const group = body.slice(i, i + 4);
+    const letters = [...group].map((ch, j) => (/[a-z]/i.test(ch) ? j : -1)).filter((j) => j >= 0);
+    let best = group;
+    let bestScore = -1;
+    for (let mask = 0; mask < 1 << letters.length; mask++) {
+      const chars = [...group];
+      letters.forEach((j, bit) => {
+        chars[j] = mask & (1 << bit) ? chars[j]!.toUpperCase() : chars[j]!.toLowerCase();
+      });
+      const v = chars.map((ch) => B64URL.indexOf(ch));
+      if (v.some((x) => x < 0)) continue;
+      const bytes = [(v[0]! << 2) | ((v[1] ?? 0) >> 4), (((v[1] ?? 0) & 15) << 4) | ((v[2] ?? 0) >> 2), (((v[2] ?? 0) & 3) << 6) | (v[3] ?? 0)];
+      const used = Math.max(0, chars.length - 1);
+      const score = bytes.slice(0, used).reduce((sum, b) => sum + jsonish(b), 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = chars.join("");
+      }
+    }
+    out += best;
+  }
+  return out;
 }
 
 /** A code inside a longer paste: up to the first character a code never has. */
