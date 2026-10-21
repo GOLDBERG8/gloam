@@ -28,20 +28,73 @@ function v4Private(ip: string): boolean {
   );
 }
 
-/** Loopback, private, link-local, carrier-grade NAT, metadata, multicast or unspecified. */
+/**
+ * The 16 bytes of an IPv6 literal, or null when it does not parse. Handles "::"
+ * and a dotted IPv4 tail, so every spelling of an address gives the same bytes.
+ */
+function v6Bytes(ip: string): number[] | null {
+  let s = ip.toLowerCase();
+  const zone = s.indexOf("%");
+  if (zone !== -1) s = s.slice(0, zone);
+  const dotted = s.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) {
+    if (isIP(dotted[2]!) !== 4) return null;
+    const [a, b, c, d] = dotted[2]!.split(".").map(Number) as [number, number, number, number];
+    s = `${dotted[1]}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const groups = (h: string) => (h === "" ? [] : h.split(":").map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN)));
+  const head = groups(halves[0]!);
+  const rest = halves.length === 2 ? groups(halves[1]!) : [];
+  if ([...head, ...rest].some(Number.isNaN)) return null;
+  let all: number[];
+  if (halves.length === 2) {
+    const fill = 8 - head.length - rest.length;
+    if (fill < 1) return null;
+    all = [...head, ...new Array<number>(fill).fill(0), ...rest];
+  } else {
+    if (head.length !== 8) return null;
+    all = head;
+  }
+  return all.flatMap((g) => [g >> 8, g & 0xff]);
+}
+
+/**
+ * An IPv6 address that reaches this host, a private network or metadata,
+ * directly or through an IPv4 address carried inside it (mapped, translated,
+ * NAT64, 6to4, Teredo).
+ */
+function v6Private(b: number[]): boolean {
+  const zero = (from: number, to: number) => b.slice(from, to).every((x) => x === 0);
+  const v4At = (at: number) => v4Private(b.slice(at, at + 4).join("."));
+  if (zero(0, 10) && b[10] === 0xff && b[11] === 0xff) return v4At(12); // ::ffff:a.b.c.d, mapped
+  if (zero(0, 8) && b[8] === 0xff && b[9] === 0xff && zero(10, 12)) return v4At(12); // ::ffff:0:a.b.c.d, translated
+  if (zero(0, 12)) return true; // ::, ::1 and the retired IPv4-compatible ::a.b.c.d
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) {
+    return zero(4, 12) ? v4At(12) : true; // 64:ff9b::/96 NAT64, and the local-use 64:ff9b:1::/48
+  }
+  if (b[0] === 0x20 && b[1] === 0x02) return v4At(2); // 2002::/16, 6to4
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x00 && b[3] === 0x00) return true; // 2001::/32, Teredo
+  if ((b[0]! & 0xfe) === 0xfc) return true; // fc00::/7, unique local
+  if (b[0] === 0xfe && (b[1]! & 0xc0) === 0x80) return true; // fe80::/10, link-local
+  if (b[0] === 0xfe && (b[1]! & 0xc0) === 0xc0) return true; // fec0::/10, old site-local
+  if (b[0] === 0xff) return true; // multicast
+  return false;
+}
+
+/**
+ * Loopback, private, link-local, carrier-grade NAT, metadata, multicast or
+ * unspecified. IPv6 is judged on its bytes, not its spelling: "::ffff:7f00:1",
+ * "::ffff:127.0.0.1" and "0:0:0:0:0:ffff:7f00:1" are all 127.0.0.1. Anything that
+ * is not a well-formed address counts as private, so the guard fails closed.
+ */
 export function isPrivateAddress(ip: string): boolean {
-  if (isIP(ip) === 4) return v4Private(ip);
-  const v6 = ip.toLowerCase();
-  const mapped = v6.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return v4Private(mapped[1]!);
-  return (
-    v6 === "::" ||
-    v6 === "::1" ||
-    v6.startsWith("fc") ||
-    v6.startsWith("fd") ||
-    /^fe[89ab]/.test(v6) ||
-    v6.startsWith("ff")
-  );
+  const kind = isIP(ip);
+  if (kind === 4) return v4Private(ip);
+  if (kind !== 6) return true;
+  const bytes = v6Bytes(ip);
+  return bytes === null ? true : v6Private(bytes);
 }
 
 /** Why the server will not fetch this URL, or null when it may. */

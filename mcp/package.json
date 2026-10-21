@@ -1,7 +1,7 @@
 {
   "name": "@gloamtrade/mcp",
   "mcpName": "io.github.cryptoduke01/gloam",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "type": "module",
   "description": "Gloam MCP server: private stablecoin payments for AI agents on Tempo and Robinhood Chain, live on mainnet (beta) with testnet for practice, under spending limits the agent cannot lift.",
@@ -51,7 +51,7 @@
     "build": "node scripts/build.mjs",
     "prepublishOnly": "npm run typecheck && npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test scripts/test-spend-limits.mts scripts/test-notes.mts scripts/test-access-key.mts scripts/test-mpp.mts scripts/test-mainnet.mts",
+    "test": "tsx --test scripts/test-spend-limits.mts scripts/test-notes.mts scripts/test-access-key.mts scripts/test-mpp.mts scripts/test-mainnet.mts scripts/test-safe-fetch.mts",
     "authorize-access-key": "tsx scripts/authorize-access-key.mts",
     "demo:tempo": "tsx scripts/demo-tempo-agent.mts",
     "verify:prover": "tsx scripts/verify-transfer-prover.mjs",
