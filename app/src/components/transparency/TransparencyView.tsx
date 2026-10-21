@@ -52,7 +52,7 @@ type NetState = { ledger: Ledger | null; error: string | null; progress: number;
 const EMPTY: NetState = { ledger: null, error: null, progress: 0, refreshing: false };
 
 function friendlyError(key: NetworkKey): string {
-  return `Could not reach ${getNetwork(key).label} just now. Public nodes sometimes slow down or limit requests, so try again in a moment.`;
+  return `Could not reach ${networkName(getNetwork(key))} just now. Public nodes sometimes slow down or limit requests, so try again in a moment.`;
 }
 
 /** Reads the ledger for the shown network, then warms the other one. */
@@ -385,7 +385,7 @@ function HoldingsCard({ ledger, prices, waiting }: { ledger: Ledger; prices: Pri
           )}
         </p>
         <p className="mt-1.5 text-[13px] leading-relaxed text-mute">
-          Everyone&apos;s private balances on {n.label}, added together. Nobody can
+          Everyone&apos;s private balances on {networkName(n)}, added together. Nobody can
           split it back into one person&apos;s share.
         </p>
 
@@ -413,7 +413,7 @@ function HoldingsCard({ ledger, prices, waiting }: { ledger: Ledger; prices: Pri
           </ul>
         ) : (
           <p className="mt-5 rounded-xl bg-surface px-4 py-3 text-[13.5px] text-mute">
-            The vault on {n.label} is empty right now.
+            The vault on {networkName(n)} is empty right now.
           </p>
         )}
         {empty.length > 0 && (
@@ -494,7 +494,7 @@ function ActivityCard({ ledger }: { ledger: Ledger }) {
       </div>
       {ledger.recent.length === 0 ? (
         <p className="px-5 py-10 text-center text-[14px] text-mute sm:px-6">
-          Nothing has happened in the vault on {n.label} yet.
+          Nothing has happened in the vault on {networkName(n)} yet.
         </p>
       ) : (
         <ul className="divide-y divide-line">
@@ -575,12 +575,12 @@ function ContractsCard({ ledger }: { ledger: Ledger }) {
               <span className="tnum min-w-0 flex-1 truncate text-[13px] text-foreground" title={r.address}>
                 {r.address}
               </span>
-              <CopyButton value={r.address} label={`${n.label} ${r.name.toLowerCase()} address`} />
+              <CopyButton value={r.address} label={`${networkName(n)} ${r.name.toLowerCase()} address`} />
               <a
                 href={n.explorerAddress(r.address)}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`${n.label} ${r.name.toLowerCase()} on the explorer`}
+                aria-label={`${networkName(n)} ${r.name.toLowerCase()} on the explorer`}
                 className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium text-mute transition-colors hover:bg-surface-2 hover:text-foreground"
               >
                 Explorer <ArrowUpRight />
@@ -772,7 +772,7 @@ export function TransparencyView() {
             {!ledger && error ? (
               <div role="alert" className="gl-card flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-[15px] text-foreground">Could not read {net.label}</p>
+                  <p className="text-[15px] text-foreground">Could not read {networkName(net)}</p>
                   <p className="mt-1 max-w-[60ch] text-[13.5px] leading-relaxed text-mute">{error}</p>
                 </div>
                 <button type="button" onClick={refresh} className="btn btn-ink shrink-0">
@@ -780,13 +780,13 @@ export function TransparencyView() {
                 </button>
               </div>
             ) : !ledger ? (
-              <LedgerSkeleton label={net.label} progress={progress} />
+              <LedgerSkeleton label={networkName(net)} progress={progress} />
             ) : (
               <>
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <p className="tnum text-[13px] text-mute" aria-live="polite">
                     {refreshing
-                      ? `Checking for anything new on ${net.label}…`
+                      ? `Checking for anything new on ${networkName(net)}…`
                       : `Up to block ${intFmt.format(Number(ledger.scannedTo))}, checked ${new Date(ledger.checkedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} in ${(ledger.tookMs / 1000).toFixed(1)}s`}
                   </p>
                   <button type="button" onClick={refresh} disabled={refreshing} className="btn btn-ghost btn-sm">
