@@ -3,8 +3,10 @@
  *
  * Partners get an API key at https://gloam.trade/partners. Payments relayed
  * with the key are attributed to the partner, who sets their own fee and sees
- * volume and commissions in the portal. On testnet nothing is charged: the
- * portal shows the fees that would apply.
+ * volume and commissions in the portal. Partner fees are not collected yet, on
+ * mainnet or testnet: the portal shows the fees your setting would apply, and
+ * responses say charged: false. On mainnet the pool itself keeps Gloam's 0.25%
+ * cash-out fee (see cashOutFee).
  *
  *   const gloam = new GloamApiClient({ apiKey: process.env.GLOAM_API_KEY! });
  *   const { hash } = await gloam.relay(sendIntent);          // private payment
@@ -24,7 +26,7 @@ import type { SweepSubmitter } from "./sweep.js";
 export const GLOAM_API_URL = "https://gloam.trade";
 
 export interface GloamApiOptions {
-  /** gloam_test_... (testnet) or gloam_live_... (mainnet). */
+  /** gloam_live_... for the mainnets, gloam_test_... for the testnets. */
   apiKey: string;
   /** Defaults to https://gloam.trade. */
   baseUrl?: string;
@@ -74,7 +76,7 @@ export interface ApiRelayResult {
   network: string;
   action: "transfer" | "unshield" | "memo";
   attribution: RelayAttribution;
-  /** False on testnet: fees are shown, never taken. */
+  /** False today on every network: partner fees are shown, not yet taken. */
   charged: boolean;
 }
 

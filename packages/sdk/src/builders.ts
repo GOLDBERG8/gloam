@@ -8,10 +8,23 @@
  * prover, and resolve to a signed-ready call. private_trade (sealedSwap) builds
  * a valid intent too, but its on-chain path is disabled pending the H1 solvency
  * work — the builder is here so integrators can wire it ahead of that flip.
+ *
+ * Network: every builder takes `chainId` (default Robinhood Chain testnet, as
+ * in 0.0.x) and `poolAddress` (default: Gloam's pool on that chain). For
+ * mainnet, pass the mainnet network's chainId (see mainnetNetwork()); a mainnet
+ * whose pool is not in this SDK version is refused rather than guessed. Prove
+ * with the key set of the same chain: circuitArtifactUrls(circuit, chainId).
  */
 
 import type { Address } from "viem";
-import { NATIVE_ASSET, RH_TESTNET_CHAIN_ID, SEALED_VAULT } from "./constants.js";
+import {
+  NATIVE_ASSET,
+  RH_TESTNET_CHAIN_ID,
+  assertDepositAllowed,
+  isMainnetChainId,
+  networkName,
+  poolForChainId,
+} from "./constants.js";
 import { makeBoundNotePoseidon, type BoundNote } from "./note.js";
 import type { GloamIntent, IntentExec, TradeSide } from "./intents.js";
 import type { PoseidonMerklePath } from "./merkle.js";
@@ -33,8 +46,9 @@ export interface ShieldIntentParams {
   amountWei: bigint;
   /** Asset address. Defaults to native ETH (zero address). */
   asset?: Address;
+  /** Chain to deposit on. Defaults to Robinhood Chain testnet (46630). */
   chainId?: number;
-  /** Sealed vault to deposit into. Defaults to the RH testnet vault. */
+  /** Pool to deposit into. Defaults to Gloam's pool on `chainId`. */
   poolAddress?: Address;
   agentAddress?: Address | null;
 }
@@ -55,13 +69,18 @@ export async function buildShieldIntent(
   params: ShieldIntentParams
 ): Promise<ShieldIntent> {
   if (params.amountWei <= 0n) throw new Error("amountWei must be positive");
+  const chainId = params.chainId ?? RH_TESTNET_CHAIN_ID;
+  if (isMainnetChainId(chainId)) {
+    throw new Error(`Plain shield() is off on ${networkName(chainId)}: the pool takes deposits with a proof only. Use buildShieldBoundIntent.`);
+  }
   const asset = params.asset ?? NATIVE_ASSET;
   const isNative = isNativeAsset(asset);
+  const poolAddress = params.poolAddress ?? poolForChainId(chainId);
   const note = await makeBoundNotePoseidon(params.amountWei, asset);
 
   return {
     intent: "shield",
-    chainId: params.chainId ?? RH_TESTNET_CHAIN_ID,
+    chainId,
     agentAddress: params.agentAddress ?? null,
     plan: {
       asset: isNative ? "ETH" : asset,
@@ -70,9 +89,9 @@ export async function buildShieldIntent(
     privacy:
       "Shielding is a public deposit: the amount and asset are visible on-chain. The note commitment hides who can later spend it, so future private sends and trades are unlinkable to this deposit.",
     execution:
-      "Unsigned. Sign and broadcast shield(asset, amount, commitment) on Robinhood Chain testnet; attach msg.value for native ETH. Persist note.secret to spend later.",
+      `Unsigned. Sign and broadcast shield(asset, amount, commitment) on ${networkName(chainId)}; attach msg.value for native ETH. Persist note.secret to spend later.`,
     exec: {
-      poolAddress: params.poolAddress ?? SEALED_VAULT,
+      poolAddress,
       fn: "shield",
       valueWei: isNative ? params.amountWei : 0n,
       args: [asset, params.amountWei, note.commitment],
@@ -94,15 +113,20 @@ export interface ShieldBoundIntentParams extends ShieldIntentParams {
  * Build a hardened shield intent for a pool whose shieldVerifier is set (audit
  * C1). Mints the note AND generates the shield proof binding the commitment to
  * (amount, asset), then resolves shieldBound(asset, amount, commitment, proof).
- * Use this on the live RH testnet pool — plain shield() reverts there
- * (ShieldProofRequired).
+ * Use this on every live Gloam pool, mainnet and testnet: plain shield()
+ * reverts there (ShieldProofRequired). On mainnet, the asset must be one the
+ * pool lists and the amount within its beta per-deposit limit; both are checked
+ * here before any proof is made.
  */
 export async function buildShieldBoundIntent(
   params: ShieldBoundIntentParams
 ): Promise<ShieldIntent> {
   if (params.amountWei <= 0n) throw new Error("amountWei must be positive");
+  const chainId = params.chainId ?? RH_TESTNET_CHAIN_ID;
   const asset = params.asset ?? NATIVE_ASSET;
   const isNative = isNativeAsset(asset);
+  const poolAddress = params.poolAddress ?? poolForChainId(chainId);
+  assertDepositAllowed(chainId, asset, params.amountWei);
   const note = await makeBoundNotePoseidon(params.amountWei, asset);
   const { proofBytes } = await params.prover({
     commitment: note.commitmentField.toString(),
@@ -113,7 +137,7 @@ export async function buildShieldBoundIntent(
 
   return {
     intent: "shield",
-    chainId: params.chainId ?? RH_TESTNET_CHAIN_ID,
+    chainId,
     agentAddress: params.agentAddress ?? null,
     plan: {
       asset: isNative ? "ETH" : asset,
@@ -121,10 +145,11 @@ export async function buildShieldBoundIntent(
     },
     privacy:
       "Shielding is a public deposit: the amount and asset are visible on-chain. The note commitment hides who can later spend it, so future private sends and trades are unlinkable to this deposit.",
-    execution:
-      "Unsigned. Sign and broadcast shieldBound(asset, amount, commitment, proof); attach msg.value for native ETH. Persist note.secret to spend later.",
+    execution: `Unsigned. Sign and broadcast shieldBound(asset, amount, commitment, proof) on ${networkName(chainId)}${
+      isNative ? "; attach msg.value for native ETH" : ", after approving the pool to pull the token"
+    }. Persist note.secret to spend later.`,
     exec: {
-      poolAddress: params.poolAddress ?? SEALED_VAULT,
+      poolAddress,
       fn: "shieldBound",
       valueWei: isNative ? params.amountWei : 0n,
       args: [asset, params.amountWei, note.commitment, proofBytes],
@@ -152,8 +177,10 @@ export async function buildUnshieldIntent(
   params: UnshieldIntentParams
 ): Promise<GloamIntent<"unshield"> & { exec: IntentExec }> {
   const asset = params.asset ?? NATIVE_ASSET;
+  const chainId = params.chainId ?? RH_TESTNET_CHAIN_ID;
+  const poolAddress = params.poolAddress ?? poolForChainId(chainId);
   // A cash out to the vault itself strands the money there.
-  if (params.to.toLowerCase() === (params.poolAddress ?? SEALED_VAULT).toLowerCase()) {
+  if (params.to.toLowerCase() === poolAddress.toLowerCase()) {
     throw new Error("That address is the vault itself. Cash out to a wallet you control.");
   }
   const w = await buildPoseidonUnshieldWitness({
@@ -168,15 +195,18 @@ export async function buildUnshieldIntent(
 
   return {
     intent: "unshield",
-    chainId: params.chainId ?? RH_TESTNET_CHAIN_ID,
+    chainId,
     agentAddress: params.agentAddress ?? null,
     plan: { asset: isNativeAsset(asset) ? "ETH" : asset, amountWei: params.amountWei, to: params.to },
     privacy:
       "Unshield is the public exit: the amount, asset, and recipient become visible. The nullifier keeps the source note unlinkable to your other activity.",
-    execution:
-      "Unsigned. Sign and broadcast unshield(proof, root, nullifier, asset, to, amount) on RH testnet.",
+    execution: `Unsigned. Sign and broadcast unshield(proof, root, nullifier, asset, to, amount) on ${networkName(chainId)}.${
+      isMainnetChainId(chainId)
+        ? " The pool keeps its cash-out fee (0.25% at launch, see cashOutFee) and sends the rest to the recipient."
+        : ""
+    }`,
     exec: {
-      poolAddress: params.poolAddress ?? SEALED_VAULT,
+      poolAddress,
       fn: "unshield",
       valueWei: 0n,
       args: [
@@ -217,6 +247,8 @@ export async function buildPrivateSendIntent(
   params: PrivateSendIntentParams
 ): Promise<PrivateSendIntent> {
   const asset = params.asset ?? NATIVE_ASSET;
+  const chainId = params.chainId ?? RH_TESTNET_CHAIN_ID;
+  const poolAddress = params.poolAddress ?? poolForChainId(chainId);
   const w = await buildTransferWitness({
     secretHex: params.secretHex,
     amountIn: params.amountInWei,
@@ -229,15 +261,14 @@ export async function buildPrivateSendIntent(
 
   return {
     intent: "private_send",
-    chainId: params.chainId ?? RH_TESTNET_CHAIN_ID,
+    chainId,
     agentAddress: params.agentAddress ?? null,
     plan: { asset: isNativeAsset(asset) ? "ETH" : asset, amountWei: params.amountPayWei },
     privacy:
       "Private send stays inside the vault: no public transfer, no visible amount. The recipient opens the payment note; the change note stays with you.",
-    execution:
-      "Unsigned. Sign and broadcast transfer(proof, root, nullifier, [c0, c1]) on RH testnet, then hand the payment note to the recipient (or post it via GloamPayMemo).",
+    execution: `Unsigned. Sign and broadcast transfer(proof, root, nullifier, [c0, c1]) on ${networkName(chainId)}, then hand the payment note to the recipient (or post it via GloamPayMemo where the network has one).`,
     exec: {
-      poolAddress: params.poolAddress ?? SEALED_VAULT,
+      poolAddress,
       fn: "transfer",
       valueWei: 0n,
       args: [
@@ -289,6 +320,11 @@ export async function buildPrivateTradeIntent(
   params: PrivateTradeIntentParams
 ): Promise<PrivateTradeIntent> {
   const assetIn = params.assetIn ?? NATIVE_ASSET;
+  const chainId = params.chainId ?? RH_TESTNET_CHAIN_ID;
+  if (isMainnetChainId(chainId)) {
+    throw new Error(`Private trading is not on ${networkName(chainId)}: the mainnet pool takes payments only.`);
+  }
+  const poolAddress = params.poolAddress ?? poolForChainId(chainId);
   const w = await buildSealedSwapWitness({
     secretHex: params.secretHex,
     amountIn: params.amountInWei,
@@ -305,7 +341,7 @@ export async function buildPrivateTradeIntent(
 
   return {
     intent: "private_trade",
-    chainId: params.chainId ?? RH_TESTNET_CHAIN_ID,
+    chainId,
     agentAddress: params.agentAddress ?? null,
     plan: {
       market: params.market ?? params.assetOut,
@@ -313,10 +349,9 @@ export async function buildPrivateTradeIntent(
     },
     privacy:
       "Private trade keeps the size off the open book: on-chain min-out is a floor, not your real amount. The explorer sees a proof and an asset pair, never how much.",
-    execution:
-      "Unsigned. Sign and broadcast sealedSwap(proof, root, nullifier, cOut, cChange, assetIn, assetOut, amountOutMin, rateIn, rateOut) on RH testnet.",
+    execution: `Unsigned. sealedSwap(proof, root, nullifier, cOut, cChange, assetIn, assetOut, amountOutMin, rateIn, rateOut) on ${networkName(chainId)}. Private trading is switched off on every live pool, so this call reverts there today.`,
     exec: {
-      poolAddress: params.poolAddress ?? SEALED_VAULT,
+      poolAddress,
       fn: "sealedSwap",
       valueWei: 0n,
       args: [

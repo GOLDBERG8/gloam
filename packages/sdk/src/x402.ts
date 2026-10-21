@@ -36,7 +36,7 @@ import type { Prover } from "./prove.js";
 import type { NoteExport } from "./witness.js";
 import { noteCommitmentPoseidon } from "./note.js";
 import { fieldToHex } from "./poseidon.js";
-import { NATIVE_ASSET, RH_TESTNET_CHAIN_ID, SEALED_VAULT } from "./constants.js";
+import { NATIVE_ASSET, RH_TESTNET_CHAIN_ID, poolForChainId } from "./constants.js";
 import {
   assertReceiveTag,
   decodeNotePackage,
@@ -124,17 +124,18 @@ export function buildGloamPaymentRequirements(
   if (params.amountWei <= 0n) throw new Error("amountWei must be positive");
   assertReceiveTag(params.payTo, "payTo");
   const asset = params.asset ?? NATIVE_ASSET;
+  const network = params.network ?? RH_TESTNET_CHAIN_ID;
   return {
     x402Version: GLOAM_X402_VERSION,
     scheme: GLOAM_X402_SCHEME,
-    network: params.network ?? RH_TESTNET_CHAIN_ID,
+    network,
     maxAmountRequired: params.amountWei.toString(),
     asset,
     assetSymbol: params.assetSymbol ?? (asset === NATIVE_ASSET ? "ETH" : "TOKEN"),
     payTo: params.payTo,
     resource: params.resource,
     description: params.description ?? `Private payment for ${params.resource}`,
-    poolAddress: params.poolAddress ?? SEALED_VAULT,
+    poolAddress: params.poolAddress ?? poolForChainId(network),
     maxTimeoutSeconds: params.maxTimeoutSeconds ?? 120,
     privacy: GLOAM_VS_ZONE,
   };

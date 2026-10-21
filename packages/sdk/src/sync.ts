@@ -46,7 +46,7 @@ export interface SyncedTree {
 }
 
 export interface SyncTreeParams {
-  /** The ShieldPool address (defaults are not assumed — pass SEALED_VAULT). */
+  /** The pool address (no default: pass the network's pool, e.g. mainnetNetwork("tempo")!.pool or SEALED_VAULT on testnet). */
   pool: Address;
   /** Earliest block to scan. Default 0n; pass the deploy block to go faster. */
   fromBlock?: bigint;

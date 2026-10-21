@@ -1,13 +1,13 @@
 # @gloamtrade/sdk
 
-**The privacy layer for Robinhood Chain, as a package.**
+**Private stablecoin payments for apps and agents on Robinhood Chain and Tempo, as a package.**
 
-Add shielded balances, private payments, and selective disclosure to any Robinhood Chain app or agent. Real zero-knowledge proofs, no proving stack to build from scratch.
+Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain or Tempo. Live on mainnet (beta) with the trusted setup's final keys, and on testnet for free practice. Real zero-knowledge proofs, no proving stack to build from scratch.
 
 [![npm version](https://img.shields.io/npm/v/@gloamtrade/sdk?color=0B0C0E&label=npm)](https://www.npmjs.com/package/@gloamtrade/sdk)
 [![license](https://img.shields.io/npm/l/@gloamtrade/sdk?color=0B0C0E)](https://github.com/cryptoduke01/gloam/blob/main/LICENSE)
 [![types](https://img.shields.io/npm/types/@gloamtrade/sdk?color=0B0C0E)](https://www.npmjs.com/package/@gloamtrade/sdk)
-[![Robinhood Chain](https://img.shields.io/badge/chain-Robinhood%20testnet%2046630-2E7D53)](https://gloam.trade/docs/testnet)
+[![Networks](https://img.shields.io/badge/mainnet-Robinhood%20Chain%204663%20%C2%B7%20Tempo%204217-2E7D53)](https://gloam.trade/docs/chain)
 
 ![The Gloam SDK](https://raw.githubusercontent.com/cryptoduke01/gloam/main/app/public/media/readme-hero.jpg)
 
@@ -18,6 +18,7 @@ Add shielded balances, private payments, and selective disclosure to any Robinho
 - [Why Gloam](#why-gloam)
 - [What you can build](#what-you-can-build)
 - [Install](#install)
+- [Networks: mainnet and testnet](#networks-mainnet-and-testnet)
 - [Quickstart: shield your first note](#quickstart-shield-your-first-note)
 - [How it works](#how-it-works)
 - [The intent model](#the-intent-model)
@@ -37,15 +38,15 @@ Add shielded balances, private payments, and selective disclosure to any Robinho
 
 ## Why Gloam
 
-Robinhood Chain is a public ledger. Every balance, position size, and trade is visible on-chain and copyable by anyone. For a trader that means the whole book is exposed. For an agent it means the entire strategy leaks on the first move.
+Public chains are public ledgers. Every balance and every payment is visible on-chain and copyable by anyone. For a business that means payroll and suppliers are exposed. For an agent it means the entire strategy leaks on the first payment.
 
-Gloam is the shielded layer on top of Robinhood Chain, and `@gloamtrade/sdk` is that layer as a dependency. Deposit into a private balance, move value with the amount hidden, and prove a holding to one chosen party without revealing anything else. Every private action is backed by a real Groth16 proof verified on-chain. Nothing is a mock. If a path cannot be made private, it stays disabled rather than pretending.
+Gloam is the shielded layer on top of Robinhood Chain and Tempo, and `@gloamtrade/sdk` is that layer as a dependency. Deposit into a private balance, move value with the amount hidden, and prove a holding to one chosen party without revealing anything else. Every private action is backed by a real Groth16 proof verified on-chain. Nothing is a mock. If a path cannot be made private, it stays disabled rather than pretending.
 
 The Gloam vault app is the reference implementation, not a special case. The same core that powers it is what you install here.
 
 ## What you can build
 
-- **Shielded balances.** Deposit ETH or tokenized stocks into a private balance only the holder can see or spend.
+- **Shielded balances.** Deposit stablecoins (USDG on Robinhood Chain; USDC.e, pathUSD, USDT0 or OUSD on Tempo) or $GLOAM into a private balance only the holder can see or spend. On testnet you can also practice with test ETH and stock tokens.
 - **Private payments.** Send inside the vault to a receive tag, with on-chain encrypted discovery. No public transfer, no visible amount.
 - **Cash out.** Unshield back to a public balance with a browser- or node-generated Groth16 proof.
 - **Selective disclosure.** Let a holder prove one balance to a chosen party, an auditor or a counterparty, revealing nothing else. Provable, not a dark pool.
@@ -69,43 +70,89 @@ npm create gloam-app@latest my-private-app
 
 That scaffolds a Next.js app already wired to the SDK. See [create-gloam-app](https://www.npmjs.com/package/create-gloam-app).
 
-## Quickstart: shield your first note
+## Networks: mainnet and testnet
 
-The hardened pool enforces a proof at deposit, so `buildShieldBoundIntent` mints the note **and** generates the shield proof. You sign the resolved call. The `note.secret` it returns is the only spend authority, so persist it.
+Gloam runs on two chains, each with a mainnet (real money) and a testnet (free practice). They are separate pools of the same design, not a bridge.
+
+| Network | Key | Chain id | Pool | Assets (beta limit per deposit / total) | Keys |
+| --- | --- | --- | --- | --- | --- |
+| Robinhood Chain | `robinhood-mainnet` | `4663` | `0xMAINNET_RH_POOL` (block `MAINNET_RH_BLOCK`) | USDG (500 / 25,000), $GLOAM (25,000 / 250,000) | Final |
+| Tempo | `tempo-mainnet` | `4217` | `0xMAINNET_TEMPO_POOL` (block `MAINNET_TEMPO_BLOCK`) | USDC.e, pathUSD, USDT0, OUSD (500 / 25,000 each) | Final |
+| Robinhood Chain testnet | `robinhood` | `46630` | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` | Test ETH, test USDG, stock tokens | Dev |
+| Tempo testnet (Moderato) | `tempo` | `42431` | `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb` | PathUSD and other test stablecoins | Dev |
 
 ```ts
-import { buildShieldBoundIntent, artifactProver, RH_TESTNET_CHAIN_ID } from "@gloamtrade/sdk";
-import { createWalletClient, http, parseEther, defineChain } from "viem";
+import { mainnetNetwork, gloamNetworks, getGloamNetwork, GLOAM_NETWORKS } from "@gloamtrade/sdk";
+
+const tempo = mainnetNetwork("tempo");        // Tempo mainnet, or null if this SDK version has no pool for it
+const all = gloamNetworks();                  // mainnets first, then the testnets
+const rh = getGloamNetwork("robinhood-mainnet");
+const practice = GLOAM_NETWORKS.tempo;        // the testnets, unchanged since 0.0.x
+```
+
+Each `GloamNetwork` carries `chainId`, `pool`, `deployBlock`, a viem `chain`, `rpcUrl`, `explorerUrl`, `assets` (with `depositLimit`), `testnet`, and `ceremony`.
+
+What is different on mainnet:
+
+- **Final keys.** The mainnet verifiers hold the final keys of the 13-contributor trusted setup (drand round 6561386, release `ceremony-final`). The testnets keep the single-party dev keys. A proof made with one set never verifies against the other, so prove with `circuitArtifactUrls(circuit, chainId)`, which picks the right set for the chain.
+- **Payments only.** The mainnet pools (`ShieldPoolPayments`) take deposits, private payments and cash outs. Private trading is not on mainnet. Stock tokens are testnet only, and Robinhood Chain mainnet takes no native ETH deposit (ETH is only gas).
+- **Beta deposit limits.** 500 per deposit and 25,000 in total for each stablecoin, 25,000 and 250,000 for $GLOAM. `buildShieldBoundIntent` refuses an unlisted asset or an amount over the per-deposit limit before it proves. Cash outs and private payments are never limited.
+- **Fees.** Deposits and private payments are free. A cash out costs 0.25%: the pool keeps `cashOutFee(amount)` and sends the rest.
+- **Pools come with the SDK version.** Mainnet pool addresses live in `MAINNET_POOLS`. If your SDK version has no pool for a mainnet, `mainnetNetwork()` returns `null` and the builders refuse that chain id rather than guess. Update the SDK, or pass `poolAddress` yourself.
+
+The builders still default to Robinhood Chain testnet when you pass no `chainId`, so code written for 0.0.x keeps working. For mainnet, pass the network explicitly, as below.
+
+## Quickstart: shield your first note
+
+The pool enforces a proof at deposit, so `buildShieldBoundIntent` mints the note **and** generates the shield proof. You approve the token and sign the resolved call. The `note.secret` it returns is the only spend authority, so persist it.
+
+```ts
+import {
+  mainnetNetwork,
+  buildShieldBoundIntent,
+  artifactProver,
+  circuitArtifactUrls,
+  TEMPO_USDCE,
+} from "@gloamtrade/sdk";
+import { createWalletClient, createPublicClient, http, erc20Abi, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-const rhTestnet = defineChain({
-  id: RH_TESTNET_CHAIN_ID, // 46630
-  name: "Robinhood Chain testnet",
-  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.testnet.chain.robinhood.com"] } },
-});
+const net = mainnetNetwork("tempo");          // Tempo mainnet: real money
+if (!net) throw new Error("This SDK version has no Tempo mainnet pool yet.");
 
 const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);
-const wallet = createWalletClient({ account, chain: rhTestnet, transport: http() });
+const wallet = createWalletClient({ account, chain: net.chain, transport: http(net.rpcUrl) });
+const publicClient = createPublicClient({ chain: net.chain, transport: http(net.rpcUrl) });
+const amount = parseUnits("25", 6);           // 25 USDC.e; the beta limit is 500 per deposit
 
-// 1. Mint the note and generate the shield proof.
+// 1. Mint the note and generate the shield proof with the mainnet (final) keys.
 const intent = await buildShieldBoundIntent({
-  amountWei: parseEther("0.001"),
-  prover: artifactProver({ wasm: "shield.wasm", zkey: "shield_final.zkey" }),
+  chainId: net.chainId,
+  poolAddress: net.pool,
+  asset: TEMPO_USDCE,
+  amountWei: amount,
+  prover: artifactProver(circuitArtifactUrls("shield", net.chainId)),
 });
 
-// 2. Sign and broadcast the resolved shieldBound(asset, amount, commitment, proof) call.
+// 2. Let the pool pull the token, then sign the resolved shieldBound(asset, amount, commitment, proof) call.
+await publicClient.waitForTransactionReceipt({
+  hash: await wallet.writeContract({ address: TEMPO_USDCE, abi: erc20Abi, functionName: "approve", args: [net.pool, amount] }),
+});
 const hash = await wallet.writeContract({
   address: intent.exec.poolAddress,
   abi: shieldBoundAbi,
   functionName: intent.exec.fn,   // "shieldBound"
   args: intent.exec.args,
-  value: intent.exec.valueWei,    // the deposit for native ETH, 0n for tokens
+  value: intent.exec.valueWei,    // 0n for tokens
 });
 
 // 3. PERSIST THIS. Losing note.secret loses the funds.
 saveSecret(intent.note.commitment, intent.note.secret);
 ```
+
+On Robinhood Chain mainnet use `mainnetNetwork("robinhood")` with `RH_MAINNET_USDG` (or `GLOAM_TOKEN`). Gas is ETH on Robinhood Chain and a USD stablecoin on Tempo.
+
+To practice for free first, use a testnet: `GLOAM_NETWORKS.tempo` (test PathUSD from the Tempo faucet) or `GLOAM_NETWORKS.robinhood` (test ETH and test USDG). The same code works with that network's `chainId`, `pool` and assets, and `circuitArtifactUrls` picks the dev keys.
 
 The minimal ABI fragment for the one call you make:
 
@@ -122,7 +169,7 @@ const shieldBoundAbi = [{
 }] as const;
 ```
 
-Circuit artifacts (`shield.wasm`, `shield_final.zkey`) are served at [www.gloam.trade/circuits](https://www.gloam.trade/circuits). Pass file paths in node or URLs in the browser. The full walkthrough, including confirming the deposit and cashing out, is in the [quickstart](https://gloam.trade/docs/quickstart).
+Circuit files are served at [www.gloam.trade/circuits](https://www.gloam.trade/circuits): the dev keys at the root, the final keys under `/circuits/final`. `circuitArtifactUrls` returns the right URLs; in the browser pass them straight to `artifactProver`. In node, snarkjs proves from local files, so download them first and check them against `CIRCUIT_SHA256`. The full walkthrough, including confirming the deposit and cashing out, is in the [quickstart](https://gloam.trade/docs/quickstart).
 
 ## How it works
 
@@ -135,7 +182,7 @@ nullifier  = Poseidon(secret, commitment)
 
 Shielding inserts the `commitment` as a leaf in a depth-20 incremental Merkle tree. The `secret` is the only spend authority and never leaves the client. Spending (send, cash out, trade) proves in zero knowledge that you know the secret for a commitment in the tree, and publishes the `nullifier` so it cannot be spent twice, all without revealing which note. The chain verifies a Groth16 proof, never your identity or size.
 
-The note commitment binds the asset, so it works for tokenized stocks, not just ETH. That binding is what makes this a privacy layer for a stock-paired chain rather than a generic ETH mixer.
+The note commitment binds the asset, so one pool holds several assets (stablecoins, $GLOAM, and on testnet ETH and stock tokens) without mixing them up.
 
 ## The intent model
 
@@ -166,20 +213,26 @@ You always sign and broadcast yourself. The SDK never holds a key.
 
 A spend needs a membership path, which needs the current tree. `syncTree` rebuilds it from chain (replaying `Shielded`, `Transferred`, and `SealedSwapped` leaves in order, so the root stays correct after any transfer). Then `buildUnshieldIntent` builds the witness and the proof. On exit, the amount, asset, and recipient become public. The source note stays unlinkable via the nullifier.
 
-```ts
-import { buildUnshieldIntent, artifactProver, syncTree, SEALED_VAULT } from "@gloamtrade/sdk";
+On mainnet the pool keeps a 0.25% cash-out fee: cashing out `amount` sends `amount - cashOutFee(amount)` to `to`. The note is spent in full either way.
 
-const synced = await syncTree(publicClient, { pool: SEALED_VAULT, fromBlock });
+```ts
+import { buildUnshieldIntent, artifactProver, circuitArtifactUrls, syncTree, cashOutFee } from "@gloamtrade/sdk";
+
+const synced = await syncTree(publicClient, { pool: net.pool, fromBlock: net.deployBlock });
 const path = await synced.pathForCommitment(note.commitment);
 if (!path) throw new Error("note not found in the tree yet");
 
 const exit = await buildUnshieldIntent({
+  chainId: net.chainId,
+  poolAddress: net.pool,
   secretHex: note.secret,
-  amountWei: parseEther("0.001"),
+  amountWei: note.amountWei,      // the whole note
+  asset: note.asset,
   to: account.address,
   path,
-  prove: artifactProver({ wasm: "unshield.wasm", zkey: "unshield_final.zkey" }),
+  prove: artifactProver(circuitArtifactUrls("unshield", net.chainId)),
 });
+// `to` receives note.amountWei - cashOutFee(note.amountWei) on mainnet.
 
 await wallet.writeContract({
   address: exit.exec.poolAddress,
@@ -194,17 +247,20 @@ await wallet.writeContract({
 `buildPrivateSendIntent` spends a note and produces two new notes: a payment note for the recipient and a change note for the sender. There is no public transfer and no visible amount.
 
 ```ts
-import { buildPrivateSendIntent, artifactProver, syncTree, SEALED_VAULT } from "@gloamtrade/sdk";
+import { buildPrivateSendIntent, artifactProver, circuitArtifactUrls, syncTree } from "@gloamtrade/sdk";
 
-const synced = await syncTree(publicClient, { pool: SEALED_VAULT, fromBlock });
+const synced = await syncTree(publicClient, { pool: net.pool, fromBlock: net.deployBlock });
 const path = await synced.pathForCommitment(note.commitment);
 
 const send = await buildPrivateSendIntent({
+  chainId: net.chainId,
+  poolAddress: net.pool,
   secretHex: note.secret,
-  amountInWei: note.amountWei,     // the source note's amount
-  amountPayWei: parseEther("0.001"), // amount to send; the rest is your change
+  amountInWei: note.amountWei,       // the source note's amount
+  amountPayWei: parseUnits("10", 6), // amount to send; the rest is your change
+  asset: note.asset,
   path,
-  prove: artifactProver({ wasm: "transfer.wasm", zkey: "transfer_final.zkey" }),
+  prove: artifactProver(circuitArtifactUrls("transfer", net.chainId)),
 });
 
 await wallet.writeContract({
@@ -217,6 +273,8 @@ await wallet.writeContract({
 // Hand send.paymentNote to the recipient; keep send.changeNote.
 ```
 
+Private payments are free and have no limit. The testnets also have an on-chain encrypted memo board (`GloamPayMemo`) so a recipient can find a payment with their Gloam address; the mainnet pools have none at launch, so hand the payment note over directly or seal it to the payee's receive tag.
+
 ## Selective disclosure
 
 Private by default, provable by choice. A holder proves one shielded balance to a party they choose, revealing nothing about their identity, their other notes, or the note secret (so the disclosure can never move the funds). It reuses the shield circuit, so there is no extra setup, and it verifies in-browser with no wallet. See the [disclosure guide](https://gloam.trade/docs/sdk/disclosure).
@@ -226,7 +284,7 @@ Private by default, provable by choice. A holder proves one shielded balance to 
 The crypto core is pure and isomorphic, so the exact code above runs server-side. An AI agent can shield, pay, and prove holdings with its size and strategy hidden. Two ways in:
 
 - **Directly via `@gloamtrade/sdk`.** Your agent framework builds an intent and signs it with its own wallet.
-- **Via the `@gloamtrade/mcp` server.** An MCP-speaking model gets Gloam as tools alongside its other capabilities, with planning and execution kept separate and keys held server-side.
+- **Via the `@gloamtrade/mcp` server** (`npx -y @gloamtrade/mcp`). An MCP-speaking model gets Gloam as tools alongside its other capabilities, with planning and execution kept separate, keys held server-side, and spending limits the agent cannot lift.
 
 See [Build a private agent](https://gloam.trade/docs/agents).
 
@@ -259,8 +317,9 @@ const seller = await generateReceiveKey();
 // Server: price a resource. This is the 402 challenge.
 const requirements = buildGloamPaymentRequirements({
   amountWei: parseUnits("0.25", 6),
-  asset: USD_TOKEN,          // a stable asset; omit for the chain's native unit
-  assetSymbol: "USD",
+  asset: TEMPO_USDCE,        // a stable asset the pool lists
+  assetSymbol: "USDC.e",
+  network: net.chainId,      // the pool is resolved from the network (pass poolAddress to override)
   payTo: seller.tag,         // the payment is sealed to this
   resource: "mcp://tool/summarize",
 });
@@ -271,7 +330,7 @@ const pay = await buildGloamPayment({
   senderSecretHex: note.secret,
   senderNoteAmountWei: note.amountWei,
   path,                                  // from syncTree.pathForCommitment
-  prove: artifactProver({ wasm, zkey }), // transfer artifacts
+  prove: artifactProver(circuitArtifactUrls("transfer", net.chainId)),
   issuerTag: "issuer:usd",               // optional issuer-scoped compliance disclosure
 });
 const hash = await wallet.writeContract({
@@ -285,8 +344,8 @@ const result = await settleGloamPayment({
   requirements,
   payload: decodePaymentHeader(xPaymentHeader),
   receiveKey: seller,
-  prove: artifactProver({ wasm, zkey }),                     // transfer artifacts
-  chain: sweepChainFromClient(publicClient, { pool, fromBlock }),
+  prove: artifactProver(circuitArtifactUrls("transfer", net.chainId)),
+  chain: sweepChainFromClient(publicClient, { pool: net.pool, fromBlock: net.deployBlock }),
   submit: relaySubmitter(),                                  // or your own wallet
   beforeSubmit: (fresh) => saveNote(fresh),                  // persist before it is sent
 });
@@ -305,17 +364,40 @@ The sealed ticket is the same format the Gloam app uses for paying a receive tag
 
 Everything exports from one barrel. The crypto and math core is pure and runs anywhere. Proving (snarkjs plus artifacts) and storage (notes, keys) are injected, so the same core serves a browser app and a node signer.
 
+### Networks, keys and fees (new in 0.1.0)
+
+```ts
+mainnetNetwork("robinhood" | "tempo"): GloamNetwork | null  // null until this SDK version has the pool
+gloamNetworks(): GloamNetwork[]                             // mainnets with a pool first, then testnets
+getGloamNetwork(key): GloamNetwork | null                   // "robinhood-mainnet" | "tempo-mainnet" | "robinhood" | "tempo"
+networkForChainId(chainId): GloamNetwork | undefined        // now finds mainnets too
+GLOAM_NETWORKS / GLOAM_TESTNETS                             // the two testnets, unchanged
+poolForChainId(chainId): Address                            // throws rather than guess
+isMainnetChainId(chainId), networkName(chainId)
+ceremonyForChainId(chainId): "dev" | "production"           // production (final keys) on 4663 and 4217
+circuitArtifactUrls(circuit, chainId, base?)                // { wasm, zkey } for "shield" | "transfer" | "unshield"
+circuitArtifactFiles(circuit, ceremony), CIRCUIT_SHA256     // relative paths and SHA-256 to check a download
+GLOAM_ARTIFACTS_URL                                         // https://www.gloam.trade/circuits
+assertDepositAllowed(chainId, asset, amount)                // listed asset, beta per-deposit limit, no native on mainnet
+CASH_OUT_FEE_BPS, cashOutFee(amount, bps?)                  // 25 bps on mainnet, rounded down like the pool
+MAINNET_POOLS, mainnetPoolFor(chainId)                      // the one place mainnet pool addresses live
+RH_MAINNET_CHAIN, TEMPO_MAINNET_CHAIN, RH_TESTNET_CHAIN, TEMPO_TESTNET_CHAIN  // viem chains
+RH_MAINNET_ASSETS, TEMPO_MAINNET_ASSETS                     // assets with beta deposit limits
+RH_MAINNET_USDG, GLOAM_TOKEN, TEMPO_USDCE, TEMPO_USDT0, TEMPO_PATHUSD, TEMPO_OUSD
+RH_MAINNET_CHAIN_ID (4663), TEMPO_MAINNET_CHAIN_ID (4217), MAINNET_POSEIDON_T3
+```
+
 ### Intent builders
 
 | Function | Resolves | Status |
 | --- | --- | --- |
-| `buildShieldBoundIntent(p)` | Mints a note + shield proof, then `shieldBound(...)` | Live |
-| `buildShieldIntent(p)` | Plain `shield(...)`, no proof (legacy pools only) | Live |
-| `buildUnshieldIntent(p)` | Witness + proof, then `unshield(...)` (cash out) | Live |
-| `buildPrivateSendIntent(p)` | Transfer witness, then `transfer(...)`; returns payment + change notes | Live |
-| `buildPrivateTradeIntent(p)` | Sealed-swap witness, then `sealedSwap(...)` | Disabled (pending H1) |
+| `buildShieldBoundIntent(p)` | Mints a note + shield proof, then `shieldBound(...)` | Live, mainnet and testnet |
+| `buildShieldIntent(p)` | Plain `shield(...)`, no proof (legacy pools only) | Refused on mainnet |
+| `buildUnshieldIntent(p)` | Witness + proof, then `unshield(...)` (cash out) | Live, mainnet and testnet |
+| `buildPrivateSendIntent(p)` | Transfer witness, then `transfer(...)`; returns payment + change notes | Live, mainnet and testnet |
+| `buildPrivateTradeIntent(p)` | Sealed-swap witness, then `sealedSwap(...)` | Off everywhere; refused on mainnet |
 
-Each builder returns a `GloamIntent` whose `exec` is guaranteed populated. `buildPrivateTradeIntent` produces a valid intent, but the on-chain sealed-swap path is disabled pending solvency work, so it is there to wire ahead of the flip.
+Each builder returns a `GloamIntent` whose `exec` is guaranteed populated. Every builder takes `chainId` (default Robinhood Chain testnet) and `poolAddress` (default: Gloam's pool on that chain). `buildPrivateTradeIntent` produces a valid intent for the testnets, but private trading is switched off on every live pool, so its call reverts today.
 
 ### Notes
 
@@ -381,7 +463,8 @@ A sweep spends the received note into a fresh note of the whole amount plus a ze
 IncrementalMerkleTreePoseidon, pathToCircomInput, MERKLE_DEPTH
 exactSealedAmounts, estimateSealedOut, marksToSealedRates   // sealed-rate math (pure)
 publicAmountOutMin, SEALED_PRIVACY_FACTS                    // size-privacy policy
-SEALED_VAULT, SHIELD_VERIFIER, NATIVE_ASSET, RH_TESTNET_CHAIN_ID, RH_MAINNET_CHAIN_ID
+SEALED_VAULT, TEMPO_SEALED_VAULT, SHIELD_VERIFIER, NATIVE_ASSET   // testnet pools and the native-asset sentinel
+RH_TESTNET_CHAIN_ID, TEMPO_TESTNET_CHAIN_ID, RH_MAINNET_CHAIN_ID, TEMPO_MAINNET_CHAIN_ID
 ```
 
 The full surface, with every parameter interface, is documented at [gloam.trade/docs/sdk/reference](https://gloam.trade/docs/sdk/reference).
@@ -436,9 +519,11 @@ PUBLIC_INPUTS.sealedSwap // [root, nullifier, newCOut, newCChange, assetIn, asse
 
 ## Guardrails and honesty
 
-- **Testnet only.** Robinhood Chain testnet (chain id `46630`), with dev-ceremony proving keys. Mainnet waits for a production trusted setup and an external audit.
+- **Mainnet is beta, with real money.** Robinhood Chain (`4663`) and Tempo (`4217`) run on the final keys of the 13-contributor trusted setup, with beta deposit limits. The contracts and circuits had an internal pre-mainnet review on 20 October 2026 with no Critical or High findings open; an external audit is planned and not done yet. Start small.
+- **A new pool has a small crowd.** Privacy depends on how many notes you hide among. On a brand new mainnet pool that crowd is thin at first, so do not treat a quick deposit and cash out of the same amount as unlinkable.
+- **Testnet is free practice.** Robinhood Chain testnet (`46630`) and Tempo Moderato (`42431`) keep running with the single-party dev keys and test funds that have no value.
 - **Real privacy only.** No mock successes. If a path cannot be private, the SDK returns a plan rather than a fake result.
-- **Sealed swaps are disabled** pending the H1 solvency work. Shield, private send, cash out, and disclosure are live and proof-gated.
+- **Private trading is off** on every pool (the mainnet pools have no swap at all). Shield, private send, cash out, and disclosure are live and proof-gated.
 - **Note secrets are the sole spend authority.** Persist and protect them. `localStorage` is fine for a demo, not for real value. Never hand one to an agent: the `@gloamtrade/mcp` server keeps them in an encrypted store and gives the agent handles.
 - **A received x402 payment is not yours until you sweep it.** The payer knows the payment note's secret. Use `settleGloamPayment` and serve only on `grantAccess`.
 
