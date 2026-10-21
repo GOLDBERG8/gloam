@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAddress } from "viem";
 import { isAdminAuthenticated } from "@/lib/adminAuth";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
+import { fetchRelayVolume } from "@/lib/relayVolume";
 import { readTractionSummary } from "@/lib/tractionStore";
 import { readFunnel } from "@/lib/funnelStore";
 import {
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
   }
 
   const force = new URL(req.url).searchParams.get("fresh") === "1";
-  const [onchain, product, claimLinks] = await Promise.all([
+  const [onchain, product, claimLinks, relay] = await Promise.all([
     fetchOnchainMetrics({ force }).catch((e) => {
       console.error("gloam_admin_metrics", e instanceof Error ? e.message : "unknown");
       return { error: "Could not read the chains. The details are in the server logs." };
@@ -45,6 +46,10 @@ export async function GET(req: Request) {
       recent: [],
     })),
     readFunnel(14).catch(() => []),
+    fetchRelayVolume().catch((e) => {
+      console.error("gloam_admin_relay", e instanceof Error ? e.message : "unknown");
+      return { error: "Could not read Relay. The details are in the server logs." };
+    }),
   ]);
 
   return NextResponse.json({
@@ -59,6 +64,7 @@ export async function GET(req: Request) {
     onchain,
     product,
     claimLinks,
+    relay,
     revenueConfig: { bridgeFeeBps: bridgeFeeBps() },
   });
 }

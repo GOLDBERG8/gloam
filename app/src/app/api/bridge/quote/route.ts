@@ -6,6 +6,7 @@ import {
   BRIDGE_DESTINATIONS,
   BRIDGE_MAX_USD,
   BRIDGE_MIN_USD,
+  RELAY_REFERRER,
   SWAP_SOURCES,
   bridgeChain,
   bridgeToken,
@@ -110,6 +111,8 @@ export async function POST(req: Request) {
         useDepositAddress: !chain.swap,
         refundTo,
         appFees: appFees(),
+        // Relay refuses a referrer without a key; with one, it tags the request for /admin.
+        ...(apiKey ? { referrer: RELAY_REFERRER } : {}),
       }),
       signal: AbortSignal.timeout(20_000),
       cache: "no-store",

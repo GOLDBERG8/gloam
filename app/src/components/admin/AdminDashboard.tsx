@@ -17,6 +17,8 @@ import type { CreatorFees } from "@/lib/creatorFees";
 import type { CombinedRevenue, DayRow, NetworkMetrics, OnchainMetrics, Windowed } from "@/lib/onchainMetrics";
 import type { DailyCounters, StoredEvent } from "@/lib/tractionStore";
 import type { FunnelDay } from "@/lib/funnelStore";
+import { relayChainName } from "@/lib/bridge";
+import type { RelayVolume } from "@/lib/relayVolume";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 
 type MetricsPayload = {
@@ -39,12 +41,14 @@ type MetricsPayload = {
   };
   /** Claim-link totals per UTC day, oldest first (lib/funnel). */
   claimLinks?: FunnelDay[];
+  /** Bridges and swaps tagged to Gloam at Relay (lib/relayVolume). */
+  relay?: RelayVolume | { error: string };
   /** Revenue switches read from env (bridge app fee). */
   revenueConfig?: { bridgeFeeBps: number | null };
   error?: string;
 };
 
-type Tab = "overview" | "revenue" | "users" | "events" | "partners" | "testers" | "bugs";
+type Tab = "overview" | "revenue" | "relay" | "users" | "events" | "partners" | "testers" | "bugs";
 
 /** Events added for proofs, the public ledger, requests and notes; shown first in the breakdowns. */
 /** How often an open admin tab refreshes. Only while it is on screen: each refresh reads Redis. */
@@ -60,6 +64,11 @@ const NEW_EVENTS = [
   "payment_request_opened",
   "payment_request_paid",
   "private_note_added",
+  "bridge_address_created",
+  "bridge_arrived",
+  "swap_review",
+  "swap_submit",
+  "swap_success",
 ];
 
 /** Payroll events come from the payroll flow; the first name present is the one counted. */
@@ -230,6 +239,7 @@ export function AdminDashboard() {
   const oc = data?.onchain && "networks" in data.onchain ? data.onchain : null;
   const ocError = data?.onchain && !("networks" in data.onchain) ? data.onchain.error : null;
   const product = data?.product;
+  const relay = data?.relay;
   const counters = useMemo(() => product?.counters ?? {}, [product?.counters]);
 
   const funnel = useMemo(() => {
@@ -458,6 +468,7 @@ export function AdminDashboard() {
               [
                 ["overview", "Overview"],
                 ["revenue", "Revenue"],
+                ["relay", "Bridge and swaps"],
                 ["users", "Wallets"],
                 ["events", "Product events"],
                 ["partners", "Partners"],
@@ -565,21 +576,30 @@ export function AdminDashboard() {
                 sub={realRev ? `${n(realRev.txs.all)} all time, on-chain` : "deposits, transfers, cash-outs"}
               />
               <Kpi
-                label="Product events"
-                value={n(product?.totalEvents)}
-                sub={product?.backend ?? "unknown"}
+                label="Claim links, 14 days"
+                value={`${n(claim.steps[2]?.v)} claimed`}
+                sub={`of ${n(claim.steps[0]?.v)} made, ${n(claim.steps[1]?.v)} opened`}
               />
             </section>
 
-            <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Kpi
-                label="Public open"
-                value={data?.launch?.open ? "Yes" : "No"}
-                sub={
-                  data?.launch?.opensAt
-                    ? new Date(data.launch.opensAt).toLocaleString()
-                    : "Not scheduled"
+                label="Bridges and swaps, 30 days"
+                value={
+                  relay && "enabled" in relay && relay.enabled
+                    ? fmtUsd(relay.last30.bridge.inUsd + relay.last30.swap.inUsd)
+                    : n((counters.bridge_arrived ?? 0) + (counters.swap_success ?? 0))
                 }
+                sub={
+                  relay && "enabled" in relay && relay.enabled
+                    ? `${n(relay.last30.bridge.count)} bridges, ${n(relay.last30.swap.count)} swaps`
+                    : "finished, from product events"
+                }
+              />
+              <Kpi
+                label="Product events"
+                value={n(product?.totalEvents)}
+                sub={product?.backend ?? "unknown"}
               />
               <Kpi
                 label="Last activity"
@@ -870,6 +890,8 @@ export function AdminDashboard() {
             bridgeFeeBps={data?.revenueConfig?.bridgeFeeBps ?? null}
           />
         )}
+
+        {tab === "relay" && <RelayPanel relay={relay} counters={counters} dims={product?.dims ?? {}} />}
 
         {tab === "partners" && <PartnersPanel />}
         {tab === "testers" && <TestersPanel />}
@@ -1461,6 +1483,148 @@ function metaText(meta: Record<string, unknown> | null): string {
     .filter(([, v]) => v !== null && v !== undefined)
     .map(([k, v]) => `${k} ${String(v)}`);
   return parts.length ? parts.join(", ").slice(0, 80) : "None";
+}
+
+const RELAY_FUNNEL: [string, string][] = [
+  ["bridge_address_created", "Deposit addresses made"],
+  ["bridge_arrived", "Bridges that arrived"],
+  ["swap_review", "Swaps reviewed"],
+  ["swap_submit", "Swaps sent from a wallet"],
+  ["swap_success", "Swaps that landed"],
+];
+
+/** Bridges in through Relay deposit addresses, and same-chain swaps of the gas coin. */
+function RelayPanel({
+  relay,
+  counters,
+  dims,
+}: {
+  relay: RelayVolume | { error: string } | undefined;
+  counters: Record<string, number>;
+  dims: Record<string, number>;
+}) {
+  const funnelMax = Math.max(1, ...RELAY_FUNNEL.map(([k]) => counters[k] ?? 0));
+  const funnel = RELAY_FUNNEL.map(([k, label]) => ({ k: label, v: counters[k] ?? 0, sub: k, pct: ((counters[k] ?? 0) / funnelMax) * 100 }));
+  const bySourceEvents = Object.entries(dims)
+    .map(([key, v]) => {
+      const m = /^(bridge_address_created|bridge_arrived)\|source=(.+)$/.exec(key);
+      return m ? { event: m[1]!, source: m[2]!, v } : null;
+    })
+    .filter((x): x is { event: string; source: string; v: number } => x !== null);
+  const sources = [...new Set(bySourceEvents.map((x) => x.source))];
+  const eventRows = sources
+    .map((src) => {
+      const made = bySourceEvents.find((x) => x.source === src && x.event === "bridge_address_created")?.v ?? 0;
+      const arrived = bySourceEvents.find((x) => x.source === src && x.event === "bridge_arrived")?.v ?? 0;
+      return { src, made, arrived };
+    })
+    .sort((a, b) => b.arrived - a.arrived || b.made - a.made);
+
+  const live = relay && "enabled" in relay && relay.enabled ? relay : null;
+  const off = relay && "enabled" in relay && !relay.enabled ? relay.reason : null;
+  const failed = relay && "error" in relay ? relay.error : null;
+
+  return (
+    <>
+      {live ? (
+        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Kpi label="Bridged in, 30 days" value={fmtUsd(live.last30.bridge.inUsd)} sub={`${n(live.last30.bridge.count)} bridges, ${fmtUsd(live.all.bridge.inUsd)} all time`} />
+          <Kpi label="Swapped, 30 days" value={fmtUsd(live.last30.swap.inUsd)} sub={`${n(live.last30.swap.count)} swaps, ${fmtUsd(live.all.swap.inUsd)} all time`} />
+          <Kpi
+            label="Finished, all time"
+            value={n(live.all.bridge.count + live.all.swap.count)}
+            sub={`${n(live.refunded)} refunded, ${n(live.failed)} failed, ${n(live.pending)} in flight`}
+          />
+          <Kpi label="Fees paid to Relay" value={fmtUsd(live.all.bridge.feeUsd + live.all.swap.feeUsd)} sub={`${fmtUsd(live.last30.bridge.feeUsd + live.last30.swap.feeUsd)} in 30 days, paid by users`} />
+        </section>
+      ) : (
+        <p className={`rounded-xl px-4 py-3 text-[14px] leading-relaxed ${failed ? "bg-danger-soft text-danger" : "bg-surface text-soft"}`}>
+          {failed
+            ? `Relay: ${failed}`
+            : `Volume from Relay is off. ${off ?? ""} Add RELAY_API_KEY on Vercel to tag new quotes as gloam.trade and read them back here. Until then, the counts below come from product events and carry no amounts.`}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <Panel title="Funnel">
+          <BarChart rows={funnel} />
+          <p className="mt-5 text-[13px] leading-relaxed text-mute">
+            Product events, counted only for visitors who accepted analytics. They carry the chain and token, never an
+            amount, wallet or transaction.
+          </p>
+        </Panel>
+        <Panel title="By source chain">
+          {live ? (
+            <DataTable
+              headers={["Source", "Kind", "Finished", "Volume", "Relay fees"]}
+              rows={live.bySource.map((r) => [relayChainName(r.chainId), r.kind === "swap" ? "Swap" : "Bridge", n(r.count), fmtUsd(r.inUsd), fmtUsd(r.feeUsd)])}
+              empty="Nothing tagged yet"
+              minWidth={460}
+            />
+          ) : (
+            <DataTable
+              headers={["Source", "Addresses made", "Arrived"]}
+              rows={eventRows.map((r) => [r.src, n(r.made), n(r.arrived)])}
+              empty="No bridge events yet"
+              minWidth={360}
+            />
+          )}
+        </Panel>
+      </div>
+
+      {live && (
+        <>
+          <Panel title="Last 30 days">
+            <DataTable
+              headers={["Day", "Bridges", "Bridged", "Swaps", "Swapped", "Relay fees"]}
+              rows={[...live.daily]
+                .reverse()
+                .filter((d) => d.bridges + d.swaps > 0)
+                .map((d) => [fmtDay(d.day), n(d.bridges), fmtUsd(d.bridgeUsd), n(d.swaps), fmtUsd(d.swapUsd), fmtUsd(d.feeUsd)])}
+              empty="No finished bridges or swaps in the last 30 days"
+              minWidth={560}
+            />
+            <p className="mt-4 text-[13px] leading-relaxed text-mute">
+              UTC days, finished requests only, valued in dollars by Relay when each one was made.
+              {live.since ? ` Tagged at Relay since ${fmtWhen(live.since)}.` : " Nothing tagged at Relay yet."}
+              {live.truncated ? " More requests exist than one refresh reads, so totals are a floor." : ""}
+            </p>
+          </Panel>
+          <Panel title="Recent">
+            <DataTable
+              headers={["Kind", "From", "Sent", "Received", "Status", "Tx", "When"]}
+              rows={live.recent.map((r) => [
+                r.kind === "swap" ? "Swap" : "Bridge",
+                relayChainName(r.fromChainId),
+                `${r.inAmount ? Number(r.inAmount).toLocaleString("en-US", { maximumFractionDigits: 6 }) : ""} ${r.inSymbol}`.trim(),
+                `${r.outAmount ? Number(r.outAmount).toLocaleString("en-US", { maximumFractionDigits: 2 }) : ""} ${r.outSymbol}`.trim(),
+                r.stage === "done" ? "Done" : r.stage === "refunded" ? "Refunded" : r.stage === "failed" ? "Failed" : "In flight",
+                r.tx ? (
+                  <a
+                    key="t"
+                    href={`https://relay.link/transaction/${r.tx}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-mute transition-colors hover:text-foreground"
+                  >
+                    {r.tx.slice(0, 10)}… <ArrowUpRight />
+                  </a>
+                ) : (
+                  ""
+                ),
+                fmtWhen(r.ts),
+              ])}
+              empty="No requests yet"
+              minWidth={720}
+            />
+            <p className="mt-4 text-[13px] leading-relaxed text-mute">
+              Wallets are left out on purpose. Relay holds the full record.
+            </p>
+          </Panel>
+        </>
+      )}
+    </>
+  );
 }
 
 function Kpi({

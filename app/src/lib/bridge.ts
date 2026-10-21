@@ -115,9 +115,26 @@ export function swapSource(network: Pick<GloamNetwork, "family" | "chainId">): B
 /** ETH kept back by Max, so the swap itself can still pay its network fee. */
 export const SWAP_GAS_RESERVE_WEI = BigInt(200_000_000_000_000);
 
+/**
+ * Gloam's tag on Relay quotes, so /admin can read back what went through the
+ * panel (lib/relayVolume). Relay takes it only with an API key.
+ */
+export const RELAY_REFERRER = "gloam.trade";
+
 /** Dollar limits for one bridge, checked against Relay's own dollar value of the deposit. */
 export const BRIDGE_MIN_USD = 1;
 export const BRIDGE_MAX_USD = 25_000;
+
+const CHAIN_NAMES = new Map<number, string>([
+  ...BRIDGE_CHAINS.map((c) => [c.id, c.name] as [number, string]),
+  ...Object.values(BRIDGE_DESTINATIONS).map((d) => [d.chainId, d.chain] as [number, string]),
+]);
+
+/** A chain's name by Relay id, or "Chain <id>" when Gloam doesn't list it. */
+export function relayChainName(id: number | null): string {
+  if (id == null) return "Unknown";
+  return CHAIN_NAMES.get(id) ?? `Chain ${id}`;
+}
 
 export function bridgeChain(id: number): BridgeChain | null {
   return BRIDGE_CHAINS.find((c) => c.id === id) ?? null;

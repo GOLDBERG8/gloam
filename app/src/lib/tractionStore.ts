@@ -37,7 +37,7 @@ const REDIS_TIMEOUT_MS = 4_000;
 export const DAILY_DAYS = 14;
 
 /** Meta fields that become breakdown counters. Values are already sanitized by /api/collect. */
-const DIM_KEYS = ["kind", "reason", "network", "chainId", "hasAmount", "hasNote", "hasProof", "relay"] as const;
+const DIM_KEYS = ["kind", "reason", "network", "chainId", "hasAmount", "hasNote", "hasProof", "relay", "source", "token"] as const;
 
 const mem: StoredEvent[] = [];
 const memCounters = new Map<string, number>();

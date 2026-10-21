@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { formatUnits, parseUnits, type Address, type Hex } from "viem";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/bridge";
 import { useAppBalance, useAppSendTransaction, useAppTxReceipt } from "@/lib/demo";
 import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
+import { track } from "@/lib/track";
 import { useNetwork } from "./NetworkProvider";
 
 const noopSubscribe = () => () => {};
@@ -262,6 +263,32 @@ function BridgeSheet({
     };
   }, [open, requestId, finished]);
 
+  // Funnel events for /admin: chain and token names only, never amounts, addresses or hashes.
+  const counted = useRef(new Set<string>());
+  const once = useCallback((key: string, event: string, meta: Record<string, string>) => {
+    if (counted.current.has(key)) return;
+    counted.current.add(key);
+    track(event, meta);
+  }, []);
+  const shown = stage.kind === "address" ? stage.quote : null;
+  useEffect(() => {
+    if (shown && !shown.tx && status?.stage === "done") {
+      once(`arrived:${shown.requestId}`, "bridge_arrived", { source: shown.send.chain, token: shown.send.symbol });
+    }
+  }, [shown, status, once]);
+  useEffect(() => {
+    if (shown?.tx && send.data) once(`sent:${send.data}`, "swap_submit", { token: shown.send.symbol });
+  }, [shown, send.data, once]);
+  useEffect(() => {
+    if (shown?.tx && send.data && receipt.isSuccess) once(`swapped:${send.data}`, "swap_success", { token: shown.send.symbol });
+  }, [shown, send.data, receipt.isSuccess, once]);
+
+  /** The review or the deposit address is on screen. */
+  function countShown(quote: BridgeQuote) {
+    if (quote.tx) once(`review:${quote.requestId}`, "swap_review", { token: quote.send.symbol });
+    else once(`address:${quote.requestId}`, "bridge_address_created", { source: quote.send.chain, token: quote.send.symbol });
+  }
+
   function pick(c: BridgeChain) {
     setChain(c);
     setSymbol(c.tokens[0]!.symbol);
@@ -276,6 +303,7 @@ function BridgeSheet({
     // A swap price from the last few seconds is the review: no second wait.
     if (swapping && live?.quote && Date.now() - live.at < 25_000) {
       setStage({ kind: "address", quote: live.quote, qr: null });
+      countShown(live.quote);
       return;
     }
     setStage({ kind: "loading" });
@@ -293,6 +321,7 @@ function BridgeSheet({
       }
       const quote = json.data;
       setStage({ kind: "address", quote, qr: null });
+      countShown(quote);
       if (quote.tx) return;
       void import("qrcode")
         .then((QR) => QR.toDataURL(quote.depositAddress, { margin: 1, width: 400, errorCorrectionLevel: "M" }))
