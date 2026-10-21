@@ -408,6 +408,18 @@ export function AdminDashboard() {
       t.link_claimed += r.link_claimed;
       t.claimer_sent += r.claimer_sent;
     }
+    // Launch day, before counting by network: either network, so shown on its own in both views.
+    const mixed = { link_created: 0, link_opened: 0, link_claimed: 0, claimer_sent: 0 };
+    const mixedRows: { day: string; c: typeof mixed }[] = [];
+    for (const r of data?.claimLinks ?? []) {
+      const m = r.mixed;
+      if (!m || m.link_created + m.link_opened + m.link_claimed + m.claimer_sent === 0) continue;
+      mixedRows.push({ day: r.day, c: m });
+      mixed.link_created += m.link_created;
+      mixed.link_opened += m.link_opened;
+      mixed.link_claimed += m.link_claimed;
+      mixed.claimer_sent += m.claimer_sent;
+    }
     const steps = [
       { k: "Links made in the app", v: t.link_created, sub: "single and payroll, payment landed" },
       { k: "Opened", v: t.link_opened, sub: "once per link per browser" },
@@ -419,7 +431,16 @@ export function AdminDashboard() {
       },
     ];
     const max = Math.max(1, ...steps.map((s) => s.v));
-    return { totals: t, steps: steps.map((s) => ({ ...s, pct: (s.v / max) * 100 })), rows: [...rows].reverse() };
+    const tableRows = [...rows].reverse().flatMap((r) => {
+      const m = mixedRows.find((x) => x.day === r.day);
+      return m ? [{ ...r, label: null as string | null }, { day: r.day, label: "before the split, either network", ...m.c }] : [{ ...r, label: null as string | null }];
+    });
+    return {
+      totals: t,
+      mixed: mixedRows.length ? mixed : null,
+      steps: steps.map((s) => ({ ...s, pct: (s.v / max) * 100 })),
+      rows: tableRows,
+    };
   }, [data?.claimLinks, env]);
 
   const days = useMemo(() => {
@@ -728,7 +749,11 @@ export function AdminDashboard() {
               <Kpi
                 label="Claim links, 14 days"
                 value={`${n(claimed)} claimed`}
-                sub={`${n(made)} made in the app, ${n(claim.totals.link_opened)} opened`}
+                sub={
+                  claim.mixed
+                    ? `${n(made)} made, ${n(claim.totals.link_opened)} opened since counting by network; launch day before that: ${n(claim.mixed.link_created)} made, ${n(claim.mixed.link_claimed)} claimed, either network`
+                    : `${n(made)} made in the app, ${n(claim.totals.link_opened)} opened`
+                }
               />
             </section>
 
@@ -824,14 +849,27 @@ export function AdminDashboard() {
                   Totals only, counted without cookies or ids. Claimed can run ahead of made: claims count every claim link
                   or code, while made counts only links made in this app whose payment landed (payroll links since 21 Oct;
                   codes from the SDK, agents or before 13 Oct are not counted). Opened counts each link once per browser, so a
-                  link opened in a chat app and again in a wallet counts twice. Split by network since 21 Oct 2026 evening;
-                  older counts are in Testnet.
+                  link opened in a chat app and again in a wallet counts twice. Counting by network started on launch day at
+                  17:43 UTC; launch-day counts from before that could be either network, so they are listed apart and not
+                  added to either total. Everything before launch day is Testnet.
                 </p>
               </Panel>
               <Panel title="Claim links by day">
                 <DataTable
                   headers={["Day", "Made", "Opened", "Claimed", "Claimer paid"]}
-                  rows={claim.rows.map((d) => [fmtDay(d.day), n(d.link_created), n(d.link_opened), n(d.link_claimed), n(d.claimer_sent)])}
+                  rows={claim.rows.map((d) => [
+                    d.label ? (
+                      <span key="d" className="text-mute">
+                        {fmtDay(d.day)}, {d.label}
+                      </span>
+                    ) : (
+                      fmtDay(d.day)
+                    ),
+                    n(d.link_created),
+                    n(d.link_opened),
+                    n(d.link_claimed),
+                    n(d.claimer_sent),
+                  ])}
                   empty="No claim links yet"
                   minWidth={420}
                 />

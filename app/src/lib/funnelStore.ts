@@ -12,8 +12,16 @@ const TTL_SEC = 400 * 24 * 60 * 60;
 
 export type FunnelCounts = Record<FunnelEvent, number>;
 
-/** One day: every count together, then split into mainnet and testnet. */
-export type FunnelDay = { day: string } & FunnelCounts & { mainnet: FunnelCounts; testnet: FunnelCounts };
+/**
+ * One day: every count together, then split. Before the mainnet launch day
+ * everything is testnet. From launch day on, counts sent without a side (before
+ * the split went live that evening, or from a tab still on the old app) are
+ * "mixed": they may be either network, so they are kept apart instead of guessed.
+ */
+export type FunnelDay = { day: string } & FunnelCounts & { mainnet: FunnelCounts; testnet: FunnelCounts; mixed: FunnelCounts };
+
+/** The UTC day mainnet opened (21 Oct 2026, 13:00 UTC). */
+const LAUNCH_DAY = "2026-10-21";
 
 const zero = (): FunnelCounts => ({ link_created: 0, link_opened: 0, link_claimed: 0, claimer_sent: 0 });
 
@@ -40,17 +48,26 @@ export async function readFunnel(days = 14, now = Date.now()): Promise<FunnelDay
     const flat = Array.isArray(res[i]) ? (res[i] as unknown[]) : [];
     const all = zero();
     const mainnet = zero();
+    const tagged = zero();
     for (let j = 0; j + 1 < flat.length; j += 2) {
       const k = String(flat[j]);
       const v = Number(flat[j + 1]) || 0;
       if (isFunnelEvent(k)) all[k] = v;
       const [side, e] = k.split(":");
       if (isFunnelEvent(e) && side === "mainnet") mainnet[e] = v;
+      if (isFunnelEvent(e) && side === "testnet") tagged[e] = v;
     }
-    // Untagged counts (before the split) belong to the testnets.
     const testnet = zero();
-    for (const e of FUNNEL_EVENTS) testnet[e] = Math.max(0, all[e] - mainnet[e]);
-    return { day, ...all, mainnet, testnet };
+    const mixed = zero();
+    for (const e of FUNNEL_EVENTS) {
+      const untagged = Math.max(0, all[e] - mainnet[e] - tagged[e]);
+      if (day < LAUNCH_DAY) testnet[e] = all[e] - mainnet[e];
+      else {
+        testnet[e] = tagged[e];
+        mixed[e] = untagged;
+      }
+    }
+    return { day, ...all, mainnet, testnet, mixed };
   });
 }
 
