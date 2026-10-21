@@ -20,6 +20,7 @@ import { getNetwork } from "./networks";
 import type { Windowed } from "./onchainMetrics";
 import { cacheGetJson, cacheSetJson, utcDay } from "./tractionStore";
 import { serverTransport } from "./serverRpc";
+import { MAINNET_LAUNCH_MS } from "./mainnet";
 
 const VAULT = "0x953391a2ddf7e8437feb878fdf2c6f325fbf00cc";
 /** $GLOAM's id in the vault. */
@@ -49,6 +50,9 @@ export type CreatorFees = {
   earnedEth: Windowed;
   /** The same at today's ETH price; null when ETH is not priced. */
   earnedUsd: Windowed | null;
+  /** ETH earned since Gloam mainnet opened (21 Oct 2026, 13:00 UTC), and its dollars now. */
+  sinceLaunchEth: number;
+  sinceLaunchUsd: number | null;
   claimedEth: number;
   /** Earned and not yet claimed. */
   unclaimedEth: number;
@@ -200,6 +204,7 @@ export async function readCreatorFees(days: string[], ethUsd: () => Promise<numb
   let latest: number | null = null;
   let error: string | null = null;
   let windows = { d1: 0, d7: 0, d30: 0 };
+  let sinceLaunch = 0;
   let byDay = new Map<string, bigint>();
   try {
     const c = rh();
@@ -216,10 +221,11 @@ export async function readCreatorFees(days: string[], ethUsd: () => Promise<numb
       .concat(days);
     const mid = await midnightBlocks(edges, head);
     const now = Math.floor(Date.now() / 1000);
-    const [b1, b7, b30] = await Promise.all([
+    const [b1, b7, b30, bLaunch] = await Promise.all([
       blockAt(now - 86_400, head),
       blockAt(now - 7 * 86_400, head),
       blockAt(now - 30 * 86_400, head),
+      blockAt(Math.floor(MAINNET_LAUNCH_MS / 1000), head),
     ]);
 
     // Fold buckets older than the oldest edge; the totals already hold them.
@@ -229,12 +235,14 @@ export async function readCreatorFees(days: string[], ethUsd: () => Promise<numb
     await cacheSetJson(STATE_KEY, state, TTL_SEC);
 
     const w = { d1: 0n, d7: 0n, d30: 0n };
+    let launched = 0n;
     byDay = new Map(days.map((d) => [d, 0n]));
     for (const [b, v] of state.buckets) {
       const wei = BigInt(v);
       if (b + BUCKET > b1) w.d1 += wei;
       if (b + BUCKET > b7) w.d7 += wei;
       if (b + BUCKET > b30) w.d30 += wei;
+      if (b + BUCKET / 2 >= bLaunch) launched += wei;
       for (let i = 0; i < days.length; i++) {
         const start = mid[days[i]!]!;
         const end = i + 1 < days.length ? mid[days[i + 1]!]! : Number.MAX_SAFE_INTEGER;
@@ -245,6 +253,7 @@ export async function readCreatorFees(days: string[], ethUsd: () => Promise<numb
       }
     }
     windows = { d1: eth(w.d1), d7: eth(w.d7), d30: eth(w.d30) };
+    sinceLaunch = eth(launched);
   } catch (e) {
     error = (e instanceof Error ? e.message : String(e)).split("\n")[0]!.slice(0, 160);
     console.warn("gloam_creator_fees", error);
@@ -263,6 +272,8 @@ export async function readCreatorFees(days: string[], ethUsd: () => Promise<numb
       price == null
         ? null
         : { d1: earnedEth.d1 * price, d7: earnedEth.d7 * price, d30: earnedEth.d30 * price, all: earnedEth.all * price },
+    sinceLaunchEth: sinceLaunch,
+    sinceLaunchUsd: price == null ? null : sinceLaunch * price,
     claimedEth: claimedAll,
     unclaimedEth: Math.max(0, earnedAll - claimedAll),
     trades: state.trades,

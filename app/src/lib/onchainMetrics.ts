@@ -38,6 +38,7 @@ import { loadEthUsd, loadLiveMarkets } from "./live-quotes";
 import { cacheGetJson, cacheSetJson, lastDays, utcDay } from "./tractionStore";
 import { serverTransport } from "@/lib/serverRpc";
 import { readCreatorFees, type CreatorFees } from "./creatorFees";
+import { MAINNET_LAUNCH_MS } from "./mainnet";
 
 export type ActivityKind = "deposit" | "transfer" | "cashout" | "trade";
 
@@ -954,6 +955,17 @@ function emptyState(n: GloamNetwork): ScanState {
 }
 
 /** Scans one network and reads its holdings. On failure keeps the last state read, with the error. */
+/**
+ * What a network's figures count. A mainnet counts from the public launch
+ * (21 Oct 2026, 13:00 UTC), not from its deploy, so the team's own checks
+ * before the doors opened stay out. Balances held are read live either way.
+ */
+function counted(n: GloamNetwork, s: ScanState): ScanState {
+  if (n.testnet) return s;
+  const from = Math.floor(MAINNET_LAUNCH_MS / 1000);
+  return { ...s, events: s.events.filter((e) => !e.ts || e.ts >= from) };
+}
+
 async function readNetwork(n: GloamNetwork, days: string[], revenueDays: string[]) {
   const started = Date.now();
   const prev = await loadState(n);
@@ -967,9 +979,10 @@ async function readNetwork(n: GloamNetwork, days: string[], revenueDays: string[
     const readMs = Date.now() - started;
     const extra = { blocksRead, latest, readMs, error: null };
     const money = { settings, days: revenueDays };
-    return { state, holdings, metrics: (p: Prices) => figures(n, state, holdings, p, days, extra, money) };
+    const view = counted(n, state);
+    return { state: view, holdings, metrics: (p: Prices) => figures(n, view, holdings, p, days, extra, money) };
   } catch (e) {
-    const state = prev ?? emptyState(n);
+    const state = counted(n, prev ?? emptyState(n));
     const msg = errText(e).split("\n")[0].slice(0, 160);
     console.warn("gloam_onchain_read", n.key, msg);
     const readMs = Date.now() - started;

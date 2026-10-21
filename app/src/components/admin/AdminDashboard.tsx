@@ -20,6 +20,7 @@ import type { FunnelDay } from "@/lib/funnelStore";
 import { relayChainName } from "@/lib/bridge";
 import type { RelayVolume } from "@/lib/relayVolume";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
+import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
 
 type MetricsPayload = {
   ok: boolean;
@@ -540,7 +541,7 @@ export function AdminDashboard() {
   const rev = agg?.revenue;
   // $GLOAM creator fees are real money on Robinhood Chain mainnet; the testnets have none.
   const creator = isMain && oc?.creator && "earnedEth" in oc.creator ? oc.creator : null;
-  const revenue = rev ? revenueTotals(rev, creator) : null;
+  const revenue = rev ? revenueTotals(rev) : null;
   const byNetwork = (
     f: (m: NetworkMetrics) => ReactNode,
     total: (c: NonNullable<typeof agg>) => ReactNode
@@ -694,14 +695,20 @@ export function AdminDashboard() {
                 sub={agg?.unpriced.length ? `${money}, plus ${agg.unpriced.length} unpriced` : `${money}, held in the vaults`}
               />
               <Kpi
-                label={isMain ? "Revenue, 30 days" : "Fees, 30 days"}
-                value={revenue ? fmtUsd(revenue.total.d30) : "Not read yet"}
-                sub={revenue ? `${fmtUsd(revenue.total.all)} all time` : "after the next chain read"}
+                label={isMain ? "Revenue since launch" : "Fees, 30 days"}
+                value={revenue ? fmtUsd(isMain ? revenue.total.all : revenue.total.d30) : "Not read yet"}
+                sub={revenue ? (isMain ? `cash-out fees; ${fmtUsd(revenue.total.d1)} in 24h` : `${fmtUsd(revenue.total.all)} all time`) : "after the next chain read"}
               />
               <Kpi
-                label="Volume, 30 days"
-                value={rev ? fmtUsd(rev.depositVolume.d30 + rev.cashoutVolume.d30) : "Not read yet"}
-                sub={rev ? `${fmtUsd(rev.depositVolume.d30)} in, ${fmtUsd(rev.cashoutVolume.d30)} out` : "deposits and cash-outs"}
+                label={isMain ? "Volume since launch" : "Volume, 30 days"}
+                value={rev ? fmtUsd(isMain ? rev.depositVolume.all + rev.cashoutVolume.all : rev.depositVolume.d30 + rev.cashoutVolume.d30) : "Not read yet"}
+                sub={
+                  rev
+                    ? isMain
+                      ? `${fmtUsd(rev.depositVolume.all)} in, ${fmtUsd(rev.cashoutVolume.all)} out`
+                      : `${fmtUsd(rev.depositVolume.d30)} in, ${fmtUsd(rev.cashoutVolume.d30)} out`
+                    : "deposits and cash-outs"
+                }
               />
               <Kpi
                 label="Active wallets, 7 days"
@@ -1200,11 +1207,14 @@ function PartnersPanel() {
   );
 }
 
-/** Revenue over the windows, in dollars: vault cash-out fees plus $GLOAM creator fees at today's ETH price. */
-function revenueTotals(rev: CombinedRevenue, creator: CreatorFees | null) {
-  const c = creator?.earnedUsd;
-  const w = (k: keyof Windowed) => rev.fees[k] + (c ? c[k] : 0);
-  return { total: { d1: w("d1"), d7: w("d7"), d30: w("d30"), all: w("all") }, creatorPriced: Boolean(c) };
+/**
+ * Gloam's own revenue over the windows, in dollars: the vaults' cash-out fees.
+ * $GLOAM creator fees are trading fees on the token's launchpad, not protocol
+ * revenue, so they are shown on their own and never added in here.
+ */
+function revenueTotals(rev: CombinedRevenue) {
+  const w = (k: keyof Windowed) => rev.fees[k];
+  return { total: { d1: w("d1"), d7: w("d7"), d30: w("d30"), all: w("all") } };
 }
 
 function fmtEth(v: number | null | undefined): string {
@@ -1249,6 +1259,7 @@ function RevenuePanel({
     .join(", ");
   const w = (v: Windowed | null | undefined, k: keyof Windowed) => (v ? fmtUsd(v[k]) : "Unknown");
   const daily = rev.daily
+    .filter((d) => !isMain || d.day >= MAINNET_LAUNCH_ISO.slice(0, 10))
     .map((d) => {
       const c = creator?.daily.find((x) => x.day === d.day);
       return { ...d, creatorUsd: c?.usd ?? null, creatorEth: c?.eth ?? 0 };
@@ -1288,22 +1299,22 @@ function RevenuePanel({
         <Kpi label={`${word}, 7 days`} value={fmtUsd(revenue.total.d7)} sub={kept} />
         <Kpi label={`${word}, 30 days`} value={fmtUsd(revenue.total.d30)} sub={kept} />
         <Kpi
-          label={`${word}, all time`}
+          label={isMain ? `${word} since launch` : `${word}, all time`}
           value={fmtUsd(revenue.total.all)}
-          sub={!isMain ? kept : revenue.creatorPriced ? "creator fees at today's ETH price" : "vault fees only"}
+          sub={isMain ? "cash-out fees since 21 Oct, 13:00 UTC" : kept}
         />
       </section>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Deposit volume, 30 days" value={fmtUsd(rev.depositVolume.d30)} sub={`${fmtUsd(rev.depositVolume.all)} all time`} />
-        <Kpi label="Cash-out volume, 30 days" value={fmtUsd(rev.cashoutVolume.d30)} sub={`${fmtUsd(rev.cashoutVolume.all)} all time`} />
+        <Kpi label="Deposit volume, 30 days" value={fmtUsd(rev.depositVolume.d30)} sub={`${fmtUsd(rev.depositVolume.all)} ${isMain ? "since launch" : "all time"}`} />
+        <Kpi label="Cash-out volume, 30 days" value={fmtUsd(rev.cashoutVolume.d30)} sub={`${fmtUsd(rev.cashoutVolume.all)} ${isMain ? "since launch" : "all time"}`} />
         <Kpi label="Fees waiting to collect" value={fmtUsd(rev.owedUsd)} sub="in the vaults, for collectFees" />
         <Kpi label="Active wallets, 30 days" value={n(rev.users.d30)} sub={`${n(rev.users.d7)} in 7 days, ${n(rev.users.d1)} in 24h`} />
       </section>
 
       <Panel title={isMain ? "Revenue by source" : "Fees by source"}>
         <DataTable
-          headers={["Source", "24 hours", "7 days", "30 days", "All time", "How it is counted"]}
+          headers={["Source", "24 hours", "7 days", "30 days", isMain ? "Since launch" : "All time", "How it is counted"]}
           rows={[
             [
               "Cash-out fees",
@@ -1315,14 +1326,6 @@ function RevenuePanel({
             ],
             ...(isMain
               ? [
-                  [
-                    "$GLOAM creator fees",
-                    w(creator?.earnedUsd, "d1"),
-                    w(creator?.earnedUsd, "d7"),
-                    w(creator?.earnedUsd, "d30"),
-                    w(creator?.earnedUsd, "all"),
-                    creator ? `1% of the ETH side of every trade on Orynth, ${fmtEth(creator.earnedEth.all)} all time` : "Not read",
-                  ],
                   [
                     "Bridge fee",
                     "",
@@ -1351,7 +1354,7 @@ function RevenuePanel({
         />
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
           {isMain
-            ? "Real money only. Priced at today's prices: stablecoins at $1, "
+            ? "Real money only, counted from the mainnet launch (21 Oct 2026, 13:00 UTC). $GLOAM creator fees are trading fees on the token's launchpad, not Gloam revenue, so they are shown on their own below. Priced at today's prices: stablecoins at $1, "
             : "Play money from testing: these fees are not revenue. $GLOAM creator fees exist on mainnet only. Priced at today's prices: stablecoins at $1, "}
           ETH {oc.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "not priced right now"}
           {isMain ? ", $GLOAM from DEX Screener" : ""}. Windows are the last 24 hours, 7 days and 30 days.
@@ -1361,14 +1364,18 @@ function RevenuePanel({
       {isMain ? (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {feesByAsset}
-          <Panel title="$GLOAM creator fees">
+          <Panel title="$GLOAM creator fees, not protocol revenue">
             {creator ? (
               <>
                 <DataTable
                   headers={["", "ETH", "USD now"]}
                   rows={[
-                    ["Earned, all time", fmtEth(creator.earnedEth.all), w(creator.earnedUsd, "all")],
-                    ["Earned, 30 days", fmtEth(creator.earnedEth.d30), w(creator.earnedUsd, "d30")],
+                    [
+                      "Earned since mainnet launch",
+                      creator.sinceLaunchEth == null ? "Not read yet" : fmtEth(creator.sinceLaunchEth),
+                      creator.sinceLaunchUsd == null ? "" : fmtUsd(creator.sinceLaunchUsd),
+                    ],
+                    ["Earned since the token launched", fmtEth(creator.earnedEth.all), w(creator.earnedUsd, "all")],
                     ["Claimed", fmtEth(creator.claimedEth), oc.prices.ethUsd ? fmtUsd(creator.claimedEth * oc.prices.ethUsd) : "Unknown"],
                     ["Waiting to claim", fmtEth(creator.unclaimedEth), oc.prices.ethUsd ? fmtUsd(creator.unclaimedEth * oc.prices.ethUsd) : "Unknown"],
                     ["Trades that paid a share", n(creator.trades), ""],
@@ -1376,7 +1383,8 @@ function RevenuePanel({
                   minWidth={360}
                 />
                 <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                  Read from the Orynth fee vault{" "}
+                  The token&apos;s 1% creator share of trades on Orynth, which goes to the creator wallet. It is real
+                  money, but it comes from trading $GLOAM, not from people using Gloam. Read from the Orynth fee vault{" "}
                   <a
                     href={getNetwork("robinhood-mainnet").explorerAddress(creator.vault)}
                     target="_blank"
@@ -1399,24 +1407,23 @@ function RevenuePanel({
         feesByAsset
       )}
 
-      <Panel title="Daily, last 30 days">
+      <Panel title={isMain ? "Daily, since launch" : "Daily, last 30 days"}>
         <DataTable
           headers={
             isMain
-              ? ["Day", "Revenue", "Cash-out fees", "Creator fees", "Deposits", "Cash-outs", "Transactions", "Active wallets"]
+              ? ["Day", "Revenue", "Deposits", "Cash-outs", "Transactions", "Active wallets", "Creator fees, not revenue"]
               : ["Day", "Cash-out fees", "Deposits", "Cash-outs", "Transactions", "Active wallets"]
           }
           rows={daily.map((d) =>
             isMain
               ? [
                   fmtDay(d.day),
-                  fmtUsd(d.feesUsd + (d.creatorUsd ?? 0)),
                   fmtUsd(d.feesUsd),
-                  d.creatorUsd == null ? fmtEth(d.creatorEth) : fmtUsd(d.creatorUsd),
                   fmtUsd(d.depositUsd),
                   fmtUsd(d.cashoutUsd),
                   n(d.txs),
                   n(d.wallets),
+                  d.creatorUsd == null ? fmtEth(d.creatorEth) : fmtUsd(d.creatorUsd),
                 ]
               : [fmtDay(d.day), fmtUsd(d.feesUsd), fmtUsd(d.depositUsd), fmtUsd(d.cashoutUsd), n(d.txs), n(d.wallets)]
           )}
@@ -1424,9 +1431,10 @@ function RevenuePanel({
           minWidth={isMain ? 820 : 620}
         />
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
-          UTC days, newest first, {isMain ? "mainnet" : "testnets"} only. Deposits and cash-outs are dollar volume;
-          transactions count deposits, private transfers, cash-outs and trades.
-          {isMain ? " Creator fees are placed in days by block, to within a couple of minutes." : ""}
+          UTC days, newest first, {isMain ? "mainnet only, from the launch at 13:00 UTC on 21 Oct" : "testnets only"}. Revenue is
+          cash-out fees. Deposits and cash-outs are dollar volume; transactions count deposits, private transfers,
+          cash-outs and trades.
+          {isMain ? " Creator fees on launch day include trades from before 13:00, and are placed in days by block." : ""}
         </p>
       </Panel>
     </>
