@@ -13,6 +13,15 @@ import { useEffect, useRef, useState } from "react";
 import { MAINNET_ENABLED, allNetworks, isNetworkWritable } from "@/lib/networks";
 import { useNetwork } from "./NetworkProvider";
 import { TokenLogo } from "./TokenLogo";
+import type { GloamNetwork } from "@/lib/networks";
+
+/** One short line per network: what it holds. Same length and shape for every row. */
+function assetLine(n: GloamNetwork): string {
+  if (n.key === "robinhood-mainnet") return "USDG and $GLOAM";
+  if (n.key === "tempo-mainnet") return "USDC.e, pathUSD, USDT0 and OUSD";
+  if (n.key === "robinhood") return "Test ETH, stablecoins and stocks";
+  return "Test stablecoins";
+}
 
 export function NetworkSelector() {
   const { network, setNetworkKey } = useNetwork();
@@ -83,74 +92,56 @@ export function NetworkSelector() {
           aria-label="Select network"
           className="absolute left-0 right-0 top-full z-50 mt-2 rounded-[18px] border border-line bg-panel p-1.5 shadow-pop [.gl-sidebar_&]:left-full [.gl-sidebar_&]:right-auto [.gl-sidebar_&]:top-0 [.gl-sidebar_&]:ml-5 [.gl-sidebar_&]:mt-0 [.gl-sidebar_&]:w-[300px]"
         >
-          <p className="t-label px-2.5 pb-1.5 pt-2">Network</p>
-          {nets.map((n) => {
-            const active = n.key === network.key;
-            const writable = isNetworkWritable(n);
-            return (
-              <button
-                key={n.key}
-                type="button"
-                role="menuitemradio"
-                aria-checked={active}
-                disabled={!writable}
-                onClick={() => {
-                  if (!writable) return;
-                  setNetworkKey(n.key);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-start gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors ${
-                  writable ? "hover:bg-surface" : "cursor-not-allowed opacity-60"
-                } ${active ? "bg-surface" : ""}`}
-              >
-                <TokenLogo id={n.family} symbol={n.label} size={30} />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="text-[14px] font-medium text-foreground">
-                      {n.label}
-                    </span>
-                    {n.status === "planned" && (
-                      <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-mute">
-                        Soon
-                      </span>
-                    )}
-                    {/* Once a mainnet is listed, every row says which money it is. */}
-                    {MAINNET_ENABLED &&
-                      (n.testnet ? (
-                        <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-mute">
-                          Testnet
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-sealed-soft px-2 py-0.5 text-[11px] font-medium text-sealed">
-                          Mainnet
-                        </span>
-                      ))}
-                  </span>
-                  <span className="mt-0.5 block text-[12px] leading-snug text-mute">
-                    {n.note}
-                  </span>
-                </span>
-                {active && (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    aria-hidden
-                    className="mt-1.5 shrink-0 text-foreground"
+          {(MAINNET_ENABLED
+            ? [
+                { title: "Mainnet", hint: "Real money", list: nets.filter((n) => !n.testnet) },
+                { title: "Testnet", hint: "Play money", list: nets.filter((n) => n.testnet) },
+              ]
+            : [{ title: "Network", hint: "", list: nets }]
+          ).map((group, gi) => (
+            <div key={group.title} className={gi > 0 ? "mt-1 border-t border-line pt-1" : ""}>
+              <p className="flex items-baseline justify-between px-2.5 pb-1 pt-2">
+                <span className="t-label">{group.title}</span>
+                {group.hint && <span className="text-[11.5px] text-mute">{group.hint}</span>}
+              </p>
+              {group.list.map((n) => {
+                const active = n.key === network.key;
+                const writable = isNetworkWritable(n);
+                return (
+                  <button
+                    key={n.key}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={active}
+                    aria-label={`${n.label} ${n.testnet ? "testnet" : "mainnet"}`}
+                    disabled={!writable}
+                    onClick={() => {
+                      if (!writable) return;
+                      setNetworkKey(n.key);
+                      setOpen(false);
+                    }}
+                    className={`flex h-[52px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition-colors ${
+                      writable ? "hover:bg-surface" : "cursor-not-allowed opacity-60"
+                    } ${active ? "bg-surface" : ""}`}
                   >
-                    <path
-                      d="m5.5 12.5 4 4 9-9"
-                      stroke="currentColor"
-                      strokeWidth="1.9"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </button>
-            );
-          })}
+                    <TokenLogo id={n.family} symbol={n.label} size={30} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px] font-medium leading-tight text-foreground">
+                        {n.label}
+                        {n.status === "planned" && <span className="ml-2 text-[11px] font-medium text-mute">Soon</span>}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">{assetLine(n)}</span>
+                    </span>
+                    {active && (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-foreground">
+                        <path d="m5.5 12.5 4 4 9-9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -46,6 +46,8 @@ const DISC_LOGO_IDS = new Set(["usdg", "usdce", "eth", "avgo", "mstr", "sbux"]);
 
 const SPECIAL_LOGOS: Record<string, string> = {
   tempo: "/brand/logos/tempo.svg",
+  // Robinhood Chain's own app icon: a full tile, so no white plate shows
+  robinhood: "/brand/chains/4663.png",
   ousd: "/brand/logos/ousd.svg",
   pathusd: "/brand/logos/pathusd.svg",
   alphausd: "/brand/logos/alphausd.svg",
