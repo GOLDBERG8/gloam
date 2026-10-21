@@ -16,7 +16,7 @@ import {
   formatUsd,
   formatUsdCompact,
 } from "@/lib/markets";
-import { shieldTokensFor } from "@/lib/tokens";
+import { shieldTokensFor, supportsNativeShield } from "@/lib/tokens";
 import {
   assetLabel,
   formatAssetAmount,
@@ -677,7 +677,7 @@ export function PortfolioView() {
                   }
                 />
               </div>
-            ) : positions.length === 0 ? (
+            ) : positions.length === 0 && nativeWei === BigInt(0) ? (
               <div className="border-t border-line">
                 {faucet ? (
                   <EmptyState
@@ -710,6 +710,35 @@ export function PortfolioView() {
                   <span className="w-[200px] max-sm:hidden" aria-hidden />
                 </div>
                 <ul className="divide-y divide-line border-t border-line">
+                  {nativeWei > BigInt(0) && (
+                    // The gas coin. Robinhood Chain mainnet's pool does not take it, so it
+                    // shows here without an add button.
+                    <li className="flex min-h-[64px] items-center gap-3 max-sm:px-5 py-3 transition-colors hover:bg-surface/60 sm:px-6">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <TokenLogo id="eth" symbol={nativeSymbol} size={34} />
+                        <div className="min-w-0">
+                          <p className="truncate text-[14px] font-medium text-foreground">{nativeSymbol}</p>
+                          <p className="truncate text-[12.5px] text-mute">Ether, pays network fees</p>
+                        </div>
+                      </div>
+                      <div className="max-sm:hidden w-[88px] sm:block" aria-hidden />
+                      <div className="w-28 text-right">
+                        <p className="tnum text-[14px] text-foreground">{formatEth(nativeWei)}</p>
+                        {settings.showUsd && nativeUsdRate != null && (
+                          <p className="tnum text-[12.5px] text-mute">
+                            {formatUsd((Number(nativeWei) / 1e18) * nativeUsdRate)}
+                          </p>
+                        )}
+                      </div>
+                      <div className="w-[200px] justify-end gap-1 max-sm:hidden sm:flex">
+                        {shieldLive && supportsNativeShield(network.chainId) && (
+                          <Link href="/app/shield" className="btn btn-ghost btn-sm">
+                            Add privately
+                          </Link>
+                        )}
+                      </div>
+                    </li>
+                  )}
                   {positions.map((p) => (
                     <li
                       key={p.id}

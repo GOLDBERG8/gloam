@@ -37,7 +37,12 @@ const PNG_LOGO_IDS = new Set([
   "usdg", "usdce", "usdt0",
   // networks
   "robinhood",
+  // gas coin
+  "eth",
 ]);
+
+/** Round marks (a full disc): shown as a circle with no plate, so no white corners. */
+const DISC_LOGO_IDS = new Set(["usdg", "usdce", "eth", "avgo", "mstr", "sbux"]);
 
 const SPECIAL_LOGOS: Record<string, string> = {
   tempo: "/brand/logos/tempo.svg",
@@ -79,6 +84,21 @@ export function TokenLogo({
   const fontRatio =
     label.length <= 2 ? 0.38 : label.length === 3 ? 0.3 : 0.25;
   const src = logoSrc ?? resolveLogo(id);
+
+  if (src && !broken && DISC_LOGO_IDS.has(id.toLowerCase())) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={`${symbol} logo`}
+        width={size}
+        height={size}
+        onError={() => setBroken(true)}
+        className={`shrink-0 rounded-full object-cover ${className}`}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
 
   if (src && !broken) {
     // Brand marks keep a white plate (some ship transparent with dark ink), the
