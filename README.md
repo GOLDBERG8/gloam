@@ -170,8 +170,8 @@ gloam/
 
 | Role | Address |
 | --- | --- |
-| Payments vault `ShieldPoolPayments` (payments only, no admin withdraw, 3-day timelock on rule changes) | [`0xMAINNET_RH_POOL`](https://explorer.mainnet.chain.robinhood.com/address/0xMAINNET_RH_POOL) |
-| Deploy block | `MAINNET_RH_BLOCK` |
+| Payments vault `ShieldPoolPayments` (payments only, no admin withdraw, 3-day timelock on rule changes) | [`0x39e28cde55cab798874746ac52cb4b5cc99a0194`](https://explorer.mainnet.chain.robinhood.com/address/0x39e28cde55cab798874746ac52cb4b5cc99a0194) |
+| Deploy block | `94194599` |
 | `PoseidonT3` | [`0x1a32…9Cb4`](https://explorer.mainnet.chain.robinhood.com/address/0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4) |
 | Owner and treasury (one wallet at launch; a multisig is planned) | [`0x76b7…D4D8`](https://explorer.mainnet.chain.robinhood.com/address/0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8) |
 | Relayer (run by the Gloam team; submits proven transactions and pays gas, cannot move or redirect money) | [`0xb1E9…512e`](https://explorer.mainnet.chain.robinhood.com/address/0xb1E994586E62994648a0b866BF33F2EDd942512e) |
@@ -185,8 +185,8 @@ gloam/
 
 | Role | Address |
 | --- | --- |
-| Payments vault `ShieldPoolPayments` (payments only, no admin withdraw, 3-day timelock on rule changes) | [`0xMAINNET_TEMPO_POOL`](https://explore.tempo.xyz/address/0xMAINNET_TEMPO_POOL) |
-| Deploy block | `MAINNET_TEMPO_BLOCK` |
+| Payments vault `ShieldPoolPayments` (payments only, no admin withdraw, 3-day timelock on rule changes) | [`0x39e28cde55cab798874746ac52cb4b5cc99a0194`](https://explore.tempo.xyz/address/0x39e28cde55cab798874746ac52cb4b5cc99a0194) |
+| Deploy block | `45172561` |
 | `PoseidonT3` | [`0x1a32…9Cb4`](https://explore.tempo.xyz/address/0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4) |
 | Owner and treasury (one wallet at launch; a multisig is planned) | [`0x76b7…D4D8`](https://explore.tempo.xyz/address/0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8) |
 | Relayer (run by the Gloam team; submits proven transactions and pays gas, cannot move or redirect money) | [`0xb1E9…512e`](https://explore.tempo.xyz/address/0xb1E994586E62994648a0b866BF33F2EDd942512e) |

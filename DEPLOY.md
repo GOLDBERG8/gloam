@@ -45,8 +45,8 @@ Mainnet pools are not env vars. After each mainnet deploy (runbook: [`contracts/
 
 | Network | Pool (`ShieldPoolPayments`) | Deploy block |
 | --- | --- | --- |
-| Robinhood Chain mainnet `4663` | `0xMAINNET_RH_POOL` | `MAINNET_RH_BLOCK` |
-| Tempo mainnet `4217` | `0xMAINNET_TEMPO_POOL` | `MAINNET_TEMPO_BLOCK` |
+| Robinhood Chain mainnet `4663` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` | `94194599` |
+| Tempo mainnet `4217` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` | `45172561` |
 
 | Variable (server only) | Value |
 | --- | --- |

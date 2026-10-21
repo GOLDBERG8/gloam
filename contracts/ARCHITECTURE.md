@@ -39,8 +39,8 @@ Both mainnets run `ShieldPoolPayments` (`src/ShieldPoolPayments.sol`): the share
 
 | | |
 | --- | --- |
-| Pool (`ShieldPoolPayments`) | `0xMAINNET_RH_POOL` |
-| Deploy block | `MAINNET_RH_BLOCK` |
+| Pool (`ShieldPoolPayments`) | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` |
+| Deploy block | `94194599` |
 | PoseidonT3 | `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` |
 | DualProofVerifier, ShieldIVerifier | Final keys (`src/verifiers/final`); read `verifier()` and `shieldVerifier()` on the pool |
 | sealedSwapVerifier | `0x0`, always (no swap code) |
@@ -53,8 +53,8 @@ Both mainnets run `ShieldPoolPayments` (`src/ShieldPoolPayments.sol`): the share
 
 | | |
 | --- | --- |
-| Pool (`ShieldPoolPayments`) | `0xMAINNET_TEMPO_POOL` |
-| Deploy block | `MAINNET_TEMPO_BLOCK` |
+| Pool (`ShieldPoolPayments`) | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` |
+| Deploy block | `45172561` |
 | PoseidonT3 | `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` |
 | DualProofVerifier, ShieldIVerifier | Final keys (`src/verifiers/final`); read `verifier()` and `shieldVerifier()` on the pool |
 | sealedSwapVerifier | `0x0`, always (no swap code) |

@@ -14,8 +14,8 @@ Live on Robinhood Chain mainnet (`4663`) and Tempo mainnet (`4217`) in beta, wit
 
 | Network | Vault `ShieldPoolPayments` | Deploy block | PoseidonT3 |
 | --- | --- | --- | --- |
-| Robinhood Chain mainnet `4663` | `0xMAINNET_RH_POOL` | `MAINNET_RH_BLOCK` | `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` |
-| Tempo mainnet `4217` | `0xMAINNET_TEMPO_POOL` | `MAINNET_TEMPO_BLOCK` | `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` |
+| Robinhood Chain mainnet `4663` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` | `94194599` | `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` |
+| Tempo mainnet `4217` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` | `45172561` | `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` |
 
 - Owner and treasury: `0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8` (one wallet at launch; a multisig is planned). Relayer: `0xb1E994586E62994648a0b866BF33F2EDd942512e` (run by the Gloam team; it only submits already-proven transactions and pays gas, and cannot move or redirect money).
 - Assets and beta deposit limits (per deposit / total): Robinhood Chain USDG `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` (500 / 25,000) and $GLOAM `0xDcD885F5c60b3aD49F6D58718696417314e8724d` (25,000 / 250,000); Tempo USDC.e `0x20c000000000000000000000b9537d11c60e8b50`, pathUSD `0x20c0000000000000000000000000000000000000`, USDT0 `0x20c00000000000000000000014f22ca97301eb73` and OUSD `0x20c0000000000000000000006a37da5c996874be` (500 / 25,000 each). ETH is gas only on Robinhood Chain, not a pool asset.

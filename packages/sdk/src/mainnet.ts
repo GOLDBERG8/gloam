@@ -23,10 +23,10 @@ export interface MainnetPoolInput {
 }
 
 export const MAINNET_POOLS: Record<MainnetChainId, MainnetPoolInput> = {
-  // Robinhood Chain mainnet (4663): USDG + GLOAM. Filled on deploy day.
-  4663: { pool: null, deployBlock: null },
-  // Tempo mainnet (4217): USDC.e, pathUSD, USDT0, OUSD. Filled on deploy day.
-  4217: { pool: null, deployBlock: null },
+  // Robinhood Chain mainnet (4663): USDG + GLOAM. Deployed 21 Oct 2026.
+  4663: { pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194", deployBlock: 94_194_599n },
+  // Tempo mainnet (4217): USDC.e, pathUSD, USDT0, OUSD. Deployed 21 Oct 2026.
+  4217: { pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194", deployBlock: 45_172_561n },
 };
 
 /**

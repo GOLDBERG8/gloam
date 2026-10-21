@@ -3,7 +3,7 @@
 The runbook for bringing the Gloam shielded pool to Tempo. You run this; no agent
 and no CI deploys it, and the proving keys are the dev ceremony, so this is a
 **testnet deploy only**. Gloam's Tempo mainnet pool (`4217`) is
-`0xMAINNET_TEMPO_POOL` (deploy block `MAINNET_TEMPO_BLOCK`), deployed with
+`0x39e28cde55cab798874746ac52cb4b5cc99a0194` (deploy block `45172561`), deployed with
 `contracts/script/DeployTempoMainnet.s.sol` on the ceremony's final keys; see
 [Tempo mainnet](#tempo-mainnet) below and `contracts/PRODUCTION.md`. Sealed swaps stay disabled (audit H1). Design and
 rationale: [`TEMPO_EXPANSION.md`](./TEMPO_EXPANSION.md).

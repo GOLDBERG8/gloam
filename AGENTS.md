@@ -21,7 +21,7 @@ Tagline: private by default, provable on demand. Hero line: private money on pub
 - X: `@gloamtrade`
 - Vercel: one project, Root Directory = `app`
 - Contracts: `contracts/` (Foundry). Mainnet: `ShieldPoolPayments` (payments only) on Robinhood Chain mainnet (`4663`) and Tempo mainnet (`4217`). Testnet: `ShieldPoolPoseidon` on Robinhood Chain testnet (`46630`) and Tempo Moderato testnet (`42431`)
-- Mainnet vaults (no admin withdraw, 3-day timelock on rule changes): Robinhood Chain `0xMAINNET_RH_POOL` (deploy block `MAINNET_RH_BLOCK`), Tempo `0xMAINNET_TEMPO_POOL` (deploy block `MAINNET_TEMPO_BLOCK`). PoseidonT3 on both: `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4`. Owner and treasury `0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8` (one wallet at launch, multisig planned); relayer `0xb1E994586E62994648a0b866BF33F2EDd942512e` (Gloam team runs it; it cannot move or redirect money)
+- Mainnet vaults (no admin withdraw, 3-day timelock on rule changes): Robinhood Chain `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (deploy block `94194599`), Tempo `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (deploy block `45172561`). PoseidonT3 on both: `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4`. Owner and treasury `0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8` (one wallet at launch, multisig planned); relayer `0xb1E994586E62994648a0b866BF33F2EDd942512e` (Gloam team runs it; it cannot move or redirect money)
 - Testnet vaults: Robinhood Chain `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740`. Tempo `0x841dc046ea3cc842ba3a855731472c6eb0f2d5eb`. Drainable, never use or seed: `0x4F38…12D8F` (audit H-P1). Never product-default `0xA488…`
 
 ## Live

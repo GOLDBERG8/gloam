@@ -76,8 +76,8 @@ Gloam runs on two chains, each with a mainnet (real money) and a testnet (free p
 
 | Network | Key | Chain id | Pool | Assets (beta limit per deposit / total) | Keys |
 | --- | --- | --- | --- | --- | --- |
-| Robinhood Chain | `robinhood-mainnet` | `4663` | `0xMAINNET_RH_POOL` (block `MAINNET_RH_BLOCK`) | USDG (500 / 25,000), $GLOAM (25,000 / 250,000) | Final |
-| Tempo | `tempo-mainnet` | `4217` | `0xMAINNET_TEMPO_POOL` (block `MAINNET_TEMPO_BLOCK`) | USDC.e, pathUSD, USDT0, OUSD (500 / 25,000 each) | Final |
+| Robinhood Chain | `robinhood-mainnet` | `4663` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (block `94194599`) | USDG (500 / 25,000), $GLOAM (25,000 / 250,000) | Final |
+| Tempo | `tempo-mainnet` | `4217` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (block `45172561`) | USDC.e, pathUSD, USDT0, OUSD (500 / 25,000 each) | Final |
 | Robinhood Chain testnet | `robinhood` | `46630` | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` | Test ETH, test USDG, stock tokens | Dev |
 | Tempo testnet (Moderato) | `tempo` | `42431` | `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb` | PathUSD and other test stablecoins | Dev |
 

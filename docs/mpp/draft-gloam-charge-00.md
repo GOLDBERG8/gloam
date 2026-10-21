@@ -377,8 +377,8 @@ it says. At the time of writing the official pools are:
 
 | Chain | chainId | Pool |
 |-------|---------|------|
-| Tempo (mainnet) | 4217 | `0xMAINNET_TEMPO_POOL` |
-| Robinhood Chain (mainnet) | 4663 | `0xMAINNET_RH_POOL` |
+| Tempo (mainnet) | 4217 | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` |
+| Robinhood Chain (mainnet) | 4663 | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` |
 | Tempo Moderato (testnet) | 42431 | `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb` |
 | Robinhood Chain (testnet) | 46630 | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` |
 

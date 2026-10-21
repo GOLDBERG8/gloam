@@ -10,9 +10,9 @@
  */
 export const MAINNET_POOLS: Record<MainnetChainId, MainnetPoolInput> = {
   // Robinhood Chain mainnet (4663): USDG + GLOAM
-  4663: { pool: null, deployBlock: null },
+  4663: { pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194", deployBlock: 94_194_599 },
   // Tempo mainnet (4217): USDC.e, pathUSD, USDT0, OUSD
-  4217: { pool: null, deployBlock: null },
+  4217: { pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194", deployBlock: 45_172_561 },
 };
 
 export type MainnetChainId = 4663 | 4217;
