@@ -20,11 +20,21 @@ import type { Address, Hex } from "viem";
 import {
   buildGloamPaymentRequirements,
   isReceiveTag,
-  GLOAM_NETWORKS,
+  getGloamNetwork,
+  gloamNetworks,
+  isMainnetChainId,
+  networkForChainId,
+  networkName,
+  GLOAM_TOKEN,
   NATIVE_ASSET,
+  RH_MAINNET_USDG,
   RH_USDG,
   TEMPO_OUSD,
   TEMPO_PATHUSD,
+  TEMPO_USDCE,
+  TEMPO_USDT0,
+  type GloamNetwork,
+  type GloamNetworkKey,
   type GloamPaymentRequirements,
 } from "@gloamtrade/sdk";
 import { canonicalJson, hmacBase64url, type PaymentChallenge } from "./wire.js";
@@ -39,7 +49,7 @@ export type GloamMode = "push" | "pull";
 export const GLOAM_MODES: readonly GloamMode[] = ["push", "pull"];
 
 export interface GloamChargeMethodDetails {
-  /** Chain the shielded pool lives on (Tempo Moderato 42431, Robinhood Chain testnet 46630). */
+  /** Chain the shielded pool lives on: Tempo 4217 or Robinhood Chain 4663 (mainnet), Tempo Moderato 42431 or Robinhood Chain testnet 46630. */
   chainId: number;
   /** The Gloam pool the transfer settles through. Clients and servers accept only the official pool for chainId. */
   pool: Address;
@@ -126,9 +136,11 @@ export class GloamChargeError extends Error {
 /** chainId -> official Gloam pool. Pass your own map only for a private deployment you trust. */
 export type GloamPools = Record<number, Address>;
 
-export const OFFICIAL_POOLS: GloamPools = Object.fromEntries(
-  Object.values(GLOAM_NETWORKS).map((n) => [n.chainId, n.pool])
-) as GloamPools;
+/**
+ * Gloam's pools on every network it runs on: the mainnets whose pool is in the
+ * SDK this package was built with, and the testnets.
+ */
+export const OFFICIAL_POOLS: GloamPools = Object.fromEntries(gloamNetworks().map((n) => [n.chainId, n.pool])) as GloamPools;
 
 export function officialPool(chainId: number, pools: GloamPools = OFFICIAL_POOLS): Address | undefined {
   return pools[chainId];
@@ -139,11 +151,11 @@ const HEX32 = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const UINT = /^(0|[1-9][0-9]*)$/;
 
-/** Decimals of the assets Gloam knows (native ETH 18; PathUSD, OUSD, USDG 6), or undefined. */
+/** Decimals of the assets Gloam knows (native ETH and GLOAM 18; the stablecoins 6), or undefined. */
 export function assetDecimals(currency: Address): number | undefined {
   const c = lc(currency);
-  if (c === lc(NATIVE_ASSET)) return 18;
-  if (c === lc(TEMPO_PATHUSD) || c === lc(TEMPO_OUSD) || c === lc(RH_USDG)) return 6;
+  if (c === lc(NATIVE_ASSET) || c === lc(GLOAM_TOKEN)) return 18;
+  if ([TEMPO_PATHUSD, TEMPO_OUSD, TEMPO_USDCE, TEMPO_USDT0, RH_USDG, RH_MAINNET_USDG].some((a) => c === lc(a))) return 6;
   return undefined;
 }
 
@@ -151,12 +163,17 @@ export function assetDecimals(currency: Address): number | undefined {
 export function assetSymbol(chainId: number, currency: Address): string {
   const c = lc(currency);
   if (c === lc(NATIVE_ASSET)) return "ETH";
-  if (c === lc(TEMPO_PATHUSD)) return "PathUSD";
+  if (c === lc(TEMPO_PATHUSD)) return isMainnetChainId(chainId) ? "pathUSD" : "PathUSD";
   if (c === lc(TEMPO_OUSD)) return "OUSD";
-  if (c === lc(RH_USDG)) return "USDG";
-  void chainId;
+  if (c === lc(TEMPO_USDCE)) return "USDC.e";
+  if (c === lc(TEMPO_USDT0)) return "USDT0";
+  if (c === lc(RH_USDG) || c === lc(RH_MAINNET_USDG)) return "USDG";
+  if (c === lc(GLOAM_TOKEN)) return "GLOAM";
   return "TOKEN";
 }
+
+/** The network names a charge takes: "tempo-mainnet", "robinhood-mainnet", "tempo", "robinhood". */
+export type GloamChargeNetwork = GloamNetworkKey;
 
 // ── building and parsing requests ─────────────────────────────────────────────
 
@@ -165,9 +182,16 @@ export interface BuildChargeRequestParams {
   amountWei: bigint;
   /** Payee receive tag (gloamr1.…). */
   recipient: string;
-  /** "tempo", "robinhood", or a chain id. Default "tempo". */
-  network?: "tempo" | "robinhood" | number;
-  /** Token address. Default PathUSD on Tempo, native ETH on Robinhood Chain. */
+  /**
+   * "tempo-mainnet" or "robinhood-mainnet" (real money), "tempo" or "robinhood"
+   * (the testnets), or a chain id. Default "tempo" (Tempo testnet), as in 0.0.x.
+   */
+  network?: GloamChargeNetwork | number;
+  /**
+   * Token address. Default: the network's first stablecoin (USDC.e on Tempo
+   * mainnet, USDG on Robinhood Chain mainnet, PathUSD on Tempo testnet) and
+   * native ETH on Robinhood Chain testnet.
+   */
   currency?: Address;
   decimals?: number;
   modes?: GloamMode[];
@@ -176,23 +200,29 @@ export interface BuildChargeRequestParams {
   pools?: GloamPools;
 }
 
-/** Resolve "tempo" | "robinhood" | chainId to a chain id, plus that network's default asset. */
+const defaultAsset = (net: GloamNetwork) => net.assets[0]!;
+
+/** Resolve a network name or chain id to a chain id, plus that network's default asset. */
 export function resolveNetwork(network: BuildChargeRequestParams["network"] = "tempo") {
   if (typeof network === "number") {
-    const known = Object.values(GLOAM_NETWORKS).find((n) => n.chainId === network);
+    const known = networkForChainId(network);
+    const asset = known ? defaultAsset(known) : null;
     return {
       chainId: network,
-      currency: known?.key === "robinhood" ? NATIVE_ASSET : TEMPO_PATHUSD,
-      decimals: known?.key === "robinhood" ? 18 : 6,
+      currency: asset?.address ?? TEMPO_PATHUSD,
+      decimals: asset?.decimals ?? 6,
     };
   }
-  const net = GLOAM_NETWORKS[network];
-  if (!net) throw new Error(`Unknown Gloam network "${network}".`);
-  return {
-    chainId: net.chainId,
-    currency: net.key === "robinhood" ? NATIVE_ASSET : TEMPO_PATHUSD,
-    decimals: net.key === "robinhood" ? 18 : 6,
-  };
+  const net = getGloamNetwork(network);
+  if (!net) {
+    throw new Error(
+      network === "tempo-mainnet" || network === "robinhood-mainnet"
+        ? `This version of @gloamtrade/sdk has no ${networkName(network === "tempo-mainnet" ? 4217 : 4663)} mainnet pool yet. Update it.`
+        : `Unknown Gloam network "${network}".`
+    );
+  }
+  const asset = defaultAsset(net);
+  return { chainId: net.chainId, currency: asset.address, decimals: asset.decimals };
 }
 
 /** Server side: the request of a gloam charge challenge. */

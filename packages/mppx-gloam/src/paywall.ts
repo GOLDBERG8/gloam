@@ -21,6 +21,7 @@ import {
   GloamChargeError,
   GLOAM_CHARGE_INTENT,
   GLOAM_METHOD,
+  type GloamChargeNetwork,
   type GloamChargeReceipt,
   type GloamChargeRequest,
   type GloamMode,
@@ -47,10 +48,11 @@ export interface GloamPaywallConfig {
   server: GloamChargeServerConfig;
   /** Protection space. Default: the request's host. */
   realm?: string;
-  network?: "tempo" | "robinhood" | number;
-  /** Token address; default PathUSD on Tempo, native ETH on Robinhood Chain. */
+  /** "tempo-mainnet" or "robinhood-mainnet" (real money), "tempo" or "robinhood" (testnet), or a chain id. Default "tempo". */
+  network?: GloamChargeNetwork | number;
+  /** Token address; default the network's first stablecoin (USDC.e on Tempo mainnet, USDG on Robinhood Chain mainnet, PathUSD on Tempo testnet), native ETH on Robinhood Chain testnet. */
   currency?: Address;
-  /** Decimals of `currency`, to read display amounts. Default 6 for PathUSD, 18 for ETH. */
+  /** Decimals of `currency`, to read display amounts. Default: the asset's own (6 for the stablecoins, 18 for ETH and GLOAM). */
   decimals?: number;
   /** Seconds a challenge stays valid. Default 600: a push payment proves and confirms before it is presented. */
   expiresIn?: number;

@@ -4,7 +4,7 @@ Private payments for the [Machine Payments Protocol](https://mpp.dev) (MPP).
 
 MPP is HTTP 402 done properly: a server answers `WWW-Authenticate: Payment …`, the client pays and retries with `Authorization: Payment …`, and gets a `Payment-Receipt`. Every method so far (tempo, evm, stripe, solana) settles in public, so the ledger shows which agent paid which service, how much, how often.
 
-This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo or Robinhood Chain:
+This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo or Robinhood Chain, on mainnet (real money, beta) or testnet (free practice):
 
 - the payment note is sealed to the payee's receive tag, so only the payee can open it;
 - the server checks it binds the price, that it is the payment output of a `Transferred` event in the official pool, and that the credential is bound to this exact challenge;
@@ -19,17 +19,17 @@ Spec: [`docs/mpp/draft-gloam-charge-00.md`](../../docs/mpp/draft-gloam-charge-00
 import { Mppx } from "mppx/server";
 import { gloam } from "@gloamtrade/mppx-gloam/server";
 import { gloamChargeChainFromClient } from "@gloamtrade/mppx-gloam/core";
-import { artifactProver, relayIntent, GLOAM_NETWORKS } from "@gloamtrade/sdk";
+import { artifactProver, circuitArtifactUrls, mainnetNetwork, relayIntent } from "@gloamtrade/sdk";
 
-const tempo = GLOAM_NETWORKS.tempo;
+const tempo = mainnetNetwork("tempo")!;                   // Tempo mainnet; GLOAM_NETWORKS.tempo for the testnet
 const mppx = Mppx.create({
   secretKey: process.env.MPP_SECRET_KEY!,
   methods: [
     gloam({
-      network: "tempo",                                   // PathUSD by default
+      network: "tempo-mainnet",                           // USDC.e by default; "tempo" for the testnet (PathUSD)
       receiveKey,                                         // from generateReceiveKey(), stored server side
       chain: gloamChargeChainFromClient(publicClient, { pool: tempo.pool, fromBlock: tempo.deployBlock }),
-      prove: artifactProver({ wasm: "transfer.wasm", zkey: "transfer_final.zkey" }),
+      prove: artifactProver(circuitArtifactUrls("transfer", tempo.chainId)), // final keys on mainnet
       submit: (intent) => relayIntent(intent),            // or your own wallet: writeContract(...)
       beforeSubmit: (freshNote) => saveNote(freshNote),   // the money: persist before the sweep goes out
     }),
@@ -52,17 +52,17 @@ Options: `modes: ["push"]` or `["pull"]` to accept one submission mode (default 
 ```ts
 import { Mppx } from "mppx/client";
 import { gloam } from "@gloamtrade/mppx-gloam/client";
-import { artifactProver, relayIntent, TEMPO_PATHUSD } from "@gloamtrade/sdk";
+import { artifactProver, circuitArtifactUrls, relayIntent, TEMPO_USDCE, TEMPO_MAINNET_CHAIN_ID } from "@gloamtrade/sdk";
 
 const mppx = Mppx.create({
   polyfill: false,
   methods: [
     gloam({
       getNote: ({ amountWei, currency }) => wallet.noteCovering(amountWei, currency), // { secret, amountWei, path }
-      prove: artifactProver({ wasm: "transfer.wasm", zkey: "transfer_final.zkey" }),
+      prove: artifactProver(circuitArtifactUrls("transfer", TEMPO_MAINNET_CHAIN_ID)), // the keys of the chain you pay on
       mode: "auto",                                       // pull when offered, else push
       submit: (intent) => relayIntent(intent),            // only needed for push
-      policy: { maxAmountWei: 50_000n, currencies: [TEMPO_PATHUSD] },
+      policy: { maxAmountWei: 50_000n, currencies: [TEMPO_USDCE], chainIds: [TEMPO_MAINNET_CHAIN_ID] },
       beforeSubmit: (built) => wallet.keep(built.changeNote),
     }),
   ],
@@ -72,6 +72,8 @@ const res = await mppx.fetch("https://api.example.com/answer");
 ```
 
 The client refuses, before proving anything, a pool that is not Gloam's for that chain, a recipient that is not a receive tag, and anything outside `policy`.
+
+Proofs must be made with the keys of the chain the payment settles on: the trusted setup's final keys on mainnet (Tempo `4217`, Robinhood Chain `4663`), the dev keys on testnet. `circuitArtifactUrls("transfer", chainId)` from the SDK returns the right files. A client that pays on more than one chain picks the prover per challenge.
 
 ## Without an MPP library
 
@@ -101,9 +103,20 @@ It also exports the Payment scheme codec (challenges, credentials, receipts, the
 | If the server refuses | the value already moved (sealed to the payee) | nothing moved |
 | What the server learns | the payer's sending address, unless relayed | nothing about the payer's wallet |
 
+## Networks
+
+| `network` | Chain | Default currency | Keys |
+| --- | --- | --- | --- |
+| `"tempo-mainnet"` | Tempo mainnet `4217`, real money | USDC.e (also pathUSD, USDT0, OUSD) | Final ceremony keys |
+| `"robinhood-mainnet"` | Robinhood Chain mainnet `4663`, real money | USDG (also GLOAM) | Final ceremony keys |
+| `"tempo"` | Tempo Moderato `42431`, test funds | PathUSD | Dev keys |
+| `"robinhood"` | Robinhood Chain testnet `46630`, test funds | ETH | Dev keys |
+
+The default `network` is still `"tempo"` (the testnet), as in 0.0.x. Official pools come from the SDK this package is built with: a mainnet appears once that SDK has its pool, and a challenge naming any other pool is refused on both sides.
+
 ## Status
 
-Testnet: Tempo Moderato (42431) and Robinhood Chain testnet (46630) pools, development proving keys. Not published to npm yet.
+Mainnet (beta) on Tempo and Robinhood Chain, payments only, with the trusted setup's final keys and beta deposit limits on the pools; reviewed internally before launch, external audit planned. The testnets stay up for free practice.
 
 ## Tests
 
