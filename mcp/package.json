@@ -1,7 +1,7 @@
 {
   "name": "@gloamtrade/mcp",
   "mcpName": "io.github.cryptoduke01/gloam",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": false,
   "type": "module",
   "description": "Gloam MCP server: private stablecoin payments for AI agents on Tempo and Robinhood Chain, live on mainnet (beta) with testnet for practice, under spending limits the agent cannot lift.",
@@ -61,6 +61,7 @@
     "@modelcontextprotocol/sdk": "^1.12.0",
     "circomlibjs": "0.1.7",
     "snarkjs": "^0.7.5",
+    "undici": "^6.21.2",
     "viem": "^2.55.2",
     "zod": "^3.23.8"
   },

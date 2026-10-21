@@ -4,11 +4,14 @@
  * to reach loopback, private, link-local or cloud-metadata addresses, including
  * through a redirect. GLOAM_FETCH_ALLOW_PRIVATE=1 lifts this for local testing.
  *
- * The check resolves the name first and fetch resolves it again, so a host that
- * changes its DNS answer between the two (rebinding) is not fully covered.
+ * For a hostname, the resolved IP is validated and pinned in the connector
+ * (guardedAgent), so the IP a fetch connects to is the one that was checked,
+ * which closes the DNS-rebinding window.
  */
 import { lookup } from "node:dns/promises";
+import { lookup as lookupCb } from "node:dns";
 import { isIP } from "node:net";
+import { Agent, type Dispatcher } from "undici";
 
 const MAX_REDIRECTS = 3;
 
@@ -117,9 +120,46 @@ export async function publicUrlProblem(raw: string): Promise<string | null> {
   return null;
 }
 
-/** fetch that checks every hop (the URL and each redirect) with publicUrlProblem. */
+/**
+ * A dispatcher whose DNS lookup validates every resolved address with
+ * isPrivateAddress and refuses if any is private, then pins the connection to the
+ * address it checked. The IP a fetch connects to is the IP that was validated, so
+ * DNS rebinding cannot swap a public check for a private connect. TLS SNI and
+ * certificate validation still use the hostname. Literals never hit DNS and are
+ * handled up front by publicUrlProblem.
+ */
+function guardedAgent(): Agent {
+  return new Agent({
+    connect: {
+      lookup(hostname, options, cb) {
+        lookupCb(hostname, { all: true, verbatim: true }, (err, addrs) => {
+          if (err) return cb(err, "", 0);
+          if (!addrs.length) return cb(new Error(`Could not resolve ${hostname}.`), "", 0);
+          for (const a of addrs) {
+            if (isPrivateAddress(a.address)) {
+              return cb(
+                new Error(`${hostname} resolves to a private or local address, which this server will not fetch.`),
+                "",
+                0,
+              );
+            }
+          }
+          if ((options as { all?: boolean }).all) return cb(null, addrs);
+          cb(null, addrs[0]!.address, addrs[0]!.family);
+        });
+      },
+    },
+  });
+}
+
+/**
+ * fetch that checks every hop (the URL and each redirect): the URL host/literal via
+ * publicUrlProblem, and the resolved IP validated + pinned by guardedAgent, which
+ * closes the DNS-rebinding window for hostnames.
+ */
 export function guardedFetch(env: Record<string, string | undefined>): typeof fetch {
   const allowPrivate = env.GLOAM_FETCH_ALLOW_PRIVATE === "1";
+  const dispatcher: Dispatcher | undefined = allowPrivate ? undefined : guardedAgent();
   return async (input, init) => {
     let url = input instanceof Request ? input.url : String(input);
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -127,7 +167,9 @@ export function guardedFetch(env: Record<string, string | undefined>): typeof fe
         const problem = await publicUrlProblem(url);
         if (problem) throw new Error(problem);
       }
-      const res = await fetch(url, { ...init, redirect: "manual" });
+      const res = await fetch(url, { ...init, redirect: "manual", dispatcher } as RequestInit & {
+        dispatcher?: Dispatcher;
+      });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
       if (!location) return res;
       url = new URL(location, url).toString();
