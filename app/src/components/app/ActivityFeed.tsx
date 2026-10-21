@@ -1,13 +1,21 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatEther } from "viem";
+import { formatEther, formatUnits } from "viem";
 import { formatEth, shortAddress } from "@/lib/chain";
 import { useAppAccount } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { useActivity } from "@/hooks/useActivity";
 
 const PAGE_SIZE = 5;
+
+/** A token amount for a row: up to six decimals, trailing zeros dropped. */
+function tokenAmount(raw: bigint, decimals: number): string {
+  const [whole, frac = ""] = formatUnits(raw, decimals).split(".");
+  const f = frac.slice(0, 6).replace(/0+$/, "");
+  if (whole === "0" && !f) return raw > BigInt(0) ? "<0.000001" : "0";
+  return `${Number(whole).toLocaleString("en-US")}${f ? `.${f}` : ""}`;
+}
 
 function DirIcon({ kind }: { kind: "out" | "in" | "vault" }) {
   return (
@@ -59,7 +67,9 @@ function Header() {
 export function ActivityFeed() {
   const { address, isConnected } = useAppAccount();
   const { network } = useNetwork();
-  const { data, isLoading, isError } = useActivity(address, network.testnet ? undefined : network.chainId);
+  const activity = useActivity(address, network.testnet ? undefined : network.chainId);
+  const { data, isLoading, isError } = activity;
+  const retry = "refetch" in activity ? () => void activity.refetch() : null;
   const txs = useMemo(() => data?.txs ?? [], [data]);
   const pageCount = Math.max(1, Math.ceil(txs.length / PAGE_SIZE));
 
@@ -105,9 +115,14 @@ export function ActivityFeed() {
         </ul>
       )}
       {isError && (
-        <p className="border-t border-line px-5 py-6 text-[13.5px] text-mute">
-          Could not load your history. Try again in a moment.
-        </p>
+        <div className="border-t border-line px-5 py-6">
+          <p className="text-[13.5px] text-mute">Could not load your history. Try again in a moment.</p>
+          {retry && (
+            <button type="button" onClick={retry} className="btn btn-ghost btn-sm mt-3">
+              Try again
+            </button>
+          )}
+        </div>
       )}
       {!isLoading && !isError && txs.length === 0 && (
         <div className="border-t border-line px-5 py-6">
@@ -125,20 +140,22 @@ export function ActivityFeed() {
               const out = tx.from.toLowerCase() === address.toLowerCase();
               let eth = "0";
               try {
-                eth = formatEth(BigInt(tx.valueWei), 5);
+                eth = tx.token ? tokenAmount(BigInt(tx.valueWei), tx.token.decimals) : formatEth(BigInt(tx.valueWei), 5);
               } catch {
                 eth = formatEther(BigInt(0));
               }
               const zero =
                 tx.valueWei === "0" || tx.valueWei === "0x0" || eth === "0";
-              const sym = network.primaryAsset.symbol;
+              const sym = tx.token?.symbol ?? network.primaryAsset.symbol;
               const counterparty = out ? tx.to : tx.from;
               const isVault =
                 network.pool != null &&
                 counterparty?.toLowerCase() === network.pool.toLowerCase();
               // Human-readable label, not raw call metadata.
               const title = !zero
-                ? `${out ? "Sent" : "Received"} ${eth} ${sym}`
+                ? tx.token && isVault
+                  ? `${out ? "Added" : "Cashed out"} ${eth} ${sym}`
+                  : `${out ? "Sent" : "Received"} ${eth} ${sym}`
                 : isVault
                   ? "Vault transaction"
                   : out
@@ -148,7 +165,7 @@ export function ActivityFeed() {
                 ? "Gloam vault"
                 : shortAddress(counterparty, 4);
               return (
-                <li key={tx.hash}>
+                <li key={tx.id ?? tx.hash}>
                   <a
                     href={network.explorerTx(tx.hash)}
                     target="_blank"

@@ -86,6 +86,10 @@ const PARALLEL: Record<number, number> = { 46630: 4, 42431: 3, 4663: 2, 4217: 3 
  * A range error splits the span in half either way.
  */
 const SPAN: Record<number, bigint> = { 46630: 4_000_000n, 4663: 4_000_000n };
+/** The first getLogs span for a network: SPAN where set, else its own limit. */
+export function logSpan(n: GloamNetwork): bigint {
+  return SPAN[n.chainId] ?? n.logRange;
+}
 const FRESH_MS = 30_000;
 const CACHE_PREFIX = "gloam_transparency_v1";
 
@@ -112,7 +116,7 @@ const MEMO_TOPICS = new Set([
 
 const clients = new Map<number, PublicClient>();
 
-function clientFor(n: GloamNetwork): PublicClient {
+export function clientFor(n: GloamNetwork): PublicClient {
   const hit = clients.get(n.chainId);
   if (hit) return hit;
   const c = createPublicClient({
@@ -129,7 +133,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const gates = new Map<number, { active: number; waiting: (() => void)[] }>();
 
 /** Every RPC call for a chain goes through here, so at most PARALLEL run at once. */
-async function gated<T>(chainId: number, call: () => Promise<T>): Promise<T> {
+export async function gated<T>(chainId: number, call: () => Promise<T>): Promise<T> {
   let g = gates.get(chainId);
   if (!g) {
     g = { active: 0, waiting: [] };
@@ -172,7 +176,7 @@ function isRateLimit(e: unknown): boolean {
  * getLogs for one range: retries transient failures, and splits the range in
  * half when the node says it is too wide or returns too much.
  */
-async function getLogsSafe<T>(
+export async function getLogsSafe<T>(
   fetchRange: (from: bigint, to: bigint) => Promise<T[]>,
   from: bigint,
   to: bigint,
@@ -196,7 +200,7 @@ async function getLogsSafe<T>(
   throw last;
 }
 
-function ranges(from: bigint, to: bigint, step: bigint): [bigint, bigint][] {
+export function ranges(from: bigint, to: bigint, step: bigint): [bigint, bigint][] {
   const out: [bigint, bigint][] = [];
   for (let s = from; s <= to; s += step) {
     out.push([s, s + step - 1n > to ? to : s + step - 1n]);
