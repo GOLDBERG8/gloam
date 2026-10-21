@@ -50,9 +50,11 @@ export const wagmiConfig = createConfig({
     ...(walletConnectFn ? [tempoFeeAware(walletConnectFn)] : []),
   ],
   transports: {
-    [robinhoodTestnet.id]: http("https://rpc.testnet.chain.robinhood.com"),
+    // Robinhood Chain's public RPC answers JSON-RPC batches: the reads after a wallet
+    // connects (balances, allowances, vault state) go out together instead of one by one.
+    [robinhoodTestnet.id]: http("https://rpc.testnet.chain.robinhood.com", { batch: { wait: 16 } }),
     [tempoTestnet.id]: http("https://rpc.moderato.tempo.xyz"),
-    [robinhood.id]: http("https://rpc.mainnet.chain.robinhood.com"),
+    [robinhood.id]: http("https://rpc.mainnet.chain.robinhood.com", { batch: { wait: 16 } }),
     [tempoMainnet.id]: http("https://rpc.tempo.xyz"),
   },
   ssr: true,
