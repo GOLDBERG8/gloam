@@ -1,7 +1,7 @@
 {
   "name": "create-gloam-app",
-  "version": "0.1.0",
-  "description": "Scaffold a private app on Robinhood Chain, powered by @gloamtrade/sdk.",
+  "version": "0.2.0",
+  "description": "Scaffold a private payments app on Robinhood Chain (mainnet or testnet), powered by @gloamtrade/sdk.",
   "type": "module",
   "license": "MIT",
   "bin": {

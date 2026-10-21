@@ -5,3 +5,4 @@ next-env.d.ts
 # circuit artifacts are fetched by `npm run artifacts` (predev/prebuild)
 public/circuits/*.wasm
 public/circuits/*.zkey
+public/circuits/final/

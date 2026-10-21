@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * create-gloam-app — scaffold a private app on Robinhood Chain, powered by
- * @gloamtrade/sdk. Copies the starter template, fills in the project name, and
- * prints the next steps. Zero dependencies (Node built-ins only).
+ * create-gloam-app: scaffold a private payments app on Robinhood Chain, powered
+ * by @gloamtrade/sdk. Copies the starter template, fills in the project name,
+ * and prints the next steps. Zero dependencies (Node built-ins only).
  */
 import {
   cpSync,
@@ -32,7 +32,7 @@ const args = process.argv.slice(2);
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`
-  ${c.bold}create-gloam-app${c.reset} — scaffold a private app on Robinhood Chain
+  ${c.bold}create-gloam-app${c.reset}: scaffold a private payments app on Robinhood Chain
 
   ${c.dim}Usage:${c.reset}
     npm create gloam-app@latest <project-name>
@@ -77,7 +77,10 @@ console.log(`  ${c.bold}Next steps${c.reset}`);
 console.log(`    ${c.cyan}cd ${name}${c.reset}`);
 console.log(`    ${c.cyan}npm install${c.reset}`);
 console.log(`    ${c.cyan}npm run dev${c.reset}   ${c.dim}# fetches the shield circuit, then starts on :3000${c.reset}\n`);
-console.log(`  Open http://localhost:3000, connect a wallet on Robinhood Chain`);
-console.log(`  testnet (chain id 46630), and shield your first private balance.\n`);
-console.log(`  Get test ETH: ${c.indigo}https://faucet.testnet.chain.robinhood.com/${c.reset}`);
-console.log(`  Docs:         ${c.indigo}https://gloam.trade/docs/sdk${c.reset}\n`);
+console.log(`  Open http://localhost:3000, connect a wallet, and shield your first private USDG.`);
+console.log(`  It runs on Robinhood Chain mainnet (4663, real money, beta limits) once your SDK`);
+console.log(`  has the mainnet pool, and on testnet (46630, test funds) until then.\n`);
+console.log(`  Practice on testnet: ${c.cyan}NEXT_PUBLIC_GLOAM_NETWORK=robinhood npm run dev${c.reset}`);
+console.log(`  Test ETH:            ${c.indigo}https://faucet.testnet.chain.robinhood.com/${c.reset}`);
+console.log(`  Test USDG:           ${c.indigo}https://faucet.paxos.com/${c.reset}`);
+console.log(`  Docs:                ${c.indigo}https://gloam.trade/docs/sdk${c.reset}\n`);

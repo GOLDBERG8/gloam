@@ -1,13 +1,13 @@
 # {{PROJECT_NAME}}
 
-A private app on **Robinhood Chain**, scaffolded with
+A private payments app on **Robinhood Chain**, scaffolded with
 [`create-gloam-app`](https://www.npmjs.com/package/create-gloam-app) and powered
 by [`@gloamtrade/sdk`](https://gloam.trade/docs/sdk).
 
-It shields a private balance in the browser: connect a wallet, prove the shield
-client-side, deposit via `shieldBound()`, and read the balance back from the pool
-with `commitmentSeen()`. The note secret is stored in `localStorage` and never
-leaves the client.
+It shields a private USDG balance in the browser: connect a wallet, prove the
+shield client-side, approve the pool, deposit via `shieldBound()`, and read the
+balance back from the pool with `commitmentSeen()`. The note secret is stored in
+`localStorage` and never leaves the client.
 
 ## Run
 
@@ -17,25 +17,34 @@ npm run dev
 ```
 
 `npm run dev` fetches the shield circuit into `public/circuits`, then starts on
-http://localhost:3000. Connect a wallet on Robinhood Chain testnet (chain id
-`46630`) and shield. Get test ETH from the
-[faucet](https://faucet.testnet.chain.robinhood.com/).
+http://localhost:3000.
+
+| Network | How | Chain id | What you need |
+| --- | --- | --- | --- |
+| Robinhood Chain mainnet (real money) | default once the SDK has the mainnet pool, or `NEXT_PUBLIC_GLOAM_NETWORK=robinhood-mainnet` | `4663` | USDG, and a little ETH for gas |
+| Robinhood Chain testnet (free practice) | `NEXT_PUBLIC_GLOAM_NETWORK=robinhood npm run dev` | `46630` | Test ETH from the [Robinhood faucet](https://faucet.testnet.chain.robinhood.com/), test USDG from the [Paxos faucet](https://faucet.paxos.com/) |
+
+On mainnet, Gloam is beta software: at most 500 USDG per deposit and 25,000 USDG
+across the pool for now. Deposits and private payments are free; cashing out
+costs 0.25%. Start with small amounts.
 
 ## Where to go next
 
-- `app/page.tsx` is the whole flow — `buildShieldBoundIntent`, wallet signing,
-  and the balance read. Start there.
+- `app/page.tsx` is the whole flow: picking the network, `buildShieldBoundIntent`,
+  the approval, wallet signing, and the balance read. Start there.
 - Add **cash out** and **private send** with `buildUnshieldIntent` /
-  `buildPrivateSendIntent` + `syncTree` — see the
+  `buildPrivateSendIntent` + `syncTree`. See the
   [SDK reference](https://gloam.trade/docs/sdk/reference).
-- Add **selective disclosure** to prove a balance to a chosen party — see the
+- Add **selective disclosure** to prove a balance to a chosen party. See the
   [disclosure guide](https://gloam.trade/docs/sdk/disclosure).
 
 ## Notes
 
-- Testnet only, dev-ceremony proving keys.
+- Mainnet proofs use the final keys from the trusted setup (13 contributors);
+  testnet proofs use the dev keys. `circuitArtifactUrls` picks the right one.
 - The note secret is the only spend authority. `localStorage` is per-browser; a
-  real app should back it up.
-- Artifacts are fetched from `https://www.gloam.trade/circuits` by default. Point
-  `GLOAM_ARTIFACTS_SOURCE` (build-time download) or `NEXT_PUBLIC_GLOAM_ARTIFACTS`
-  (browser fetch, needs CORS) elsewhere to self-host them.
+  real app, and anything holding real money, must back it up.
+- Artifacts are fetched from `https://www.gloam.trade/circuits` by default (the
+  final keys under `/final`). Point `GLOAM_ARTIFACTS_SOURCE` (build-time
+  download) or `NEXT_PUBLIC_GLOAM_ARTIFACTS` (browser fetch, needs CORS, same
+  layout) elsewhere to self-host them.
