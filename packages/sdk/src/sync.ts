@@ -87,7 +87,8 @@ async function getLogsChunked(
   fromBlock: bigint,
   chunkSize: bigint
 ): Promise<DecodedLog[]> {
-  const latest = await client.getBlockNumber();
+  // Fresh every time: a cached head can miss a note made seconds before it is spent.
+  const latest = await client.getBlockNumber({ cacheTime: 0 });
   if (latest < fromBlock) return [];
   const out: DecodedLog[] = [];
   for (let start = fromBlock; start <= latest; start += chunkSize) {
