@@ -5,11 +5,11 @@
  * send of exactly the price, seals the payment note to the seller, and retries
  * with the credential.
  */
-import type { Address, Hex } from "viem";
+import { parseUnits, type Address, type Hex } from "viem";
 import { Mppx } from "mppx/client";
 import { gloam } from "@gloamtrade/mppx-gloam/client";
 import type { BuiltPayment, Prover } from "@gloamtrade/sdk";
-import { PATHUSD, type MockPool } from "./mock-pool.js";
+import type { MockPool } from "./mock-pool.js";
 
 interface HeldNote {
   secret: Hex;
@@ -32,7 +32,9 @@ export function createAgentWallet(pool: MockPool) {
     },
     /** The smallest unspent note that covers the charge, reserved until the payment settles. */
     async getNote(want: { amountWei: bigint; currency: Address }) {
-      if (want.currency.toLowerCase() !== PATHUSD.toLowerCase()) throw new Error("This wallet only holds PathUSD.");
+      if (want.currency.toLowerCase() !== pool.asset.address.toLowerCase()) {
+        throw new Error(`This wallet only holds ${pool.asset.symbol}.`);
+      }
       const n = notes
         .filter((x) => x.status === "unspent" && x.amountWei >= want.amountWei)
         .sort((a, b) => (a.amountWei < b.amountWei ? -1 : 1))[0];
@@ -79,8 +81,8 @@ export function createAgent(o: { pool: MockPool; wallet: AgentWallet; prove: Pro
         // push: the agent broadcasts its own transfer (its wallet, or the Gloam relay so its wallet never shows).
         submit: o.pool.submitter("agent"),
         waitForReceipt: o.pool.chain.waitForReceipt,
-        // Never pay more than 0.05 PathUSD per request, never in another token, never to a pool that is not Gloam's.
-        policy: { maxAmountWei: 50_000n, currencies: [PATHUSD] },
+        // Never pay more than 0.05 per request, never in another token, never to a pool that is not Gloam's.
+        policy: { maxAmountWei: parseUnits("0.05", o.pool.asset.decimals), currencies: [o.pool.asset.address] },
         beforeSubmit: (built) => o.wallet.keepChange(built),
       }),
     ],

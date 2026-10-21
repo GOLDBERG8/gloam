@@ -2,7 +2,7 @@
   "name": "gloam-agent-shield-example",
   "private": true,
   "type": "module",
-  "description": "Reference wrapper: an AI agent shields ETH privately on Gloam via @gloamtrade/sdk.",
+  "description": "Reference wrapper: an AI agent shields a stablecoin privately on Gloam (mainnet or testnet) via @gloamtrade/sdk.",
   "scripts": {
     "start": "tsx agent-shield.ts"
   },

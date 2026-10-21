@@ -2,9 +2,9 @@
   "name": "gloam-web-shield-example",
   "private": true,
   "type": "module",
-  "description": "Reference wrapper: shield a private balance in the browser with @gloamtrade/sdk.",
+  "description": "Reference wrapper: shield a private USDG balance in the browser with @gloamtrade/sdk, on Robinhood Chain mainnet or testnet.",
   "scripts": {
-    "artifacts": "mkdir -p public/circuits && cp ../../app/public/circuits/shield.wasm ../../app/public/circuits/shield_final.zkey public/circuits/",
+    "artifacts": "mkdir -p public/circuits/final && cp ../../app/public/circuits/shield.wasm ../../app/public/circuits/shield_final.zkey public/circuits/ && cp ../../app/public/circuits/final/shield_final.zkey public/circuits/final/",
     "predev": "npm run artifacts",
     "prebuild": "npm run artifacts",
     "dev": "next dev --webpack",

@@ -4,3 +4,4 @@ out
 # circuit artifacts are copied in by `npm run artifacts` (predev/prebuild)
 public/circuits/*.wasm
 public/circuits/*.zkey
+public/circuits/final/

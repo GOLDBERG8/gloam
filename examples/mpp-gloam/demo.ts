@@ -4,24 +4,60 @@
  *   pnpm --filter gloam-mpp-example start                  (stub proofs, a second or two)
  *   pnpm --filter gloam-mpp-example start -- --real-proofs (real Groth16 transfer proofs, verified)
  *
- * A real HTTP server on localhost (Hono + mppx) charges 0.01 PathUSD per
- * request. An agent (mppx client) pays it twice from its private balance: once
- * in push mode (it broadcasts its own transfer) and once in pull mode (the
+ * A real HTTP server on localhost (Hono + mppx) charges 0.01 of a stablecoin
+ * per request. An agent (mppx client) pays it twice from its private balance:
+ * once in push mode (it broadcasts its own transfer) and once in pull mode (the
  * server submits it). The chain is a mock pool in memory that applies the
  * pool's transfer rules. Nothing is broadcast to any network.
+ *
+ * GLOAM_NETWORK picks whose terms the charge carries: tempo (Tempo testnet,
+ * PathUSD, the default), robinhood (Robinhood Chain testnet, test USDG),
+ * tempo-mainnet (USDC.e) or robinhood-mainnet (USDG). The chain id, the
+ * official pool and the stablecoin come from that network; on a mainnet,
+ * --real-proofs uses the ceremony's final keys. Either way, nothing moves.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { generateReceiveKey, packGroth16Proof, type NoteExport, type Prover } from "@gloamtrade/sdk";
+import { formatUnits, parseUnits } from "viem";
+import {
+  circuitArtifactFiles,
+  generateReceiveKey,
+  getGloamNetwork,
+  networkName,
+  packGroth16Proof,
+  NATIVE_ASSET,
+  type GloamNetworkKey,
+  type NoteExport,
+  type Prover,
+} from "@gloamtrade/sdk";
 import { isGloamChargeChallenge, parsePaymentChallenges, parseReceipt } from "@gloamtrade/mppx-gloam/core";
 import { createMockPool } from "./mock-pool.js";
 import { createPaidApi, listen } from "./server.js";
 import { createAgent, createAgentWallet } from "./client.js";
 
 const short = (s: string, n = 10) => (s.length > 2 * n + 1 ? `${s.slice(0, n)}…${s.slice(-6)}` : s);
-const usd = (base: bigint) => `${(Number(base) / 1e6).toFixed(2)} PathUSD`;
 const step = (title: string) => console.log(`\n── ${title}`);
+
+// ── network ────────────────────────────────────────────────────────────────
+const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "robinhood", "tempo"];
+const networkKey = (process.env.GLOAM_NETWORK?.trim() || "tempo") as GloamNetworkKey;
+if (!NETWORK_KEYS.includes(networkKey)) {
+  console.error(`GLOAM_NETWORK must be one of: ${NETWORK_KEYS.join(", ")}.`);
+  process.exit(1);
+}
+const net = getGloamNetwork(networkKey);
+if (!net) {
+  const family = networkKey === "tempo-mainnet" ? "tempo" : "robinhood";
+  console.error(
+    `This version of @gloamtrade/sdk has no ${family === "tempo" ? "Tempo" : "Robinhood Chain"} mainnet pool yet, so a charge has no official pool to name. Update the SDK once the pool is published, or run on testnet terms with GLOAM_NETWORK=${family}.`
+  );
+  process.exit(1);
+}
+// The network's first stablecoin: PathUSD on Tempo testnet, USDC.e on Tempo mainnet, USDG on Robinhood Chain.
+const asset = net.assets.find((a) => a.address.toLowerCase() !== NATIVE_ASSET.toLowerCase())!;
+const fmt = (base: bigint) => `${formatUnits(base, asset.decimals)} ${asset.symbol}`;
+const networkLabel = net.testnet ? networkName(net.chainId) : `${net.label} mainnet`;
 
 // ── proving ────────────────────────────────────────────────────────────────
 const realProofs = process.argv.includes("--real-proofs");
@@ -33,11 +69,20 @@ async function makeProver(): Promise<Prover> {
       return { proofBytes: "0xdeadbeef" };
     };
   }
+  // The key set the network verifies: the final ceremony keys (under final/) on
+  // a mainnet, the dev keys on a testnet.
+  const files = circuitArtifactFiles("transfer", net!.ceremony);
   const circuits = fileURLToPath(new URL("../../app/public/circuits/", import.meta.url));
-  const vkeyPath = fileURLToPath(new URL("../../contracts/circuits/build/transfer_v2/transfer_vkey.json", import.meta.url));
-  const wasm = `${circuits}transfer.wasm`;
-  const zkey = `${circuits}transfer_final.zkey`;
+  const vkeyPath =
+    net!.ceremony === "production"
+      ? `${circuits}final/transfer_vkey.json`
+      : fileURLToPath(new URL("../../contracts/circuits/build/transfer_v2/transfer_vkey.json", import.meta.url));
+  const wasm = `${circuits}${files.wasm}`;
+  const zkey = `${circuits}${files.zkey}`;
   for (const f of [wasm, zkey, vkeyPath]) if (!existsSync(f)) throw new Error(`--real-proofs needs ${f}`);
+  if (createHash("sha256").update(readFileSync(zkey)).digest("hex") !== files.sha256.zkey) {
+    throw new Error(`${zkey} is not the published ${net!.ceremony} transfer key (SHA-256 mismatch).`);
+  }
   const snarkjs = await import("snarkjs");
   const vkey = JSON.parse(readFileSync(vkeyPath, "utf8"));
   return async (input) => {
@@ -50,10 +95,13 @@ async function makeProver(): Promise<Prover> {
 
 // ── setup ──────────────────────────────────────────────────────────────────
 const prove = await makeProver();
-const pool = createMockPool();
+const pool = createMockPool({ pool: net.pool, asset });
 const seller = await generateReceiveKey();
 const sellerNotes: NoteExport[] = [];
 const app = createPaidApi({
+  chainId: net.chainId,
+  currency: asset.address,
+  decimals: asset.decimals,
   receiveKey: seller,
   chain: pool.chain,
   submit: pool.submitter("seller"),
@@ -72,12 +120,17 @@ const recordingFetch = (async (input: RequestInfo | URL, init?: RequestInit) => 
 }) as typeof fetch;
 
 const wallet = createAgentWallet(pool);
-wallet.add(await pool.shield(BigInt(`0x${randomBytes(30).toString("hex")}`), 5_000_000n));
+wallet.add(await pool.shield(BigInt(`0x${randomBytes(30).toString("hex")}`), parseUnits("5", asset.decimals)));
 
 console.log("Gloam private payments over MPP (mock pool, nothing broadcast)");
+console.log(
+  net.testnet
+    ? `  network         ${networkLabel} terms. Set GLOAM_NETWORK=${net.family}-mainnet for mainnet terms.`
+    : `  network         ${networkLabel} terms (the real pool and ${asset.symbol}); this demo still moves no money.`
+);
 console.log(`  seller API      ${url}`);
 console.log(`  seller tag      ${short(seller.tag, 18)}`);
-console.log(`  agent balance   ${usd(wallet.balance())} in ${wallet.count()} shielded note`);
+console.log(`  agent balance   ${fmt(wallet.balance())} in ${wallet.count()} shielded note`);
 console.log(`  proofs          ${realProofs ? "real Groth16 transfer proofs, each verified" : "stubbed (run with --real-proofs for real ones)"}`);
 
 // ── 1. the 402 ─────────────────────────────────────────────────────────────
@@ -87,7 +140,7 @@ const [challenge] = parsePaymentChallenges(first.headers.get("www-authenticate")
 if (!challenge) throw new Error("No gloam challenge in the 402.");
 const req = challenge.request as { amount: string; currency: string; recipient: string; methodDetails: { chainId: number; pool: string } };
 console.log(`  ${first.status} ${first.statusText}  WWW-Authenticate: Payment method="${challenge.method}", intent="${challenge.intent}"`);
-console.log(`  price           ${usd(BigInt(req.amount))} (${req.amount} base units of ${short(req.currency)})`);
+console.log(`  price           ${fmt(BigInt(req.amount))} (${req.amount} base units of ${short(req.currency)})`);
 console.log(`  pay to          ${short(req.recipient, 18)} (the seller's receive tag)`);
 console.log(`  settles in      pool ${short(req.methodDetails.pool)} on chain ${req.methodDetails.chainId}`);
 console.log(`  expires         ${challenge.expires}`);
@@ -109,7 +162,7 @@ for (const mode of ["push", "pull"] as const) {
       ? "  The agent broadcast its own transfer; the seller swept it before serving."
       : "  The agent broadcast nothing: the seller submitted the agent's proven transfer, then swept it."
   );
-  console.log(`  agent balance   ${usd(wallet.balance())}`);
+  console.log(`  agent balance   ${fmt(wallet.balance())}`);
 }
 
 // ── 4. replay ──────────────────────────────────────────────────────────────
@@ -128,8 +181,8 @@ console.log("  Shielded transfers only: no amounts, no receive tags, no notes. W
 console.log("  each transaction (the agent's wallet in push mode, unless it pays through the Gloam relay; only the");
 console.log("  seller in pull mode), and a sweep right after a payment can be linked to it by timing.");
 const sellerTotal = sellerNotes.reduce((s, n) => s + BigInt(n.amountWei), 0n);
-console.log(`\n  seller holds    ${usd(sellerTotal)} in ${sellerNotes.length} fresh notes only it knows`);
-console.log(`  agent holds     ${usd(wallet.balance())} in ${wallet.count()} note`);
+console.log(`\n  seller holds    ${fmt(sellerTotal)} in ${sellerNotes.length} fresh notes only it knows`);
+console.log(`  agent holds     ${fmt(wallet.balance())} in ${wallet.count()} note`);
 console.log(`  proofs          ${proofs}${realProofs ? " generated and verified" : " (stubbed)"}`);
 
 await server.close();

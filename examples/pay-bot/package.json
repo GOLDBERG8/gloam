@@ -2,7 +2,7 @@
   "name": "gloam-pay-bot-example",
   "private": true,
   "type": "module",
-  "description": "Reference wrapper: a payments bot that sends a private payment on Gloam via @gloamtrade/sdk.",
+  "description": "Reference wrapper: a payments bot that sends a private payment on Gloam (mainnet or testnet) via @gloamtrade/sdk.",
   "scripts": {
     "start": "tsx pay-bot.ts"
   },

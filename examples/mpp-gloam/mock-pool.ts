@@ -14,13 +14,9 @@ import {
   fieldToHex,
   hexToField,
   noteCommitmentPoseidon,
-  GLOAM_NETWORKS,
-  TEMPO_PATHUSD,
+  type GloamAsset,
 } from "@gloamtrade/sdk";
 import { TRANSFERRED_TOPIC, type GloamChargeChain, type GloamSubmitter, type MinimalReceipt } from "@gloamtrade/mppx-gloam/core";
-
-export const POOL: Address = GLOAM_NETWORKS.tempo.pool;
-export const PATHUSD: Address = TEMPO_PATHUSD;
 
 const lc = (h: string) => h.toLowerCase();
 
@@ -32,7 +28,12 @@ export interface PublicEvent {
   newCommitments: [Hex, Hex];
 }
 
-export function createMockPool() {
+/**
+ * `pool` is the official pool the charge names (the receipts' logs come from
+ * it); `asset` is the stablecoin the demo prices in. Both come from the network
+ * the demo runs on the terms of.
+ */
+export function createMockPool(o: { pool: Address; asset: GloamAsset }) {
   const tree = new IncrementalMerkleTreePoseidon();
   const index = new Map<string, number>();
   const roots = new Set<string>();
@@ -58,7 +59,7 @@ export function createMockPool() {
     }
     receipts.set(tx, {
       status: ok ? "success" : "reverted",
-      logs: ok ? [{ address: POOL, topics: [TRANSFERRED_TOPIC, lc(nullifier)], data: `0x${outs.map((c) => lc(c).slice(2)).join("")}` }] : [],
+      logs: ok ? [{ address: o.pool, topics: [TRANSFERRED_TOPIC, lc(nullifier)], data: `0x${outs.map((c) => lc(c).slice(2)).join("")}` }] : [],
     });
     return tx;
   }
@@ -82,7 +83,7 @@ export function createMockPool() {
    * would have. (A real shield is public: a deposit of a known amount. The demo
    * starts after it.)
    */
-  async function shield(secret: bigint, amountWei: bigint, asset: Address = PATHUSD) {
+  async function shield(secret: bigint, amountWei: bigint, asset: Address = o.asset.address) {
     const commitment = fieldToHex(await noteCommitmentPoseidon(secret, amountWei, asset));
     await insert(commitment);
     return { secret: fieldToHex(secret), amountWei, commitment, path: await tree.path(index.get(lc(commitment))!) };
@@ -93,7 +94,7 @@ export function createMockPool() {
     return tree.path(index.get(lc(commitment))!);
   }
 
-  return { chain, submitter, shield, pathOf, publicFeed };
+  return { chain, submitter, shield, pathOf, publicFeed, pool: o.pool, asset: o.asset };
 }
 
 export type MockPool = ReturnType<typeof createMockPool>;

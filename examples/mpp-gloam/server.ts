@@ -5,8 +5,9 @@
  * fresh note only this server knows, and only then lets the route run.
  *
  *   GET /health   free
- *   GET /answer   0.01 PathUSD per request, paid privately
+ *   GET /answer   0.01 of the network's stablecoin per request, paid privately
  */
+import type { Address } from "viem";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Hono } from "hono";
@@ -16,6 +17,11 @@ import type { GloamChargeChain, GloamSubmitter } from "@gloamtrade/mppx-gloam/co
 import type { NoteExport, Prover, ReceiveKey } from "@gloamtrade/sdk";
 
 export interface PaidApiOptions {
+  /** Chain id of the network to price on. Its official Gloam pool is where payments settle. */
+  chainId: number;
+  /** The stablecoin to price in, and its decimals. */
+  currency: Address;
+  decimals: number;
   /** The seller's receive key. Its tag is where every payment is sealed. */
   receiveKey: ReceiveKey;
   /** Chain reads (gloamChargeChainFromClient(publicClient, ...) against a real RPC). */
@@ -35,7 +41,9 @@ export function createPaidApi(o: PaidApiOptions) {
     secretKey: o.secretKey,
     methods: [
       gloam({
-        network: "tempo",
+        network: o.chainId,
+        currency: o.currency,
+        decimals: o.decimals,
         receiveKey: o.receiveKey,
         chain: o.chain,
         prove: o.prove,

@@ -13,24 +13,32 @@
  * feed. This is NOT a Tempo Zone: no operator sees the payment; only the payer
  * and the payee learn the amount.
  *
- *   GLOAM_PAY_KEY=0x<funded RH testnet key> \
- *     npx tsx examples/pay-x402/pay-x402.ts
+ *   # mainnet, real money: a 0.01 USDC.e payment on Tempo (or USDG on Robinhood Chain)
+ *   GLOAM_NETWORK=tempo-mainnet GLOAM_PAY_KEY=0x... npx tsx examples/pay-x402/pay-x402.ts
  *
- * The demo settles on Robinhood testnet (asset: native ETH), because that pool
- * is live. On Tempo the identical flow settles a stablecoin; only the asset and
- * the chain config differ.
+ *   # testnet, test funds (the default): test ETH on Robinhood Chain testnet
+ *   GLOAM_PAY_KEY=0x... npx tsx examples/pay-x402/pay-x402.ts
+ *
+ * GLOAM_NETWORK is robinhood-mainnet, tempo-mainnet, robinhood or tempo (the
+ * last two are the testnets). Unset, it stays on Robinhood Chain testnet so
+ * nothing real is spent by accident. Optional: GLOAM_ASSET (a symbol or address
+ * the pool lists), GLOAM_RPC (your own RPC URL), GLOAM_RELAY_URL (sweep through
+ * the Gloam relay).
  */
 import {
   createWalletClient,
   createPublicClient,
-  defineChain,
   http,
+  erc20Abi,
   parseUnits,
   formatUnits,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   buildShieldBoundIntent,
   buildGloamPaymentRequirements,
@@ -45,36 +53,17 @@ import {
   decodePaymentHeader,
   artifactProver,
   syncTree,
-  SEALED_VAULT,
+  circuitArtifactFiles,
+  circuitArtifactUrls,
+  getGloamNetwork,
+  networkName,
   NATIVE_ASSET,
-  RH_TESTNET_CHAIN_ID,
+  type GloamAsset,
+  type GloamNetwork,
+  type GloamNetworkKey,
+  type PoolCircuit,
+  type Prover,
 } from "@gloamtrade/sdk";
-
-// Defaults target Robinhood testnet (native ETH). Override via env to run on
-// another chain. Tempo Moderato blocks native msg.value, so shield an ERC-20
-// stablecoin there (e.g. PathUSD, 6 decimals):
-//   GLOAM_RPC=https://rpc.moderato.tempo.xyz GLOAM_CHAIN_ID=42431 \
-//   GLOAM_POOL=0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb GLOAM_DEPLOY_BLOCK=37411195 \
-//   GLOAM_ASSET=0x20c0000000000000000000000000000000000000 \
-//   GLOAM_DECIMALS=6 GLOAM_ASSET_SYMBOL=PathUSD
-const RPC = process.env.GLOAM_RPC ?? "https://rpc.testnet.chain.robinhood.com";
-const CHAIN_ID = Number(process.env.GLOAM_CHAIN_ID ?? RH_TESTNET_CHAIN_ID);
-const POOL = (process.env.GLOAM_POOL ?? SEALED_VAULT) as `0x${string}`;
-// RH hardened pool 0xAc25… deploy block (matches SEALED_VAULT default).
-const DEPLOY_BLOCK = BigInt(process.env.GLOAM_DEPLOY_BLOCK ?? "126185021");
-const ASSET = (process.env.GLOAM_ASSET ?? NATIVE_ASSET) as `0x${string}`;
-const DECIMALS = Number(process.env.GLOAM_DECIMALS ?? "18");
-const ASSET_SYMBOL = process.env.GLOAM_ASSET_SYMBOL ?? "ETH";
-const IS_NATIVE = ASSET.toLowerCase() === NATIVE_ASSET.toLowerCase();
-const here = dirname(fileURLToPath(import.meta.url));
-const art = (name: string) => resolve(here, "../../app/public/circuits/", name);
-
-const chain = defineChain({
-  id: CHAIN_ID,
-  name: `Gloam chain ${CHAIN_ID}`,
-  nativeCurrency: { name: ASSET_SYMBOL, symbol: ASSET_SYMBOL, decimals: 18 },
-  rpcUrls: { default: { http: [RPC] } },
-});
 
 const shieldBoundAbi = [
   {
@@ -91,98 +80,167 @@ const shieldBoundAbi = [
   },
 ] as const;
 
-const erc20Abi = [
-  {
-    type: "function",
-    name: "approve",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "spender", type: "address" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "bool" }],
-  },
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "owner", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-] as const;
+// ── network ──────────────────────────────────────────────────────────────────
+
+const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "robinhood", "tempo"];
+const isNative = (a: GloamAsset) => a.address.toLowerCase() === NATIVE_ASSET.toLowerCase();
+
+/** The network from GLOAM_NETWORK; Robinhood Chain testnet when unset. */
+function pickNetwork(fallback: GloamNetworkKey = "robinhood"): GloamNetwork {
+  const key = (process.env.GLOAM_NETWORK?.trim() || fallback) as GloamNetworkKey;
+  if (!NETWORK_KEYS.includes(key)) throw new Error(`GLOAM_NETWORK must be one of: ${NETWORK_KEYS.join(", ")}.`);
+  const net = getGloamNetwork(key);
+  if (!net) {
+    const family = key === "tempo-mainnet" ? "tempo" : "robinhood";
+    const label = family === "tempo" ? "Tempo" : "Robinhood Chain";
+    throw new Error(
+      `This version of @gloamtrade/sdk has no ${label} mainnet pool yet. Update the SDK once the pool is published, or practice on testnet with GLOAM_NETWORK=${family}.`
+    );
+  }
+  if (net.testnet) {
+    console.log(`${networkName(net.chainId)} (test funds). Set GLOAM_NETWORK=${net.family}-mainnet to use real money.`);
+  } else {
+    console.log(`${net.label} mainnet. This moves REAL MONEY. Gloam is beta software: at most 500 per stablecoin deposit for now.`);
+  }
+  return net;
+}
+
+/** GLOAM_ASSET (a symbol or address the pool lists) if set, else native ETH where the pool takes it (Robinhood Chain testnet), else the pool's first stablecoin. */
+function pickAsset(net: GloamNetwork): GloamAsset {
+  const want = process.env.GLOAM_ASSET?.trim();
+  const asset = want
+    ? net.assets.find((a) => [a.symbol, a.address].some((s) => s.toLowerCase() === want.toLowerCase()))
+    : net.assets.find((a) => isNative(a) === net.nativeShield);
+  if (!asset) {
+    throw new Error(`${networkName(net.chainId)} does not take ${want}. Pick one of: ${net.assets.map((a) => a.symbol).join(", ")}.`);
+  }
+  return asset;
+}
+
+// ── circuit files ────────────────────────────────────────────────────────────
+
+const here = dirname(fileURLToPath(import.meta.url));
+/** The repo's copy of the circuits: dev keys at the root, the final keys under final/. */
+const REPO_CIRCUITS = resolve(here, "../../app/public/circuits");
+/** Downloads land here with the same layout, so the dev and final keys never mix. */
+const CACHE = process.env.GLOAM_CIRCUITS_CACHE?.trim() || join(homedir(), ".cache", "gloam", "circuits");
+const sha256 = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
+
+/**
+ * A prover for `circuit` with the keys `net` verifies against (final keys on
+ * mainnet, dev keys on testnet). snarkjs proves from local files in node, so
+ * each file comes from the repo or the cache, or is downloaded from
+ * gloam.trade, and is checked against its SHA-256 before it is used.
+ */
+async function proverFor(circuit: PoolCircuit, net: GloamNetwork): Promise<Prover> {
+  const files = circuitArtifactFiles(circuit, net.ceremony);
+  const urls = circuitArtifactUrls(circuit, net.chainId);
+  const wasm = await artifact(files.wasm, urls.wasm, files.sha256.wasm);
+  const zkey = await artifact(files.zkey, urls.zkey, files.sha256.zkey);
+  return artifactProver({ wasm, zkey });
+}
+
+async function artifact(rel: string, url: string, expected: string): Promise<string> {
+  for (const dir of [REPO_CIRCUITS, CACHE]) {
+    const p = join(dir, rel);
+    if (existsSync(p) && sha256(readFileSync(p)) === expected) return p;
+  }
+  console.log(`Downloading ${url}`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Could not download ${url} (HTTP ${res.status}).`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (sha256(bytes) !== expected) throw new Error(`${url} does not match its published SHA-256. Not proving with it.`);
+  const p = join(CACHE, rel);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, bytes);
+  return p;
+}
+
+// ── main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  const net = pickNetwork();
+  const asset = pickAsset(net);
   const pk = process.env.GLOAM_PAY_KEY;
-  if (!pk) throw new Error("Set GLOAM_PAY_KEY (a funded RH testnet key).");
-  const account = privateKeyToAccount(
-    (pk.startsWith("0x") ? pk : `0x${pk}`) as `0x${string}`
-  );
-  const wallet = createWalletClient({ account, chain, transport: http(RPC) });
-  const pub = createPublicClient({ chain, transport: http(RPC) });
+  if (!pk) throw new Error(`Set GLOAM_PAY_KEY (a key funded on ${networkName(net.chainId)}).`);
+  const account = privateKeyToAccount((pk.startsWith("0x") ? pk : `0x${pk}`) as `0x${string}`);
+  const rpc = process.env.GLOAM_RPC?.trim() || net.rpcUrl;
+  const wallet = createWalletClient({ account, chain: net.chain, transport: http(rpc) });
+  const pub = createPublicClient({ chain: net.chain, transport: http(rpc) });
+  const show = (v: bigint) => `${formatUnits(v, asset.decimals)} ${asset.symbol}`;
+  const transferProver = await proverFor("transfer", net);
 
   // ── Seller: a receive key, and the price (the 402 challenge) ───────────────
   // A real seller makes its key once and keeps the private half server-side.
   const seller = await generateReceiveKey();
-  const price = parseUnits("0.0002", DECIMALS);
+  const price = parseUnits(isNative(asset) ? "0.0002" : "0.01", asset.decimals);
   const requirements = buildGloamPaymentRequirements({
     amountWei: price,
-    asset: ASSET,
-    assetSymbol: ASSET_SYMBOL,
+    asset: asset.address,
+    assetSymbol: asset.symbol,
     payTo: seller.tag, // payments are sealed to this; only the seller can open them
     resource: "mcp://gloam/tool/summarize",
     description: "One private summarize call",
-    poolAddress: POOL,
-    network: CHAIN_ID,
+    poolAddress: net.pool,
+    network: net.chainId,
   });
   console.log("402 Payment Required:");
-  console.log(`  price ${formatUnits(price, DECIMALS)} ${requirements.assetSymbol} to ${requirements.payTo.slice(0, 24)}…`);
+  console.log(`  price ${show(price)} to ${requirements.payTo.slice(0, 24)}...`);
   console.log(`  ${requirements.privacy.oneLine}\n`);
 
   // ── Buyer: shield a note to fund itself ────────────────────────────────────
-  const fund = parseUnits("0.0005", DECIMALS);
+  // Small by default: 1 of a stablecoin, or 0.0005 test ETH.
+  const fund = parseUnits(isNative(asset) ? "0.0005" : "1", asset.decimals);
   // Precheck funding so an underfunded wallet fails clearly. A native shield
-  // attaches its amount as msg.value; an ERC-20 shield pulls via transferFrom
-  // after approve. Either way the wallet also needs native balance for gas.
-  const gas = await pub.getBalance({ address: account.address });
-  if (gas === 0n) {
-    throw new Error(`Wallet ${account.address} has no native balance for gas. Fund it first.`);
-  }
-  if (IS_NATIVE) {
-    const needed = fund + parseUnits("0.0004", DECIMALS);
-    if (gas < needed) {
-      throw new Error(
-        `Wallet ${account.address} has ${formatUnits(gas, DECIMALS)} but needs about ${formatUnits(needed, DECIMALS)} (shield amount plus gas). Top up at the faucet.`
-      );
+  // attaches its amount as msg.value; a token shield pulls via transferFrom
+  // after approve. On Robinhood Chain the wallet also needs ETH for gas; on
+  // Tempo, gas is paid in a stablecoin.
+  if (net.family === "robinhood") {
+    const eth = await pub.getBalance({ address: account.address });
+    if (eth === 0n) throw new Error(`${account.address} has no ETH for gas on ${networkName(net.chainId)}.`);
+    const needed = fund + parseUnits("0.0004", 18);
+    if (isNative(asset) && eth < needed) {
+      throw new Error(`${account.address} has ${formatUnits(eth, 18)} ETH but needs about ${formatUnits(needed, 18)} (the deposit plus gas).`);
     }
-  } else {
+  }
+  if (!isNative(asset)) {
     const tokenBal = await pub.readContract({
-      address: ASSET,
+      address: asset.address,
       abi: erc20Abi,
       functionName: "balanceOf",
       args: [account.address],
     });
     if (tokenBal < fund) {
-      throw new Error(
-        `Wallet ${account.address} holds ${formatUnits(tokenBal, DECIMALS)} ${ASSET_SYMBOL} but needs ${formatUnits(fund, DECIMALS)}. Fund it from the faucet.`
-      );
+      throw new Error(`${account.address} holds ${show(tokenBal)} but needs ${show(fund)}.`);
     }
   }
-  console.log(`Buyer ${account.address} shielding ${formatUnits(fund, DECIMALS)} ${ASSET_SYMBOL} to fund the payment…`);
+  console.log(`Buyer ${account.address} shielding ${show(fund)} to fund the payment`);
   const shield = await buildShieldBoundIntent({
+    chainId: net.chainId,
+    poolAddress: net.pool,
+    asset: asset.address,
     amountWei: fund,
-    asset: ASSET,
-    poolAddress: POOL,
-    prover: artifactProver({ wasm: art("shield.wasm"), zkey: art("shield_final.zkey") }),
+    prover: await proverFor("shield", net),
   });
-  // ERC-20 shields need an allowance so the pool can pull the tokens.
-  if (!IS_NATIVE) {
-    const approveHash = await wallet.writeContract({
-      address: ASSET,
+  console.log(`  buyer note ${shield.note.commitment.slice(0, 12)}... secret ${shield.note.secret} (store it until the payment settles)`);
+  // Token shields need an allowance so the pool can pull the tokens. Wait for it to land first.
+  if (!isNative(asset)) {
+    const allowance = await pub.readContract({
+      address: asset.address,
       abi: erc20Abi,
-      functionName: "approve",
-      args: [POOL, fund],
+      functionName: "allowance",
+      args: [account.address, net.pool],
     });
-    await pub.waitForTransactionReceipt({ hash: approveHash });
+    if (allowance < fund) {
+      const approveHash = await wallet.writeContract({
+        address: asset.address,
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [net.pool, fund],
+      });
+      const approved = await pub.waitForTransactionReceipt({ hash: approveHash });
+      if (approved.status !== "success") throw new Error("The approval reverted.");
+    }
   }
   const shieldHash = await wallet.writeContract({
     address: shield.exec.poolAddress,
@@ -191,24 +249,30 @@ async function main() {
     args: shield.exec.args as readonly [`0x${string}`, bigint, `0x${string}`, `0x${string}`],
     value: shield.exec.valueWei,
   });
-  await pub.waitForTransactionReceipt({ hash: shieldHash });
+  const shielded = await pub.waitForTransactionReceipt({ hash: shieldHash });
+  if (shielded.status !== "success") {
+    throw new Error("The deposit reverted. Check the balance, the approval and the pool's deposit limits.");
+  }
 
   // ── Buyer: sync the tree and build the private x402 payment ────────────────
-  const synced = await syncTree(pub, { pool: POOL, fromBlock: DEPLOY_BLOCK });
+  const synced = await syncTree(pub, { pool: net.pool, fromBlock: net.deployBlock });
   const path = await synced.pathForCommitment(shield.note.commitment);
-  if (!path) throw new Error("Source note not in the tree yet — retry in a moment.");
+  if (!path) throw new Error("Source note not in the tree yet. Retry in a moment.");
 
   const payment = await buildGloamPayment({
     requirements,
     senderSecretHex: shield.note.secret,
     senderNoteAmountWei: fund,
     path,
-    prove: artifactProver({ wasm: art("transfer.wasm"), zkey: art("transfer_final.zkey") }),
+    prove: transferProver,
     issuerTag: "issuer:demo", // optional issuer-scoped compliance disclosure
   });
+  // The change is the rest of the buyer's balance: keep it before anything is sent.
+  const change = BigInt(payment.changeNote.amountWei);
+  console.log(`  buyer keeps change note ${payment.changeNote.commitment.slice(0, 12)}... (${show(change)}) secret ${payment.changeNote.secret}`);
 
   // ── Buyer: settle the payment itself, then attach the tx hash ──────────────
-  console.log("Settling the private payment (self-custodial)…");
+  console.log("Settling the private payment (self-custodial)");
   const sendHash = await wallet.writeContract({
     address: payment.intent.exec.poolAddress,
     abi: POOL_TRANSFER_ABI,
@@ -231,8 +295,8 @@ async function main() {
     requirements,
     payload: presented,
     receiveKey: seller,
-    prove: artifactProver({ wasm: art("transfer.wasm"), zkey: art("transfer_final.zkey") }),
-    chain: sweepChainFromClient(pub, { pool: POOL, fromBlock: DEPLOY_BLOCK }),
+    prove: transferProver,
+    chain: sweepChainFromClient(pub, { pool: net.pool, fromBlock: net.deployBlock }),
     submit: relayUrl
       ? relaySubmitter({ url: relayUrl })
       : (intent) =>
@@ -243,12 +307,15 @@ async function main() {
             args: transferCallArgs(intent),
           }),
     // Store this before the sweep is sent; its secret is now the seller's money.
-    beforeSubmit: (fresh) => console.log(`  seller keeps fresh note ${fresh.commitment.slice(0, 12)}… (store its secret)`),
+    beforeSubmit: (fresh) => console.log(`  seller keeps fresh note ${fresh.commitment.slice(0, 12)}... secret ${fresh.secret} (store it)`),
   });
   console.log(`\nSeller settle: ${settled.status}${settled.reason ? ` (${settled.reason})` : ""}`);
   if (!settled.grantAccess) throw new Error("Payment is not final. Do not serve.");
   console.log(`  swept in ${settled.sweep?.hash}; the buyer can no longer spend it back`);
   console.log("\nAccess granted. The public feed shows shielded transfers, never the amount or the parties.");
+  if (!net.testnet) {
+    console.log("Deposits and private payments are free. Cashing out costs 0.25% (see cashOutFee in the SDK).");
+  }
 }
 
 main().catch((e) => {
