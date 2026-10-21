@@ -47,6 +47,7 @@ import {
   encodeNotePackageEncrypted,
   isEncryptedPackage,
   isPayToTagSealed,
+  paymentCodeIn,
 } from "@/lib/notePackage";
 import {
   getOrCreateReceiveIdentity,
@@ -2272,7 +2273,7 @@ export function MoveView() {
                     )}
                   </div>
                 )}
-                {(importText.trim().startsWith("gloam1e.") ||
+                {(paymentCodeIn(importText).startsWith("gloam1e.") ||
                   (isEncryptedPackage(importText) &&
                     !isPayToTagSealed(importText))) && (
                   <div className="mt-4">

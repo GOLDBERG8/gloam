@@ -239,7 +239,7 @@ export async function decodeNotePackage(
   passphrase?: string,
   opts?: { tryTagDecrypt?: boolean }
 ): Promise<NotePackage> {
-  const s = input.trim();
+  const s = paymentCodeIn(input);
 
   // Pay-to-tag sealed package, only recipient’s receive key opens it
   if (s.startsWith("gloam2t.")) {
@@ -304,17 +304,47 @@ export async function decodeNotePackage(
   }
 
   throw new Error(
-    "Paste a Gloam payment (gloam1… / gloam1e… / gloam2t… or full package)."
+    "That isn't a whole Gloam payment. Paste the full claim link, or the code that starts with gloam1, gloam1e or gloam2t. If the sender's message cut it off, ask them to send it again."
   );
 }
 
+/** A code inside a longer paste: up to the first character a code never has. */
+const CODE_IN_TEXT = /gloam(?:2t|1e|1)\.[A-Za-z0-9_\-.]+/;
+
+/**
+ * The payment code in whatever was pasted. People paste the whole claim link
+ * (gloam.trade/claim?...#claim=gloam1%2E...), the code with its dot still
+ * written %2E, the code inside a longer message, or only the part after
+ * "gloam1." when a chat app linked just the start of it. All of these hold the
+ * same code, so all of them claim.
+ */
+export function paymentCodeIn(input: string): string {
+  let s = input.trim();
+  if (s.startsWith("{")) return s; // an old JSON package
+  const hashAt = s.search(/(?:#|%23)claim(?:=|%3D)/i);
+  if (hashAt !== -1) s = s.slice(hashAt).replace(/^(?:#|%23)claim(?:=|%3D)/i, "");
+  if (s.includes("%")) {
+    try {
+      s = decodeURIComponent(s);
+    } catch {
+      // keep it as pasted
+    }
+  }
+  const found = s.match(CODE_IN_TEXT);
+  if (found) return found[0].replace(/\.+$/, "");
+  // "gloam1." lost on the way: a plain code's body is base64 JSON, which starts "eyJ".
+  const body = s.replace(/\s+/g, "");
+  if (/^eyJ[A-Za-z0-9_-]{20,}$/.test(body)) return PREFIX_PLAIN + body;
+  return s;
+}
+
 export function isEncryptedPackage(input: string): boolean {
-  const t = input.trim();
+  const t = paymentCodeIn(input);
   return t.startsWith(PREFIX_ENC) || t.startsWith("gloam2t.");
 }
 
 export function isPayToTagSealed(input: string): boolean {
-  return input.trim().startsWith("gloam2t.");
+  return paymentCodeIn(input).startsWith("gloam2t.");
 }
 
 export function formatAmountEth(wei: string): string {
