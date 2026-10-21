@@ -8,6 +8,17 @@
 
 import { analyticsAllowed } from "@/lib/consent";
 import { readDemo } from "@/lib/demoFlag";
+import { getActiveNetwork } from "@/lib/networks";
+
+/** Which network the visitor is on, so mainnet and testnet activity can be told apart. */
+function networkMeta(): TrackPayload["meta"] {
+  try {
+    const n = getActiveNetwork();
+    return { network: n.key, mainnet: !n.testnet };
+  } catch {
+    return {};
+  }
+}
 
 export type TrackPayload = {
   t: string;
@@ -55,7 +66,7 @@ export function track(
     t: event,
     path: window.location.pathname,
     ref: document.referrer || null,
-    meta: meta ?? undefined,
+    meta: { ...networkMeta(), ...(meta ?? {}) },
     ts: Date.now(),
   });
 }

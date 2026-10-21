@@ -16,12 +16,12 @@ import { FlowField } from "@/components/ui/FlowField";
 import { MAINNET_LAUNCH_LABEL } from "@/lib/mainnet";
 
 export const metadata: Metadata = {
-  title: "Mainnet countdown",
-  description: "Gloam goes live on Robinhood Chain and Tempo mainnet on Wednesday 21 October at 13:00 UTC.",
+  title: "Mainnet",
+  description: "Gloam is live on Robinhood Chain and Tempo mainnet: private stablecoin payments for people and AI agents.",
   alternates: { canonical: "/mainnet" },
   openGraph: {
-    title: "Gloam mainnet: Wednesday 21 October, 13:00 UTC",
-    description: "Private payments go live on Robinhood Chain and Tempo mainnet.",
+    title: "Gloam is live on mainnet",
+    description: "Private payments are live on Robinhood Chain and Tempo mainnet.",
   },
 };
 
