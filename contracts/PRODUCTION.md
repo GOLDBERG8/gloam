@@ -1,8 +1,9 @@
 # Production gate (contracts + circuits)
 
-Testnet Poseidon pools are live with **dev ceremony** keys. The mainnet deploy uses
-the multi-party ceremony's final keys and checks them on chain. Mainnet is announced
-for Wednesday 21 October 2026, 13:00 UTC.
+Testnet Poseidon pools are live with **dev ceremony** keys, as the free practice
+network. The mainnet deploy uses the multi-party ceremony's final keys and checks them
+on chain. Mainnet launches Wednesday 21 October 2026, 13:00 UTC, as a beta with
+deposit limits, on Robinhood Chain (`4663`) and Tempo (`4217`).
 
 ## 1. Ceremony
 
@@ -19,23 +20,29 @@ for Wednesday 21 October 2026, 13:00 UTC.
 
 ## 2. Deploy
 
+- [x] PoseidonT3 deployed on both mainnets at `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4`
+      (Robinhood Chain `4663` and Tempo `4217`): the `POSEIDON2` both deploy scripts take
 - [ ] `ShieldPoolPayments` (payments only, no sealed swap) on each chain:
       `script/DeployTempoMainnet.s.sol` (4217) and `script/DeployRobinhoodMainnet.s.sol`
       (4663), both running the shared `script/MainnetDeploy.sol`. It deploys the final
       verifiers and **creates no pool unless they accept the final-key proofs and reject
-      the dev-key ones**. The pool estimates ~23.2M gas on Tempo (30M cap); Robinhood
+      the dev-key ones**. The pool estimates about 24.9M gas on Tempo with the cash-out
+      fee (30M cap; keep `--gas-estimate-multiplier` at or under 120); Robinhood
       Chain has no special cap. USDG on Robinhood Chain is `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168`
 - [ ] The pool can't take a plain `shield()` (deposits need `shieldBound()`), and
       `endSetup()` reverts until both verifiers are set and deposit limits are on
 - [ ] Beta deposit limits on: each listed asset gets a per-deposit and a
       total limit; an unlisted asset cannot be deposited. Robinhood Chain lists
       USDG and GLOAM (`0xDcD885F5c60b3aD49F6D58718696417314e8724d`, 18 decimals,
-      25,000 per deposit, 250,000 total) so holders can vote privately
+      25,000 per deposit, 250,000 total) so holders can vote privately; Tempo lists
+      USDC.e, pathUSD, USDT0 and OUSD. Each stablecoin: 500 per deposit, 25,000 total
 - [ ] Emergency path: `lowerDepositLimit(asset, 0, 0)` closes deposits at once
       (no timelock); withdrawals and private transfers keep working. Raising a
       limit or listing an asset takes the 3-day timelock
 - [ ] Transfer ownership to a multisig (`NEW_OWNER`, then `acceptOwnership()`). The
-      script refuses a `NEW_OWNER` with no code unless `NEW_OWNER_EOA=1`
+      script refuses a `NEW_OWNER` with no code unless `NEW_OWNER_EOA=1`. At launch the
+      owner and treasury is one wallet (`0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8`);
+      the multisig is planned
 - [ ] After the broadcast the script reads every setting back and fails on a mismatch:
       deposit limits on, setup ended, shield verifier and spend verifier as deployed, fee
       at most 1%, and the key gate again on the pool's own verifiers. If it fails, do
@@ -44,9 +51,12 @@ for Wednesday 21 October 2026, 13:00 UTC.
       $GLOAM): a rebasing, freezable or fee-on-transfer token only harms its own asset,
       but it can stall that asset
 - [ ] Record addresses in `deployments/mainnet.json` (or chain-specific)
-- [ ] App: add the mainnet entries to `app/src/lib/networks.ts` with the pool, deploy
-      block and `ceremony: "production"`, the mainnet token lists in `tokens.ts`, and set
-      `GLOAM_RPC_URL_<chainId>` to a private RPC for the server
+- [x] App: the mainnet entries in `app/src/lib/networks.ts` (`ceremony: "production"`)
+      and the mainnet token lists in `tokens.ts`, hidden until their pool is filled in
+- [ ] Fill in each pool and its deploy block: `MAINNET_POOLS` in `app/src/lib/mainnet.ts`
+      and in the SDK (Robinhood Chain `0xMAINNET_RH_POOL` at `MAINNET_RH_BLOCK`, Tempo
+      `0xMAINNET_TEMPO_POOL` at `MAINNET_TEMPO_BLOCK`), and set `GLOAM_RPC_URL_4663` /
+      `GLOAM_RPC_URL_4217` to a private RPC for the server
 
 ## 3. Review
 
@@ -64,8 +74,9 @@ for Wednesday 21 October 2026, 13:00 UTC.
 - [ ] Monitoring (pool balance, root, verifier, pause if any)
 - [ ] No always-true mock verifier on funded pool (ever)
 
-## Explicit non-claims until done
+## Explicit non-claims
 
-- Not production-safe
-- Not mainnet-ready
+- No external audit yet: reviewed internally, an external audit is planned
+- Beta software handling real money: deposit limits on, one owner wallet until the multisig
+- Private trading is not on mainnet (`ShieldPoolPayments` has no swap code)
 - Dev zkeys must not be used for real money

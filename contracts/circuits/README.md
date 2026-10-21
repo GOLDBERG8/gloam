@@ -8,7 +8,7 @@
 
 ## Circuits
 
-| Circuit | Source | Constraints | Public inputs | Checked by | Status (testnet) |
+| Circuit | Source | Constraints | Public inputs | Checked by | Status (mainnet and testnet) |
 | --- | --- | --- | --- | --- | --- |
 | shield | `shield/shield.circom` | 390 | `commitment, amount, asset` | On-chain, `ShieldIVerifier` via `shieldBound()` | Live |
 | transfer (1 in, 2 out) | `transfer/transfer.circom` | 6,270 | `root, nullifier, newCommitment0, newCommitment1` | On-chain, `DualProofVerifier` (4 inputs) | Live |
@@ -18,7 +18,7 @@
 | receipt (proof of payment) | `receipt/receipt.circom` | 5,510 | `root, commitment, asset, minAmount, reveal, shownAmount, context` | Off-chain, gloam.trade/verify | Live |
 | payroll_total | `payroll_total/payroll_total.circom` | 37,278 | `asset, total, count, paymentsHash, context` | Off-chain, gloam.trade/verify | Live |
 
-All Merkle membership uses `common/merkle_poseidon.circom` at depth 20. Browser artifacts live in `app/public/circuits/` (`shield`, `transfer`, `unshield`, `sealed_swap`, `funds` for solvency, `receipt`, `payroll_total`).
+All Merkle membership uses `common/merkle_poseidon.circom` at depth 20. Browser artifacts live in `app/public/circuits/` (`shield`, `transfer`, `unshield`, `sealed_swap`, `funds` for solvency, `receipt`, `payroll_total`) with the testnet dev keys; the mainnet final keys for the six ceremony circuits are in `app/public/circuits/final/` (the `.wasm` files are shared).
 
 **`context`** (solvency, receipt, payroll_total) is `keccak256(abi.encode("gloam.proof.v1", kind, chainId, pool, expiresAt, verifier)) mod p`. It binds the label naming who the proof is for and its expiry into the proof, so a `gloamfunds1`, `gloampay1` or `gloamroll1` proof forwarded to someone else still shows who it was made for. The older `gloamdisc1` balance disclosure reuses the shield circuit and has no `context`, so it carries no recipient or expiry.
 
@@ -87,7 +87,9 @@ Built and compiled, but private trade is switched off pending audit of its solve
 | `ScaffoldUnshieldVerifier` / `ScaffoldIVerifier` | Old placeholder | **Never** on a funded pool |
 | `RejectVerifier` | Always false (locks a path) | Tests / emergency lock only |
 
-Live addresses: [`../ARCHITECTURE.md`](../ARCHITECTURE.md). Current pools: Robinhood Chain `46630` `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740`, Tempo `42431` `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb`. Earlier pools (including the Phase-1 keccak pool `0x2BD9…`) are superseded.
+The table is the testnet set. The mainnet pools use the same contracts built from the final keys (`src/verifiers/final`, `*Final`), behind the same `DualProofVerifier`, and have no sealed swap verifier at all.
+
+Live addresses: [`../ARCHITECTURE.md`](../ARCHITECTURE.md). Mainnet pools (`ShieldPoolPayments`, final keys): Robinhood Chain `4663` `0xMAINNET_RH_POOL`, Tempo `4217` `0xMAINNET_TEMPO_POOL`. Testnet pools (dev keys): Robinhood Chain `46630` `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740`, Tempo `42431` `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb`. Earlier pools (including the Phase-1 keccak pool `0x2BD9…`) are superseded.
 
 ## App helpers
 
@@ -140,6 +142,6 @@ NEXT_PUBLIC_SHIELD_DEPLOY_BLOCK=<deploy block>
 
 ## Safety
 
-- Dev-ceremony keys only. Never present them as production.
+- Two key sets: the dev-ceremony keys are for the testnets only (never present them as production or use them for real money); mainnet uses the ceremony's final keys.
 - Unit tests may use `MockVerifier`; production never does.
 - Every regeneration of a proving key invalidates proofs made with the previous key; for the pool circuits the on-chain verifier must also be redeployed and switched through the 3-day timelock.

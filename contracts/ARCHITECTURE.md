@@ -2,7 +2,7 @@
 
 ## Goal
 
-Private hold, move and pay on **Robinhood Chain testnet** (`46630`) and **Tempo Moderato testnet** (`42431`). Private trade is built but switched off pending audit. Testnet only; mainnet is not live.
+Private hold, move and pay on **Robinhood Chain mainnet** (`4663`) and **Tempo mainnet** (`4217`), in beta, with **Robinhood Chain testnet** (`46630`) and **Tempo Moderato testnet** (`42431`) as the free practice network. Private trade is built but switched off pending audit, and the mainnet pool leaves it out entirely.
 
 ## Contract surface
 
@@ -23,13 +23,49 @@ User wallet
 GloamPayMemo: encrypted payment memos for discovery. Holds no funds.
 ```
 
+Mainnet runs `ShieldPoolPayments`: the same surface without `sealedSwap`, plus beta deposit limits and a cash-out fee.
+
 ## Owner powers
 
 - **No admin withdraw.** No function moves note-backed funds; notes leave only through a proof-gated `unshield()` to the recipient bound in the proof. `sweepStrayNative()` can only take native currency above `deposited[address(0)]`, i.e. ETH sent straight to the contract that backs no note.
-- **Timelocked rule changes.** Setters that affect proof validity, pricing or asset flows (`setVerifier`, `setSealedSwapVerifier`, `setShieldVerifier`, `setSwapRate`, `setPriceFeed`, `setOracleConfig`, `setOracleRatePair`) run directly only during setup. `setupMode()` is `false` on both live pools, so every change goes `queueChange` → public `CHANGE_DELAY` (3 days) → `executeChange` within a 14-day grace window. The owner wallet can still swap verifiers this way; the delay is what gives users time to see it and cash out.
-- **Two-step ownership** (`transferOwnership` + `acceptOwnership`). On testnet the owner is a single wallet; a multisig is an open mainnet decision.
+- **Timelocked rule changes.** Setters that affect proof validity, pricing or asset flows (`setVerifier`, `setSealedSwapVerifier`, `setShieldVerifier`, `setSwapRate`, `setPriceFeed`, `setOracleConfig`, `setOracleRatePair`) run directly only during setup. `setupMode()` is `false` on every live pool, mainnet and testnet, so every change goes `queueChange` → public `CHANGE_DELAY` (3 days) → `executeChange` within a 14-day grace window. The owner wallet can still swap verifiers this way; the delay is what gives users time to see it and cash out.
+- **Two-step ownership** (`transferOwnership` + `acceptOwnership`). On testnet the owner is a single wallet. On mainnet the owner and treasury is one wallet at launch (`0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8`); a multisig is planned.
 
-## Live deploy (current pools, redeployed 2026-09-29)
+## Mainnet deploy (2026-10-21, beta)
+
+Both mainnets run `ShieldPoolPayments` (`src/ShieldPoolPayments.sol`): the shared core with no sealed swap code, deposits through `shieldBound()` only, beta deposit limits and a 0.25% cash-out fee. Each was deployed by `script/MainnetDeploy.sol` (through `DeployRobinhoodMainnet.s.sol` and `DeployTempoMainnet.s.sol`), which deploys the final-key verifiers, refuses to create the pool unless they accept final-key proofs and reject dev-key ones, and ends setup in the same run. The internal pre-mainnet review (20 October 2026) closed with no Critical or High findings open; an external audit is planned.
+
+**Robinhood Chain mainnet `4663`.**
+
+| | |
+| --- | --- |
+| Pool (`ShieldPoolPayments`) | `0xMAINNET_RH_POOL` |
+| Deploy block | `MAINNET_RH_BLOCK` |
+| PoseidonT3 | `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` |
+| DualProofVerifier, ShieldIVerifier | Final keys (`src/verifiers/final`); read `verifier()` and `shieldVerifier()` on the pool |
+| sealedSwapVerifier | `0x0`, always (no swap code) |
+| Listed assets (per deposit / total) | USDG `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` (500 / 25,000), $GLOAM `0xDcD885F5c60b3aD49F6D58718696417314e8724d` (25,000 / 250,000). ETH is gas only |
+| Owner and treasury | `0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8` (one wallet at launch; a multisig is planned) |
+| Relayer | `0xb1E994586E62994648a0b866BF33F2EDd942512e` (submits proven calls and pays gas; cannot move or redirect money) |
+| GloamPayMemo | None yet |
+
+**Tempo mainnet `4217`.**
+
+| | |
+| --- | --- |
+| Pool (`ShieldPoolPayments`) | `0xMAINNET_TEMPO_POOL` |
+| Deploy block | `MAINNET_TEMPO_BLOCK` |
+| PoseidonT3 | `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` |
+| DualProofVerifier, ShieldIVerifier | Final keys (`src/verifiers/final`); read `verifier()` and `shieldVerifier()` on the pool |
+| sealedSwapVerifier | `0x0`, always (no swap code) |
+| Listed assets (per deposit / total) | USDC.e `0x20c000000000000000000000b9537d11c60e8b50`, pathUSD `0x20c0000000000000000000000000000000000000`, USDT0 `0x20c00000000000000000000014f22ca97301eb73`, OUSD `0x20c0000000000000000000006a37da5c996874be` (TIP-20, 6 decimals, 500 / 25,000 each) |
+| Owner and treasury | `0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8` (one wallet at launch; a multisig is planned) |
+| Relayer | `0xb1E994586E62994648a0b866BF33F2EDd942512e` (submits proven calls and pays gas; cannot move or redirect money) |
+| GloamPayMemo | None yet |
+
+On `ShieldPoolPayments` the timelocked setters are `setVerifier`, `setShieldVerifier`, `setDepositLimit` and `setWithdrawFee`. `lowerDepositLimit` (down to `0, 0`, which closes deposits for that asset) and `lowerWithdrawFee` are instant. Withdrawals and private transfers are never limited.
+
+## Testnet deploy (current pools, redeployed 2026-09-29)
 
 **Robinhood Chain testnet `46630`.** Record: [deployments/poseidon-testnet.json](./deployments/poseidon-testnet.json).
 
@@ -53,7 +89,7 @@ GloamPayMemo: encrypted payment memos for discovery. Holds no funds.
 | sealedSwapVerifier | `0x0` (private trade off) |
 | GloamPayMemo | `0x3ca88712e9219b5EE4c82D31cAfEaB64C9E9b4E3` (fixed source, no poster in the event) |
 
-Both: hash Poseidon, proof layout v2, Groth16 on BN254, keys from a **single-contributor dev ceremony** (testnet only). Mainnet deploys `ShieldPoolPayments` with the multi-party ceremony's final keys (`src/verifiers/final`).
+Both: hash Poseidon, proof layout v2, Groth16 on BN254, keys from a **single-contributor dev ceremony** (testnet only). Mainnet runs `ShieldPoolPayments` on the multi-party ceremony's final keys (`src/verifiers/final`), above.
 
 ### Superseded pools (history only)
 
@@ -77,12 +113,12 @@ Older verifier deployments (for example `DualProofVerifier 0x4B0D…949C`, `Seal
 | --- | --- | --- |
 | 0 | Interfaces + scaffold | Done |
 | 1 | Keccak pool, shield only | Superseded (history only) |
-| 2 | Poseidon pool, bound shield + unshield + transfer, dual verifier | **Live on testnet (dev keys)**, RH + Tempo |
-| 2b | No admin withdraw, timelocked rule changes | **Live on testnet** since 2026-09-29 |
+| 2 | Poseidon pool, bound shield + unshield + transfer, dual verifier | **Live on mainnet (final keys, `ShieldPoolPayments`) and testnet (dev keys)**, RH + Tempo |
+| 2b | No admin withdraw, timelocked rule changes | **Live on testnet** since 2026-09-29, **on mainnet** from launch |
 | 3a | Vault trade adapter (unshield → DEX → reshield) | In the app where a public pool exists; size is public on the swap edge |
 | 3b | Sealed-size private trade | **Built, switched off pending audit** (`sealedSwapVerifier = 0`); see [SEALED_TRADE.md](./SEALED_TRADE.md) |
-| 4 | Off-chain proofs: funds, payment, payroll total | **Live on testnet**, verified at gloam.trade/verify |
-| Prod | Multi-party ceremony + external audit + mainnet | Blocked, see [PRODUCTION.md](./PRODUCTION.md) |
+| 4 | Off-chain proofs: funds, payment, payroll total | **Live on mainnet and testnet**, verified at gloam.trade/verify |
+| Prod | Multi-party ceremony + mainnet | **Live in beta** from 2026-10-21: ceremony done (13 contributors), internal review, beta deposit limits. External audit planned. See [PRODUCTION.md](./PRODUCTION.md) |
 
 ## Note scheme (Poseidon)
 
@@ -102,7 +138,7 @@ Merkle     = Poseidon(left, right)  // depth 20
 | Testnet pool (core + sealed swap) | `src/ShieldPoolPoseidon.sol` |
 | Mainnet pool (core only) | `src/ShieldPoolPayments.sol` |
 | Timelock | `src/lib/ChangeTimelock.sol` |
-| App artifacts | `app/public/circuits/*.wasm` + `*_final.zkey` |
+| App artifacts | `app/public/circuits/*.wasm` + `*_final.zkey` (testnet dev keys); `app/public/circuits/final/` (mainnet final keys) |
 
 ### Proof public inputs (v2)
 

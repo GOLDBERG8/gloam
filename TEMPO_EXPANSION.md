@@ -1,12 +1,18 @@
 # Tempo expansion: design and positioning
 
-Status: **live on Tempo Moderato testnet.** Current pool
+Status: **live on Tempo mainnet (`4217`) from 21 October 2026, in beta.** Pool
+`0xMAINNET_TEMPO_POOL` (`ShieldPoolPayments`, payments only, deploy block
+`MAINNET_TEMPO_BLOCK`) on the trusted setup's final keys, listing USDC.e, pathUSD,
+USDT0 and OUSD with beta deposit limits (500 per deposit, 25,000 in total for
+each). Deposits and private payments are free; a cash out costs 0.25%. It was
+reviewed internally before launch; an external audit is planned. Tempo Moderato
+stays up as the free practice network: current pool
 `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb` (redeployed 2026-09-29, block
 37411195, no admin withdraw, timelocked rule changes) and memo board
-`0x3ca88712e9219b5EE4c82D31cAfEaB64C9E9b4E3`. Shield PathUSD and other test
-stablecoins, private send, cash out, payroll, proofs and the relay all run there.
-Private trade is off, as on Robinhood Chain. Mainnet is not live. The sections
-below are the original design, annotated with what shipped (re-checked
+`0x3ca88712e9219b5EE4c82D31cAfEaB64C9E9b4E3`, on dev keys with test funds. Shield
+PathUSD and other test stablecoins, private send, cash out, payroll, proofs and
+the relay all run there. Private trade is off on both, as on Robinhood Chain. The
+sections below are the original design, annotated with what shipped (re-checked
 2026-10-10).
 
 Gloam runs one product on two chains: the flagship on Robinhood Chain
@@ -19,7 +25,7 @@ frames. The runtime network toggle (Phase 0) is already shipped: see
 Tempo testnet (Moderato): chainId 42431, RPC https://rpc.moderato.tempo.xyz,
 explorer https://explore.testnet.tempo.xyz, native currency USD, EVM (Reth).
 Mainnet: chainId 4217, RPC https://rpc.tempo.xyz. Verified against
-docs.tempo.xyz on 2026-09-07.
+docs.tempo.xyz on 2026-09-07. Mainnet explorer: https://explore.tempo.xyz.
 
 ## 1. Why Tempo, and why now
 
@@ -66,7 +72,7 @@ This is a real design constraint and it gates asset choice.
 Resolution, which is also the differentiator (the "compliant privacy" frame that
 won for Encifher and Mercantill):
 
-- **Selective disclosure (live on testnet).** The older `gloamdisc1` disclosure
+- **Selective disclosure (live on mainnet and testnet).** The older `gloamdisc1` disclosure
   names no party, and anyone can make one for any deposit from public chain
   data, so it is no longer made and never verifies. The newer proof of funds, proof of
   payment and payroll total proofs (`gloamfunds1`, `gloampay1`, `gloamroll1`)
@@ -135,15 +141,16 @@ selective disclosure it lacks:
   **Shipped** for the send: it broadcasts and returns the payment header and the
   change note; an auditor proof comes from the separate proof tools.
 
-## 6. Positioning lines (honest, no mainnet claim)
+## 6. Positioning lines (honest)
 
 - Protocol: the privacy layer for onchain finance, for people and the agents
   acting for them.
 - Tempo: private, self-custodial stablecoin payments. The permissionless
   complement to Zones, with selective disclosure a user can hand an issuer or
   auditor.
-- Say "live on Tempo testnet"; never imply mainnet. Testnet only until the
-  production gate is met.
+- Say "live on Tempo mainnet, in beta", with Moderato as the free practice
+  network. Never say "audited": it was reviewed internally, and an external
+  audit is planned. Never claim private trading is live.
 
 ## 7. Open questions and risks
 
@@ -177,3 +184,5 @@ selective disclosure it lacks:
    2026-09-29 (no admin withdraw, timelocked rule changes).
 4. Phase 2 (done on testnet): x402 + MCP private-pay surface.
 5. Phase 3 (open): issuer-viewing-key selective disclosure as a headline feature.
+6. Mainnet (21 October 2026): `ShieldPoolPayments` on Tempo mainnet, final keys,
+   beta deposit limits, payments only.

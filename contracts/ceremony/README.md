@@ -6,7 +6,8 @@ across many people: each contributor mixes in their own randomness and throws it
 away. **If even one contributor is honest, nobody can forge a proof.**
 
 Testnet runs on development keys made by one person. Mainnet uses the keys this
-ceremony produces.
+ceremony produced: it closed with 13 contributors and drand round 6561386 as the
+beacon, and the final keys are published in the `ceremony-final` release.
 
 ## What is in scope
 

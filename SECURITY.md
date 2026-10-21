@@ -1,4 +1,6 @@
-# Security notes (Gloam testnet)
+# Security notes (Gloam)
+
+Gloam runs on Robinhood Chain mainnet (`4663`) and Tempo mainnet (`4217`) as beta software handling real money, with the testnets (`46630`, `42431`) as the free practice network. The code was reviewed internally before mainnet (20 October 2026, no Critical or High findings open); an external audit is planned, not done.
 
 ## Secrets policy
 
@@ -35,10 +37,10 @@ If a scanner still flags a **public** tx hash or zkey, mark as false positive. I
 Thank you for looking. Please report privately; don't open a public issue or post details until a fix ships.
 
 - **Where:** email [hello@gloam.trade](mailto:hello@gloam.trade) with "Security" in the subject, or DM [@gloamtrade](https://x.com/gloamtrade). A machine-readable contact is at [gloam.trade/.well-known/security.txt](https://gloam.trade/.well-known/security.txt).
-- **What helps:** the affected contract, route or page, exact steps or a proof of concept, and the impact you saw. Tests on a fork or a local chain are ideal.
-- **What's in scope:** the vault and verifier contracts, the circuits, the app and API at gloam.trade, the relay, the SDK and the MCP server.
+- **What helps:** the affected contract, route or page, exact steps or a proof of concept, and the impact you saw. Tests on a fork, a local chain or the testnet are ideal; please never test an exploit against the mainnet pools.
+- **What's in scope:** the vault and verifier contracts on mainnet and testnet, the circuits and both key sets, the app and API at gloam.trade, the relay, the SDK and the MCP server.
 - **Please don't:** run attacks that degrade the service for others, touch other people's data or notes, or use social engineering.
 - **What to expect:** we aim to reply within 3 days, keep you updated, and credit you once it's fixed if you'd like that.
-- **Rewards:** Gloam is testnet only and does not run a paid bug bounty yet. We'll say so here when that changes.
+- **Rewards:** Gloam does not run a paid bug bounty yet. We'll say so here when that changes.
 
 Past reviews and every finding with its status: [`contracts/audit/REMEDIATION.md`](./contracts/audit/REMEDIATION.md).

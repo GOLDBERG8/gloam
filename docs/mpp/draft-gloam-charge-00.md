@@ -61,9 +61,11 @@ normative:
     author:
       - org: iden3
   GLOAM-POOL:
-    title: "ShieldPoolPoseidon: the Gloam shielded pool contract"
+    title: >
+      ShieldPoolCore: the Gloam shielded pool contract (ShieldPoolPayments
+      on mainnet, ShieldPoolPoseidon on testnet)
     target: >
-      https://github.com/cryptoduke01/gloam/blob/main/contracts/src/ShieldPoolPoseidon.sol
+      https://github.com/cryptoduke01/gloam/blob/main/contracts/src/ShieldPoolCore.sol
     author:
       - org: Gloam
     date: 2026
@@ -375,8 +377,18 @@ it says. At the time of writing the official pools are:
 
 | Chain | chainId | Pool |
 |-------|---------|------|
+| Tempo (mainnet) | 4217 | `0xMAINNET_TEMPO_POOL` |
+| Robinhood Chain (mainnet) | 4663 | `0xMAINNET_RH_POOL` |
 | Tempo Moderato (testnet) | 42431 | `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb` |
 | Robinhood Chain (testnet) | 46630 | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` |
+
+The mainnet pools hold real value and are in beta: each accepts
+deposits only of the assets it lists, within per-deposit and total
+limits. Limits apply to deposits only; transfers, and so gloam
+charges, are never limited. Deposits and transfers carry no pool fee,
+so a charge settles for exactly the requested amount; a withdrawal
+from a mainnet pool keeps 0.25% of the amount. The testnet pools hold
+test funds with no real value.
 
 Implementations SHOULD take this list from the Gloam SDK
 {{GLOAM-SDK}} rather than from the challenge. A server that runs its
@@ -911,10 +923,15 @@ to unauthenticated clients.
 
 ## Proving Keys
 
-The pool's Groth16 verifiers rely on a trusted setup. The deployments
-listed in {{official-pools}} are testnets with development keys. A
-production deployment needs a multi-party setup ceremony, and a
-setup compromise would allow forged spends.
+The pool's Groth16 verifiers rely on a trusted setup, and a setup
+compromise would allow forged spends. The mainnet pools listed in
+{{official-pools}} use the final keys of a multi-party setup ceremony
+(13 contributors, closed with drand beacon round 6561386), which
+holds as long as one contributor discarded their randomness. The
+testnet pools use single-contributor development keys and are for
+testing only. A proof made with one key set does not verify against
+the other, so a client proves with the keys of the pool for
+`methodDetails.chainId`.
 
 ## Issuer Controls and Compliance {#compliance}
 

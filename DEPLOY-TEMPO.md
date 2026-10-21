@@ -2,8 +2,10 @@
 
 The runbook for bringing the Gloam shielded pool to Tempo. You run this; no agent
 and no CI deploys it, and the proving keys are the dev ceremony, so this is a
-**testnet deploy only**. The mainnet deploy is `contracts/script/DeployTempoMainnet.s.sol`,
-on the ceremony's final keys (see `contracts/PRODUCTION.md`). Sealed swaps stay disabled (audit H1). Design and
+**testnet deploy only**. Gloam's Tempo mainnet pool (`4217`) is
+`0xMAINNET_TEMPO_POOL` (deploy block `MAINNET_TEMPO_BLOCK`), deployed with
+`contracts/script/DeployTempoMainnet.s.sol` on the ceremony's final keys; see
+[Tempo mainnet](#tempo-mainnet) below and `contracts/PRODUCTION.md`. Sealed swaps stay disabled (audit H1). Design and
 rationale: [`TEMPO_EXPANSION.md`](./TEMPO_EXPANSION.md).
 
 ## What this deploys
@@ -19,15 +21,15 @@ Tempo has none of Gloam's on-chain deps, so this is a full-stack deploy:
 
 Live surface after deploy: shield, private send, cash out, selective disclosure.
 
-## Network (verified against docs.tempo.xyz, 2026-09-07)
+## Network (testnet verified against docs.tempo.xyz, 2026-09-07)
 
-| | Value |
-| --- | --- |
-| Name | Tempo Testnet (Moderato) |
-| chainId | 42431 |
-| RPC | https://rpc.moderato.tempo.xyz |
-| Explorer | https://explore.testnet.tempo.xyz |
-| Native currency | USD (gas paid in USD; confirm decimals before wiring amounts) |
+| | Testnet (this runbook) | Mainnet |
+| --- | --- | --- |
+| Name | Tempo Testnet (Moderato) | Tempo |
+| chainId | 42431 | 4217 |
+| RPC | https://rpc.moderato.tempo.xyz | https://rpc.tempo.xyz |
+| Explorer | https://explore.testnet.tempo.xyz | https://explore.tempo.xyz |
+| Native currency | USD (gas paid in USD; confirm decimals before wiring amounts) | None; gas is paid in stablecoins |
 
 ## Prereqs
 
@@ -88,9 +90,48 @@ in `stableAssets`.
    send, and confirm `verifyGloamPayment` passes and the on-chain checks it lists
    hold. See `mcp/scripts/verify-transfer-prover.mjs` for the offline proof path.
 
+## Tempo mainnet
+
+The mainnet pool is a different contract and a different script. `DeployTempoMainnet.s.sol`
+runs the shared `script/MainnetDeploy.sol` (the same deploy as Robinhood Chain) and only
+runs on chainId 4217:
+
+1. It deploys the final-key verifiers (`src/verifiers/final`) and refuses to create a
+   pool unless they accept final-key proofs and reject dev-key ones.
+2. It creates `ShieldPoolPayments` (payments only; the sealed swap code is left out)
+   on the PoseidonT3 already on Tempo mainnet,
+   `0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4` (`POSEIDON2`).
+3. It sets the shield verifier, turns deposit limits on and lists each asset in
+   `LIMIT_ASSETS`: USDC.e `0x20c000000000000000000000b9537d11c60e8b50`, pathUSD
+   `0x20c0000000000000000000000000000000000000`, USDT0
+   `0x20c00000000000000000000014f22ca97301eb73` and OUSD
+   `0x20c0000000000000000000006a37da5c996874be`, each 500 per deposit and 25,000 in
+   total (`500000000` and `25000000000` in raw 6-decimal units). Tempo has no native
+   coin to list.
+4. It sets the 0.25% cash-out fee (`WITHDRAW_FEE_BPS=25`) when `FEE_RECIPIENT` is set,
+   starts the ownership handoff to `NEW_OWNER` if one is given (it must call
+   `acceptOwnership()`), and ends setup in the same run.
+5. It reads every setting back and fails on a mismatch. If it fails, do not announce
+   the pool; deploy a fresh one.
+
+```bash
+cd contracts
+export RPC_URL=https://rpc.tempo.xyz
+export POSEIDON2=0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4
+# plus DEPLOYER_PK, LIMIT_ASSETS, LIMIT_PER_DEPOSIT, LIMIT_TOTAL, FEE_RECIPIENT, NEW_OWNER
+forge script script/DeployTempoMainnet.s.sol:DeployTempoMainnet --rpc-url $RPC_URL \
+  --broadcast --gas-estimate-multiplier 115
+```
+
+Tempo caps a transaction at 30M gas; the pool deploy is estimated at about 24.9M, so
+keep the multiplier at or under 120 and check the dry run first. Then record the pool
+and its deploy block in `MAINNET_POOLS` in `app/src/lib/mainnet.ts` (the app's
+`tempo-mainnet` entry reads them from there) and in the SDK's `MAINNET_POOLS`.
+
 ## Do not
 
-- Deploy to Tempo mainnet (chainId 4217). Testnet only until the production gate.
+- Run this testnet runbook (`DeployTempo.s.sol`) against Tempo mainnet (chainId 4217).
+  Mainnet uses `DeployTempoMainnet.s.sol` above, on the final keys.
 - Enable sealedSwap. It stays off until the H1 confidential-reserve work lands.
 - Ship a compliance-enforcing stablecoin without the issuer-viewing-key path.
 - Reuse the dev-ceremony keys for any real value.
