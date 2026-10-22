@@ -73,3 +73,55 @@ test("the guarded fetch never reaches a local service", async () => {
     server.close();
   }
 });
+
+test("a redirect to another origin never carries the payment, a cookie or a POST body on", async () => {
+  const seen: { method?: string; headers: http.IncomingHttpHeaders; body: string }[] = [];
+  const other = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      seen.push({ method: req.method, headers: req.headers, body });
+      res.end("other");
+    });
+  });
+  await new Promise<void>((r) => other.listen(0, "127.0.0.1", r));
+  const otherPort = (other.address() as AddressInfo).port;
+  const paid = http.createServer((req, res) => {
+    const code = req.url === "/see-other" ? 303 : req.url === "/moved" ? 302 : 307;
+    res.writeHead(code, { location: `http://127.0.0.1:${otherPort}/landed` }).end();
+  });
+  await new Promise<void>((r) => paid.listen(0, "127.0.0.1", r));
+  const paidPort = (paid.address() as AddressInfo).port;
+  try {
+    // Local servers stand in for two public sites, so the address guard is lifted here.
+    const f = guardedFetch({ GLOAM_FETCH_ALLOW_PRIVATE: "1" });
+    const headers = {
+      "x-payment": "secret-x402",
+      authorization: "Payment secret-mpp",
+      cookie: "session=1",
+      "payment-credential": "secret-custom",
+      "content-type": "application/json",
+      accept: "application/json",
+    };
+    for (const path of ["/see-other", "/moved", "/kept"]) {
+      seen.length = 0;
+      const res = await f(`http://127.0.0.1:${paidPort}${path}`, { method: "POST", headers, body: '{"a":1}' });
+      assert.equal(await res.text(), "other");
+      const hit = seen[0]!;
+      for (const name of ["x-payment", "authorization", "cookie", "payment-credential"]) {
+        assert.equal(hit.headers[name], undefined, `${path}: ${name} stays behind`);
+      }
+      assert.equal(hit.headers.accept, "application/json", `${path}: plain headers go on`);
+      if (path === "/kept") {
+        assert.equal(hit.method, "POST", "a 307 keeps the method and body");
+        assert.equal(hit.body, '{"a":1}');
+      } else {
+        assert.equal(hit.method, "GET", `${path}: becomes a GET`);
+        assert.equal(hit.body, "", `${path}: without the body`);
+      }
+    }
+  } finally {
+    paid.close();
+    other.close();
+  }
+});

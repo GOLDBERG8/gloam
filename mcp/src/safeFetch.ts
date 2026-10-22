@@ -153,26 +153,55 @@ function guardedAgent(): Agent {
 }
 
 /**
+ * Headers that carry a credential or a payment: never sent on to another
+ * origin. An MPP credential can sit in a field its challenge names, so any
+ * header with "payment" in it counts.
+ */
+const CREDENTIAL_HEADER = /^(?:authorization|proxy-authorization|cookie)$|payment/i;
+
+/** The request headers without credentials, for a hop to another origin. */
+function withoutCredentials(headers: HeadersInit | undefined): Headers {
+  const out = new Headers(headers);
+  for (const name of [...out.keys()]) if (CREDENTIAL_HEADER.test(name)) out.delete(name);
+  return out;
+}
+
+/**
  * fetch that checks every hop (the URL and each redirect): the URL host/literal via
  * publicUrlProblem, and the resolved IP validated + pinned by guardedAgent, which
  * closes the DNS-rebinding window for hostnames.
+ *
+ * A redirect is followed the way a browser follows it: a 303, or a 301/302
+ * after a POST, goes on as a GET without the body, and a hop to another
+ * origin drops every credential and payment header. So a paid site that
+ * redirects can never forward the payment to where it points.
  */
 export function guardedFetch(env: Record<string, string | undefined>): typeof fetch {
   const allowPrivate = env.GLOAM_FETCH_ALLOW_PRIVATE === "1";
   const dispatcher: Dispatcher | undefined = allowPrivate ? undefined : guardedAgent();
   return async (input, init) => {
     let url = input instanceof Request ? input.url : String(input);
+    let opts: RequestInit = { ...init };
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (!allowPrivate) {
         const problem = await publicUrlProblem(url);
         if (problem) throw new Error(problem);
       }
-      const res = await fetch(url, { ...init, redirect: "manual", dispatcher } as RequestInit & {
+      const res = await fetch(url, { ...opts, redirect: "manual", dispatcher } as RequestInit & {
         dispatcher?: Dispatcher;
       });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
       if (!location) return res;
-      url = new URL(location, url).toString();
+      await res.body?.cancel().catch(() => undefined);
+      const next = new URL(location, url);
+      const method = (opts.method ?? "GET").toUpperCase();
+      if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) {
+        const headers = new Headers(opts.headers);
+        for (const name of ["content-type", "content-length", "content-encoding"]) headers.delete(name);
+        opts = { ...opts, method: method === "HEAD" ? "HEAD" : "GET", body: undefined, headers };
+      }
+      if (next.origin !== new URL(url).origin) opts = { ...opts, headers: withoutCredentials(opts.headers) };
+      url = next.toString();
     }
     throw new Error("Too many redirects.");
   };
