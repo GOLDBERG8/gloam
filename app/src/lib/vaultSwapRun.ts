@@ -7,9 +7,9 @@
  *
  *   1. make the new note for exactly the planned amount, and a refund note in
  *      the note's own asset, and prove both shields;
- *   2. ask the router for this swap's escrow (escrowFor: derived from both new
- *      notes and the route) and prove the note's unshield to it, so nobody can
- *      change what lands;
+ *   2. work out this swap's escrow (derived from the note spent, both new notes
+ *      and the route), check it against the router's escrowFor, and prove the
+ *      note's unshield to it, so nobody can change what lands;
  *   3. save both new notes before anything is sent, out of the balance until
  *      one lands (sweepPending, named after the note they come from: the sync
  *      that counts one retires that note and the other, lib/claimSweep);
@@ -22,7 +22,9 @@
  */
 import { keccak256, type Address, type Hex } from "viem";
 import { buildPoseidonUnshieldWitness } from "./proverPoseidon";
-import { fieldToBytes32, proveUnshieldInBrowser } from "./proveClient";
+import { fieldToBytes32, proveShieldInBrowser, proveUnshieldInBrowser } from "./proveClient";
+import { noteNullifierPoseidon } from "./notePoseidon";
+import { fieldToHex, hexToField } from "./poseidon";
 import type { PoseidonMerklePath } from "./merklePoseidon";
 import { prepareBridgeNote } from "./bridgePrivate";
 import { freshPath, splitForCashOut } from "./cashOutSplit";
@@ -30,7 +32,15 @@ import { relayVaultSwap, RelaySubmitError, waitForTx } from "./relay/client";
 import { getRhPublicClient } from "./rhClient";
 import { dropUnsentNote, saveLocalNote, shieldPoolAbi, updateLocalNote, type LocalNote } from "./shield";
 import type { GloamNetwork } from "./networks";
-import { encodeRoute, refundAmountFor, vaultSwapAbi, type SwapPlan } from "./vaultSwap";
+import {
+  encodeRoute,
+  escrowAddress,
+  refundAmountFor,
+  vaultSwapAbi,
+  type EscrowKey,
+  type SwapPlan,
+  type VaultSwapRefundInfo,
+} from "./vaultSwap";
 
 /** Relay codes after which the swap may still have gone out. */
 const MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "internal", "in_flight"]);
@@ -42,7 +52,7 @@ export const SWAP_REVERTED =
   "The swap didn't go through on this try. Your money is safe in the vault: refresh in a minute, then get a new quote.";
 
 export const SWAP_REFUNDED =
-  "The swap couldn't finish, so the money went back to your private balance, less the vault's cash-out fee.";
+  "The swap couldn't finish, so the money went back to your private balance, less up to 1%: the vault's cash-out fee, plus a safety margin that goes to the Gloam treasury.";
 
 export type SwapResult = { hash: Hex; outNote: LocalNote; refunded: boolean };
 
@@ -87,14 +97,33 @@ export async function runVaultSwap(args: {
   const out = await prepareBridgeNote(plan.amountOut, args.assetOut, network, args.owner);
   const back = await prepareBridgeNote(refundAmountFor(targetWei), target.asset, network, args.owner);
 
-  // 2. The escrow the unshield must name, and the unshield proof to it.
+  // 2. The escrow the unshield must name: worked out here, and checked against
+  //    the router's own answer, so a wrong RPC can't send the note elsewhere.
+  const nullifier =
+    target.nullifier && target.nullifier !== "0x"
+      ? target.nullifier
+      : (fieldToHex(await noteNullifierPoseidon(hexToField(target.secret), hexToField(target.commitment))) as Hex);
   const routeBytes = encodeRoute(plan.route);
-  const escrow = await getRhPublicClient().readContract({
+  const key: EscrowKey = {
+    nullifier,
+    amountIn: targetWei,
+    outCommitment: out.note.commitment,
+    assetOut: args.assetOut,
+    amountOut: plan.amountOut,
+    refundCommitment: back.note.commitment,
+    refundAmount: BigInt(back.note.amountWei),
+    routeHash: keccak256(routeBytes),
+  };
+  const escrow = escrowAddress(router, target.asset, key);
+  const routerSays = await getRhPublicClient().readContract({
     address: router,
     abi: vaultSwapAbi,
     functionName: "escrowFor",
-    args: [target.asset, out.note.commitment, args.assetOut, plan.amountOut, back.note.commitment, BigInt(back.note.amountWei), keccak256(routeBytes)],
+    args: [target.asset, key],
   });
+  if (routerSays.toLowerCase() !== escrow.toLowerCase()) {
+    throw new Error("This swap's address didn't check out, so nothing was sent. Refresh and try again.");
+  }
   const path = await args.pathFor(target);
   if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
   const w = await buildPoseidonUnshieldWitness({
@@ -105,13 +134,29 @@ export async function runVaultSwap(args: {
     path,
   });
   if (!w.checks.commitmentMatches) throw new Error(w.blocker ?? "This balance does not match the vault.");
+  if (fieldToBytes32(w.publicInputs.nullifier).toLowerCase() !== nullifier.toLowerCase()) {
+    throw new Error("This balance does not match the vault.");
+  }
   const { proofBytes } = await proveUnshieldInBrowser(w.circomInput);
-  const nullifier = fieldToBytes32(w.publicInputs.nullifier);
 
-  // 3. Both saved before anything is sent.
+  // 3. Both saved before anything is sent. The refund note keeps what finishing
+  //    a refund needs (finishVaultSwapRefund), in case it is ever wanted.
   const now = Date.now();
+  const refundInfo: VaultSwapRefundInfo = {
+    router,
+    assetIn: target.asset,
+    amountIn: targetWei.toString(),
+    out: { commitment: out.note.commitment, asset: args.assetOut, amount: plan.amountOut.toString() },
+    route: plan.route,
+  };
   const outNote: LocalNote = { ...out.note, id: `sw-${now}`, sweptFrom: { id: target.id, nullifier }, sweepPending: true };
-  const refundNote: LocalNote = { ...back.note, id: `swr-${now}`, sweptFrom: { id: target.id, nullifier }, sweepPending: true };
+  const refundNote: LocalNote = {
+    ...back.note,
+    id: `swr-${now}`,
+    sweptFrom: { id: target.id, nullifier },
+    sweepPending: true,
+    vaultSwap: refundInfo,
+  };
   saveLocalNote(outNote);
   saveLocalNote(refundNote);
   const dropBoth = () => {
@@ -172,4 +217,42 @@ export async function runVaultSwap(args: {
     refunded,
     outNote: { ...landed, txHash: hash, sweepPending: false, ...(at ? { leafIndex: at.leafIndex } : {}) },
   };
+}
+
+/** Proof bytes and a root the router never reads on the refund path (64 zero bytes, a zero root). */
+const UNUSED_PROOF = `0x${"00".repeat(64)}` as Hex;
+const UNUSED_ROOT = `0x${"00".repeat(32)}` as Hex;
+const RETRY_MS = 60_000;
+const lastTry = new Map<string, number>();
+
+/**
+ * Puts a swap's waiting money back as its refund note: the case where someone
+ * sent the swapped note's unshield on its own, so the money sits at the swap's
+ * escrow (lib/claimSweep finds it and calls this). Proves the refund note's
+ * shield again from its saved secret and sends the same swap call through the
+ * relay; the router sees the note spent and makes the refund. At most one try
+ * a minute per note; the next sync counts the note once it lands.
+ */
+export async function finishVaultSwapRefund(note: LocalNote): Promise<void> {
+  const info = note.vaultSwap;
+  const from = note.sweptFrom;
+  if (!info || !from || !note.sweepPending) return;
+  const last = lastTry.get(note.id);
+  if (last !== undefined && Date.now() - last < RETRY_MS) return;
+  lastTry.set(note.id, Date.now());
+
+  const { proofBytes } = await proveShieldInBrowser({
+    commitment: BigInt(note.commitment).toString(),
+    amount: note.amountWei,
+    asset: BigInt(note.asset).toString(),
+    secret: BigInt(note.secret).toString(),
+  });
+  const hash = await relayVaultSwap({
+    chainId: note.chainId,
+    spend: { proof: UNUSED_PROOF, root: UNUSED_ROOT, nullifier: from.nullifier, asset: info.assetIn, amount: BigInt(info.amountIn) },
+    deposit: { proof: UNUSED_PROOF, commitment: info.out.commitment, asset: info.out.asset, amount: BigInt(info.out.amount) },
+    refund: { proof: proofBytes, commitment: note.commitment, asset: note.asset, amount: BigInt(note.amountWei) },
+    route: info.route,
+  });
+  await waitForTx(hash).catch(() => null);
 }

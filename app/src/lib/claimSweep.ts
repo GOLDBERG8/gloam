@@ -40,6 +40,7 @@ import { getRhPublicClient } from "./rhClient";
 import { getAllNotes } from "./noteVault";
 import { saveLocalNote, shieldPoolAbi, updateLocalNote, type LocalNote } from "./shield";
 import { syncShieldTree } from "./treeSync";
+import { escrowHolds } from "./vaultSwap";
 
 /** Claimed payments are saved under this id prefix (MoveView). */
 export const CLAIM_PREFIX = "imp-";
@@ -88,6 +89,10 @@ export type ClaimEnv = {
    * block apart can't call a move that landed dead. Null fields: unread.
    */
   stateAt?: (nullifier: Hex | null, commitment: Hex) => Promise<{ spent: boolean | null; seen: boolean | null }>;
+  /** A private swap's refund note: does its money wait at the swap's escrow? Null: unread. */
+  escrowWaiting?: (n: LocalNote) => Promise<boolean | null>;
+  /** Puts a swap's waiting money back as its refund note (lib/vaultSwapRun). */
+  finishRefund?: (n: LocalNote) => Promise<void>;
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -150,6 +155,16 @@ export function appClaimEnv(onStage?: (text: string) => void): ClaimEnv {
     relay: relayTransfer,
     leafIndexOf: async (commitment) => (await findLeaf(commitment))?.idx,
     stateAt: (nullifier, commitment) => readStateAt(pool!, nullifier, commitment),
+    escrowWaiting: async (n) => {
+      if (!n.vaultSwap || !n.sweptFrom) return false;
+      return escrowHolds(getRhPublicClient(), n.vaultSwap, n.sweptFrom.nullifier, n.commitment, BigInt(n.amountWei)).catch(
+        () => null
+      );
+    },
+    finishRefund: async (n) => {
+      const { finishVaultSwapRefund } = await import("./vaultSwapRun");
+      await finishVaultSwapRefund(n);
+    },
   };
 }
 
@@ -177,8 +192,13 @@ async function finalize(env: ClaimEnv, fresh: LocalNote, txHash: Hex | null) {
  * history). Otherwise it stays pending. The app reads both at one block
  * (stateAt), so answers from two nodes a block apart can't call a move that
  * landed dead.
+ *
+ * One exception: a private swap's refund note (`vaultSwap`) whose note was
+ * spent by an unshield sent on its own. The money then waits at the swap's
+ * escrow and lands as this note once the refund is finished, so while the
+ * escrow holds it (or can't be read) the note is "refund" or pending, never dead.
  */
-async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" | "dead" | "pending"> {
+async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" | "dead" | "pending" | "refund"> {
   const { spent, seen } = env.stateAt
     ? await env.stateAt(fresh.sweptFrom?.nullifier ?? null, fresh.commitment)
     : {
@@ -190,6 +210,11 @@ async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" 
     return "landed";
   }
   if (seen === false && spent === true) {
+    if (fresh.vaultSwap) {
+      const waiting = env.escrowWaiting ? await env.escrowWaiting(fresh).catch(() => null) : null;
+      if (waiting === true) return "refund";
+      if (waiting === null) return "pending";
+    }
     updateLocalNote(fresh.id, { status: "recovered", sweepPending: false });
     return "dead";
   }
@@ -340,7 +365,13 @@ export async function reconcileClaims(env?: ClaimEnv): Promise<boolean> {
   let changed = false;
   for (const fresh of pending) {
     if (fresh.chainId !== e.chainId || fresh.pool.toLowerCase() !== pool.toLowerCase()) continue;
-    if ((await settlePending(e, fresh)) !== "pending") changed = true;
+    const state = await settlePending(e, fresh);
+    if (state === "refund") {
+      // proving and relaying take a while: the sync doesn't wait, the next one counts it
+      void e.finishRefund?.(fresh).catch(() => {});
+      continue;
+    }
+    if (state !== "pending") changed = true;
   }
   return changed;
 }

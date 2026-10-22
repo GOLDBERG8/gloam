@@ -674,7 +674,10 @@ const erc20BalanceAbi = [
  * router, only the vault's own assets, only a route the app builds, and the
  * same lock, root check and dry run as any spend. A note already spent is
  * refused, unless its money is waiting at this swap's escrow: then the call
- * puts it back as the refund note.
+ * puts it back as the refund note. That call (lib/vaultSwapRun
+ * finishVaultSwapRefund) carries only the refund note's proof; the spend's
+ * proof and root and the new note's proof are placeholders the router never
+ * reads on that path, so the root is not checked for it.
  */
 export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unknown>) {
   const router = vaultSwapRouter(net.chainId);
@@ -720,7 +723,19 @@ export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unk
       address: router,
       abi: vaultSwapAbi,
       functionName: "escrowFor",
-      args: [spend.asset, deposit.commitment, deposit.asset, deposit.amount, refund.commitment, refund.amount, keccak256(routeBytes)],
+      args: [
+        spend.asset,
+        {
+          nullifier: spend.nullifier,
+          amountIn: spend.amount,
+          outCommitment: deposit.commitment,
+          assetOut: deposit.asset,
+          amountOut: deposit.amount,
+          refundCommitment: refund.commitment,
+          refundAmount: refund.amount,
+          routeHash: keccak256(routeBytes),
+        },
+      ],
     });
     const waiting = await pub.readContract({ address: spend.asset, abi: erc20BalanceAbi, functionName: "balanceOf", args: [escrow] });
     if (waiting < refund.amount) throw new RelayError(REVERT_MESSAGES.AlreadySpent, 409, "AlreadySpent");

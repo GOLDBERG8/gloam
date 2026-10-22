@@ -16,7 +16,15 @@
  *
  * Shared by the app and the relay server: no browser-only imports here.
  */
-import { encodeAbiParameters, type Address, type Hex, type PublicClient } from "viem";
+import {
+  concatHex,
+  encodeAbiParameters,
+  getContractAddress,
+  keccak256,
+  type Address,
+  type Hex,
+  type PublicClient,
+} from "viem";
 
 /** The router per chain. null: swaps are off there. */
 export const VAULT_SWAP_ROUTERS: Record<number, Address | null> = {
@@ -87,6 +95,96 @@ const SWAP_ERRORS = [
   "BadRoute", "NotPoolManager", "MiddleNotSettled", "BadRefund", "EscrowUsed",
 ].map((name) => ({ type: "error" as const, name, inputs: [] }));
 
+/** GloamVaultSwap.EscrowKey, in order: what a swap's escrow address is derived from. */
+const ESCROW_KEY_COMPONENTS = [
+  { name: "nullifier", type: "bytes32" },
+  { name: "amountIn", type: "uint256" },
+  { name: "outCommitment", type: "bytes32" },
+  { name: "assetOut", type: "address" },
+  { name: "amountOut", type: "uint256" },
+  { name: "refundCommitment", type: "bytes32" },
+  { name: "refundAmount", type: "uint256" },
+  { name: "routeHash", type: "bytes32" },
+] as const;
+
+export type EscrowKey = {
+  nullifier: Hex;
+  amountIn: bigint;
+  outCommitment: Hex;
+  assetOut: Address;
+  amountOut: bigint;
+  refundCommitment: Hex;
+  refundAmount: bigint;
+  routeHash: Hex;
+};
+
+/**
+ * SwapEscrow's creation code (contracts/src/SwapEscrow.sol, solc 0.8.24,
+ * optimizer 200, shanghai), pinned: keccak256 is SWAP_ESCROW_CODE_HASH, the
+ * same value VaultSwapReview.t.sol checks against the compiled contract. The
+ * app works each swap's escrow out from it and refuses to swap if the router's
+ * own escrowFor disagrees.
+ */
+export const SWAP_ESCROW_INIT_CODE: Hex =
+  "0x608060405234801561000f575f80fd5b5060405161023438038061023483398101604081905261002e916101a4565b6040516370a0823160e01b81523060048201525f906001600160a01b038316906370a0823190602401602060405180830381865afa158015610072573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061009691906101d1565b905080156101a25760408051336024820152604480820184905282518083039091018152606490910182526020810180516001600160e01b031663a9059cbb60e01b17905290515f9182916001600160a01b038616916100f5916101e8565b5f604051808303815f865af19150503d805f811461012e576040519150601f19603f3d011682016040523d82523d5f602084013e610133565b606091505b509150915081801561015d57508051158061015d57508080602001905181019061015d9190610214565b61019f5760405162461bcd60e51b815260206004820152600f60248201526e32b9b1b937bb903a3930b739b332b960891b604482015260640160405180910390fd5b50505b005b5f602082840312156101b4575f80fd5b81516001600160a01b03811681146101ca575f80fd5b9392505050565b5f602082840312156101e1575f80fd5b5051919050565b5f82515f5b8181101561020757602081860181015185830152016101ed565b505f920191825250919050565b5f60208284031215610224575f80fd5b815180151581146101ca575f80fdfe";
+export const SWAP_ESCROW_CODE_HASH: Hex = "0x192133b7cb5a5193a55ec981c9f7272702248f684d2b85aa1dd843dde9b85bd4";
+
+/** A swap's escrow, worked out here: CREATE2 from the router, salt keccak256(abi.encode(key)). */
+export function escrowAddress(router: Address, assetIn: Address, key: EscrowKey): Address {
+  const salt = keccak256(encodeAbiParameters(ESCROW_KEY_COMPONENTS, [
+    key.nullifier, key.amountIn, key.outCommitment, key.assetOut, key.amountOut, key.refundCommitment, key.refundAmount, key.routeHash,
+  ]));
+  const bytecode = concatHex([SWAP_ESCROW_INIT_CODE, encodeAbiParameters([{ type: "address" }], [assetIn])]);
+  return getContractAddress({ opcode: "CREATE2", from: router, salt, bytecode });
+}
+
+/**
+ * What a swap's refund note keeps, so the refund can be finished later from
+ * this browser (lib/vaultSwapRun finishVaultSwapRefund) if someone sent the
+ * note's unshield on its own. Amounts as decimal strings (the note store is JSON).
+ */
+export type VaultSwapRefundInfo = {
+  router: Address;
+  assetIn: Address;
+  amountIn: string;
+  out: { commitment: Hex; asset: Address; amount: string };
+  route: PoolKey[];
+};
+
+/** The escrow key for a refund note, from what it keeps. */
+export function refundEscrowKey(info: VaultSwapRefundInfo, nullifier: Hex, refundCommitment: Hex, refundAmount: bigint): EscrowKey {
+  return {
+    nullifier,
+    amountIn: BigInt(info.amountIn),
+    outCommitment: info.out.commitment,
+    assetOut: info.out.asset,
+    amountOut: BigInt(info.out.amount),
+    refundCommitment,
+    refundAmount,
+    routeHash: keccak256(encodeRoute(info.route)),
+  };
+}
+
+const balanceOfAbi = [
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+] as const;
+
+/**
+ * Whether a swap's money waits at its escrow (someone sent the note's unshield
+ * on its own, and no refund has finished yet): its balance covers the refund note.
+ */
+export async function escrowHolds(
+  client: PublicClient,
+  info: VaultSwapRefundInfo,
+  nullifier: Hex,
+  refundCommitment: Hex,
+  refundAmount: bigint
+): Promise<boolean> {
+  const escrow = escrowAddress(info.router, info.assetIn, refundEscrowKey(info, nullifier, refundCommitment, refundAmount));
+  const held = await client.readContract({ address: info.assetIn, abi: balanceOfAbi, functionName: "balanceOf", args: [escrow] });
+  return held >= refundAmount;
+}
+
 const DEPOSIT_COMPONENTS = [
   { name: "proof", type: "bytes" },
   { name: "commitment", type: "bytes32" },
@@ -123,12 +221,7 @@ export const vaultSwapAbi = [
     stateMutability: "view",
     inputs: [
       { name: "assetIn", type: "address" },
-      { name: "outCommitment", type: "bytes32" },
-      { name: "assetOut", type: "address" },
-      { name: "amountOut", type: "uint256" },
-      { name: "refundCommitment", type: "bytes32" },
-      { name: "refundAmount", type: "uint256" },
-      { name: "routeHash", type: "bytes32" },
+      { name: "k", type: "tuple", components: ESCROW_KEY_COMPONENTS },
     ],
     outputs: [{ name: "", type: "address" }],
   },

@@ -350,8 +350,18 @@ export function VaultSwapView() {
         <p className="t-title mt-5 text-foreground">What is public</p>
         <ul className="mt-3 space-y-2">
           <li>The two amounts and the two tokens, as with any trade on {venue}.</li>
-          <li>So cashing out that exact amount later can be matched to this swap. Send it on or cash out a different amount.</li>
+          <li>
+            The amount you swap, too: swapping exactly what you added links back to that deposit. Swap a different
+            amount.
+          </li>
+          <li>And cashing out exactly what you got can be matched to this swap. Send it on or cash out a different amount.</li>
         </ul>
+        <p className="t-title mt-5 text-foreground">If it can&apos;t finish</p>
+        <p className="mt-3">
+          Once a swap is sent, anyone can make it fail on purpose by sending its first step on its own. Then the money
+          comes back to your private balance by itself, less up to 1%: the vault&apos;s cash-out fee and a safety
+          margin that goes to the Gloam treasury.
+        </p>
       </div>
     </div>
   );

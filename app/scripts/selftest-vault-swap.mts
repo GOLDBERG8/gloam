@@ -10,11 +10,16 @@
  * Run: npx tsx scripts/selftest-vault-swap.mts [--live]
  */
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import { createPublicClient, decodeAbiParameters, encodeAbiParameters, http, keccak256, type Address } from "viem";
 import {
   RH_SWAP_POOLS,
+  SWAP_ESCROW_CODE_HASH,
+  SWAP_ESCROW_INIT_CODE,
   VAULT_SWAP_ROUTERS,
   encodeRoute,
+  escrowAddress,
+  refundEscrowKey,
   isKnownRoute,
   planVaultSwap,
   refundAmountFor,
@@ -60,6 +65,52 @@ assert.ok(!isKnownRoute(4663, USDG, GLOAM, [{ ...there[0]![0]!, hooks: "0x000000
 assert.ok(isKnownRoute(4217, USDG, GLOAM, []), "Tempo takes no route");
 assert.ok(!isKnownRoute(4217, USDG, GLOAM, there[0]!));
 n += 5;
+
+// The escrow code the app works addresses out from is the pinned one, and (when
+// the contracts are built) exactly what the compiler made of SwapEscrow.sol.
+assert.equal(keccak256(SWAP_ESCROW_INIT_CODE), SWAP_ESCROW_CODE_HASH);
+n++;
+const artifact = new URL("../../contracts/out/SwapEscrow.sol/SwapEscrow.json", import.meta.url);
+if (existsSync(artifact)) {
+  const built = JSON.parse(readFileSync(artifact, "utf8")).bytecode.object as string;
+  assert.equal(built.toLowerCase(), SWAP_ESCROW_INIT_CODE.toLowerCase(), "SwapEscrow was changed: update SWAP_ESCROW_INIT_CODE");
+  n++;
+}
+// Every part of the key moves the address; the refund note's key is what the swap used.
+{
+  const router = "0x00000000000000000000000000000000000beef1" as Address;
+  const key = {
+    nullifier: `0x${"01".repeat(32)}`,
+    amountIn: 20_000_000n,
+    outCommitment: `0x${"02".repeat(32)}`,
+    assetOut: GLOAM,
+    amountOut: 7n * 10n ** 18n,
+    refundCommitment: `0x${"03".repeat(32)}`,
+    refundAmount: refundAmountFor(20_000_000n),
+    routeHash: keccak256(encodeRoute(there[1]!)),
+  } as const;
+  const base = escrowAddress(router, USDG, key);
+  for (const change of [
+    { nullifier: `0x${"09".repeat(32)}` },
+    { amountIn: 20_000_001n },
+    { amountOut: 1n },
+    { refundCommitment: `0x${"09".repeat(32)}` },
+    { routeHash: keccak256(encodeRoute(there[0]!)) },
+  ]) {
+    assert.notEqual(escrowAddress(router, USDG, { ...key, ...change } as typeof key), base);
+  }
+  assert.notEqual(escrowAddress(router, GLOAM, key), base, "another input asset");
+  assert.notEqual(escrowAddress("0x00000000000000000000000000000000000beef2", USDG, key), base, "another router");
+  const info = {
+    router,
+    assetIn: USDG,
+    amountIn: "20000000",
+    out: { commitment: key.outCommitment, asset: GLOAM, amount: key.amountOut.toString() },
+    route: there[1]!,
+  };
+  assert.deepEqual(refundEscrowKey(info, key.nullifier, key.refundCommitment, key.refundAmount), key);
+  n += 8;
+}
 
 // Route bytes decode as PoolKey[].
 const bytes = encodeRoute(there[1]!);

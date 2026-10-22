@@ -349,6 +349,94 @@ await test("a wrong amount is caught before anything is sent", async () => {
   assert.equal(freshOf(claim).length, 0);
 });
 
+// ---------------------------------------------------------------- private swaps (review F-2)
+
+/** A swap's two pending notes (the new one, and the refund note that keeps what a refund needs). */
+async function swapNotes(pool: ReturnType<typeof mockPool>, amount: bigint) {
+  const spentNote = await claimed(pool, amount);
+  const from = { id: spentNote.id, nullifier: spentNote.nullifier! };
+  const fresh = async (id: string, value: bigint, extra: Partial<LocalNote>) => {
+    const secret = await randomSecretField();
+    const commitment = fieldToHex(await noteCommitmentPoseidon(secret, value, ASSET));
+    const n: LocalNote = {
+      id,
+      chainId: net.chainId,
+      pool: POOL,
+      asset: ASSET,
+      amountWei: value.toString(),
+      commitment,
+      secret: fieldToHex(secret),
+      nullifier: fieldToHex(await noteNullifierPoseidon(secret, hexToField(commitment))),
+      bound: true,
+      scheme: "poseidon",
+      from: ME,
+      createdAt: Date.now(),
+      status: "open",
+      source: "local",
+      sweptFrom: from,
+      sweepPending: true,
+      ...extra,
+    };
+    saveLocalNote(n);
+    return n;
+  };
+  const out = await fresh(`sw-${Date.now()}`, 7_000_000n, {});
+  const refund = await fresh(`swr-${Date.now()}`, amount - amount / 100n, {
+    vaultSwap: {
+      router: "0x00000000000000000000000000000000000beef1",
+      assetIn: ASSET,
+      amountIn: amount.toString(),
+      out: { commitment: out.commitment, asset: ASSET, amount: out.amountWei },
+      route: [],
+    },
+  });
+  return { spentNote, out, refund };
+}
+
+await test("swap: an unshield sent alone keeps the refund note pending and finishes it", async () => {
+  const pool = mockPool();
+  const { spentNote, out, refund } = await swapNotes(pool, 20_000_000n);
+  pool.spent.add(lc(spentNote.nullifier!)); // the unshield, sent on its own: money at the escrow
+  const finished: string[] = [];
+  const env = pool.env({ escrowWaiting: async () => true, finishRefund: async (n) => void finished.push(n.id) });
+  await reconcileClaims(env);
+  assert.equal(byId(refund.id).status, "open", "the refund note is not dead");
+  assert.equal(byId(refund.id).sweepPending, true, "still pending, out of the balance");
+  assert.equal(byId(out.id).status, "recovered", "the swap's new note can never land now");
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(finished, [refund.id], "the refund is finished");
+  // the refund lands: counted, once
+  await pool.insert(refund.commitment);
+  await reconcileClaims(env);
+  assert.equal(byId(refund.id).sweepPending, false);
+  assert.equal(byId(refund.id).status, "open");
+});
+
+await test("swap: an unreadable escrow keeps the refund note pending, and nothing is finished blind", async () => {
+  const pool = mockPool();
+  const { spentNote, refund } = await swapNotes(pool, 10_000_000n);
+  pool.spent.add(lc(spentNote.nullifier!));
+  let tried = 0;
+  const env = pool.env({ escrowWaiting: async () => null, finishRefund: async () => void tried++ });
+  await reconcileClaims(env);
+  assert.equal(byId(refund.id).sweepPending, true);
+  assert.equal(byId(refund.id).status, "open");
+  assert.equal(tried, 0);
+  // a read that throws counts as unread too
+  await reconcileClaims(pool.env({ escrowWaiting: async () => Promise.reject(new Error("rpc down")) }));
+  assert.equal(byId(refund.id).status, "open");
+});
+
+await test("swap: once the swap landed, the empty escrow lets the refund note go", async () => {
+  const pool = mockPool();
+  const { spentNote, out, refund } = await swapNotes(pool, 10_000_000n);
+  pool.spent.add(lc(spentNote.nullifier!));
+  await pool.insert(out.commitment); // the swap itself landed
+  await reconcileClaims(pool.env({ escrowWaiting: async () => false }));
+  assert.equal(byId(out.id).sweepPending, false, "the new note counts");
+  assert.equal(byId(refund.id).status, "recovered", "the refund note can never land");
+});
+
 // The note store's writes land on disk encrypted, never as plaintext.
 await new Promise((r) => setTimeout(r, 50));
 const stored = localStorage.getItem("gloam.shield.notes.v1") ?? "";

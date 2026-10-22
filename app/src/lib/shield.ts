@@ -8,6 +8,7 @@ import { knownTokens } from "./tokens";
 import { getActiveNetwork } from "./networks";
 import { makeBoundNote } from "./note";
 import { getAllNotes, setAllNotes } from "./noteVault";
+import type { VaultSwapRefundInfo } from "./vaultSwap";
 import { walkLogs, walkTuning } from "./leafIndex";
 import {
   activeHashScheme,
@@ -456,6 +457,12 @@ export type LocalNote = {
    * the note unspent) the note is spendable again.
    */
   cashOut?: CashOutMark;
+  /**
+   * On a private swap's refund note (lib/vaultSwap): what finishing the refund
+   * needs, if someone sends the swapped note's unshield on its own. While the
+   * money waits at the swap's escrow the note stays pending, never dead.
+   */
+  vaultSwap?: VaultSwapRefundInfo;
 };
 
 export type CashOutMark = {
