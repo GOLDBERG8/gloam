@@ -235,7 +235,15 @@ export function VolumeChart({ days, caption }: { days: VolumeDay[]; caption: str
         </span>
       </div>
       <div ref={setWrap} className="relative" onPointerLeave={() => setHover(null)}>
-        <svg width={width} height={H} role="img" aria-labelledby={titleId} className="block max-w-full">
+        {/* The viewBox lets the plot scale down on a phone narrower than its 260px floor instead of clipping. */}
+        <svg
+          viewBox={`0 0 ${width} ${H}`}
+          width={width}
+          height={H}
+          role="img"
+          aria-labelledby={titleId}
+          className="block h-auto max-w-full"
+        >
           <title id={titleId}>{caption}</title>
           {ticks.map((t, i) => {
             const yy = i < 2 ? mid - y(t) : i === 2 ? mid : mid + y(t);

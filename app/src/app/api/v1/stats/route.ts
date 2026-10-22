@@ -55,6 +55,7 @@ export async function GET(req: Request) {
           heldUsd: m.combined.heldUsd,
           unpriced: m.combined.unpriced,
         },
+        combinedIncludesTestnets: true,
         // real money only; `combined` above also counts the testnets
         ...(m.mainnet
           ? {

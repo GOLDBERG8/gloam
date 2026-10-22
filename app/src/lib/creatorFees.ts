@@ -21,6 +21,7 @@ import type { Windowed } from "./onchainMetrics";
 import { cacheGetJson, cacheSetJson, utcDay } from "./tractionStore";
 import { serverTransport } from "./serverRpc";
 import { MAINNET_LAUNCH_MS } from "./mainnet";
+import { getLogsSafe } from "./logRange";
 
 const VAULT = "0x953391a2ddf7e8437feb878fdf2c6f325fbf00cc";
 /** $GLOAM's id in the vault. */
@@ -109,7 +110,8 @@ async function scan(prev: State, head: number): Promise<State> {
   const logs: Log[] = [];
   for (let i = 0; i < spans.length; i += 2) {
     const part = await Promise.all(
-      spans.slice(i, i + 2).map(([a, b]) => c.getLogs({ address: VAULT, fromBlock: a, toBlock: b }))
+      // A span holding more than 10,000 vault logs is refused by the RPC: it is halved until it fits.
+      spans.slice(i, i + 2).map(([a, b]) => getLogsSafe((x, y) => c.getLogs({ address: VAULT, fromBlock: x, toBlock: y }), a, b))
     );
     logs.push(...part.flat());
   }

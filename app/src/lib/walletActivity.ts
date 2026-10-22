@@ -151,21 +151,8 @@ async function read(key: NetworkKey, address: Address, k: string): Promise<{ txs
     .sort((a, b) => Number(BigInt(b.block) - BigInt(a.block)) || b.logIndex - a.logIndex)
     .slice(0, KEEP);
 
-  // Block times for the rows that have none yet, one lookup per block.
-  const missing = [...new Set(rows.filter((r) => !r.timestamp).map((r) => r.block))];
-  const times = new Map<string, number>();
-  await Promise.all(
-    missing.map(async (b) => {
-      try {
-        const block = await gated(id, () => c.getBlock({ blockNumber: BigInt(b) }));
-        times.set(b, Number(block.timestamp) * 1000);
-      } catch {
-        /* shown without a time; the next read tries again */
-      }
-    })
-  );
-  const timed = rows.map((r) => (r.timestamp ? r : { ...r, timestamp: times.get(r.block) ?? 0 }));
-
-  saveCached(k, { scannedTo: String(latest), rows: timed });
-  return { txs: timed };
+  // No block-time lookups: the feed orders rows by block and shows no times,
+  // and up to 40 getBlock calls made its first load slow.
+  saveCached(k, { scannedTo: String(latest), rows });
+  return { txs: rows };
 }

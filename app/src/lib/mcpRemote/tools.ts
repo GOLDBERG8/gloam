@@ -377,13 +377,7 @@ async function vaultStats(args: Args, ctx: ToolContext): Promise<CallToolResult>
     ...(only
       ? {}
       : {
-          combined: {
-            heldUsd: Math.round(m.combined.heldUsd * 100) / 100,
-            deposits: m.combined.deposits,
-            privateTransfers: m.combined.transfers,
-            cashouts: m.combined.cashouts,
-            paymentMessages: m.combined.memos,
-          },
+          // Real money first. The all-networks total adds testnet play money and says so in its name.
           ...(m.mainnet
             ? {
                 mainnet: {
@@ -395,9 +389,16 @@ async function vaultStats(args: Args, ctx: ToolContext): Promise<CallToolResult>
                 },
               }
             : {}),
+          allNetworksIncludingTestnets: {
+            heldUsd: Math.round(m.combined.heldUsd * 100) / 100,
+            deposits: m.combined.deposits,
+            privateTransfers: m.combined.transfers,
+            cashouts: m.combined.cashouts,
+            paymentMessages: m.combined.memos,
+          },
         }),
     about:
-      "Vault-level totals anyone can read from public nodes. Deposits, private transfers and cash outs are counted since countedSince: on mainnet that is the public launch, 21 Oct 2026 13:00 UTC, so the team's own checks before launch are not counted, while holdings are the live balance. That is why a vault can hold money with no deposit counted. Amounts of private transfers and who holds what inside a vault are not public, and are not here.",
+      "Vault-level totals anyone can read from public nodes. `mainnet` is real money; `allNetworksIncludingTestnets` adds the testnets' play money and is not a measure of real deposits, so quote `mainnet` for how much is in Gloam. Deposits, private transfers and cash outs are counted since countedSince: on mainnet that is the public launch, 21 Oct 2026 13:00 UTC, so the team's own checks before launch are not counted, while holdings are the live balance. That is why a vault can hold money with no deposit counted. Amounts of private transfers and who holds what inside a vault are not public, and are not here.",
     transparency: `${ctx.origin}/transparency`,
   });
 }

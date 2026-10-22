@@ -561,9 +561,12 @@ export function AdminDashboard() {
     f: (m: NetworkMetrics) => ReactNode,
     total: (c: NonNullable<typeof agg>) => ReactNode
   ): ReactNode[] => [...sideNets.map((m) => f(m)), agg ? total(agg) : ""];
-  const recentTx = (oc?.recent ?? []).filter(
-    (tx) => getNetwork(isNetworkKey(tx.network) ? tx.network : "robinhood").testnet !== isMain
-  );
+  // This side's own newest rows: the combined list keeps only the newest few
+  // across every network, so a busy side would push the other one out of it.
+  const recentTx = sideNets
+    .flatMap((m) => m.recent)
+    .sort((a, b) => b.ts - a.ts || Number(b.block) - Number(a.block))
+    .slice(0, 25);
   const money = isMain ? "real money" : "play money";
   // Bridge and swaps move real money only.
   const shown: Tab = !isMain && tab === "relay" ? "overview" : tab;

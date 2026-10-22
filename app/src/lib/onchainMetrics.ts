@@ -39,6 +39,7 @@ import { cacheGetJson, cacheSetJson, lastDays, utcDay } from "./tractionStore";
 import { serverTransport } from "@/lib/serverRpc";
 import { readCreatorFees, type CreatorFees } from "./creatorFees";
 import { MAINNET_LAUNCH_MS } from "./mainnet";
+import { errText, getLogsSafe } from "./logRange";
 
 export type ActivityKind = "deposit" | "transfer" | "cashout" | "trade";
 
@@ -360,46 +361,15 @@ async function gated<T>(chainId: number, call: () => Promise<T>): Promise<T> {
   }
 }
 
-function errText(e: unknown): string {
-  if (e && typeof e === "object") {
-    const o = e as { details?: unknown; shortMessage?: unknown; message?: unknown };
-    return String(o.details ?? o.shortMessage ?? o.message ?? e);
-  }
-  return String(e);
-}
-
-/** The node refusing a span as too wide or too big (not a rate limit). */
-const RANGE_ERROR =
-  /block range|range (is )?too|exceeds? (the )?max|max(imum)? block|only \d+ are allowed|more than \d+ (results|logs)|too many (results|logs)|response size|query timeout|limit exceeded/i;
-
-function isRateLimit(e: unknown): boolean {
-  const status = (e as { status?: number })?.status;
-  return status === 429 || /429|too many requests|rate ?limit/i.test(errText(e));
-}
-
-/** getLogs for one range: retries transient failures, halves the range when the node says it is too wide. */
-async function getLogsSafe(
-  fetchRange: (from: bigint, to: bigint) => Promise<Log[]>,
-  from: bigint,
-  to: bigint,
-  depth = 0
-): Promise<Log[]> {
-  let last: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      return await fetchRange(from, to);
-    } catch (e) {
-      last = e;
-      if (!isRateLimit(e) && RANGE_ERROR.test(errText(e)) && to > from && depth < 10) {
-        const mid = from + (to - from) / 2n;
-        const a = await getLogsSafe(fetchRange, from, mid, depth + 1);
-        const b = await getLogsSafe(fetchRange, mid + 1n, to, depth + 1);
-        return [...a, ...b];
-      }
-      await sleep(1500 * (attempt + 1));
-    }
-  }
-  throw last;
+/**
+ * Relay's router makes every private-bridge deposit (lib/bridge
+ * privateBridgeable), so its address is not a person's wallet: such a deposit
+ * counts as money in, but not as a wallet or a depositor.
+ */
+const RELAY_ROUTER = "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
+function depositor(from: string | undefined): string | undefined {
+  const w = from?.toLowerCase();
+  return w === RELAY_ROUTER ? undefined : w;
 }
 
 function ranges(from: bigint, to: bigint, step: bigint): [bigint, bigint][] {
@@ -636,7 +606,7 @@ async function scan(
     const asset = assetKey;
     switch (log.eventName) {
       case "Shielded":
-        fresh.push({ ...base, k: "deposit", w: log.args.from?.toLowerCase(), a: asset(log.args.asset), v: String(log.args.amount ?? 0n) });
+        fresh.push({ ...base, k: "deposit", w: depositor(log.args.from), a: asset(log.args.asset), v: String(log.args.amount ?? 0n) });
         break;
       case "Unshielded": {
         const fee = feeOf.get(`${log.transactionHash}:${log.args.nullifier}`);
