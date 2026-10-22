@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSwitchChain } from "wagmi";
 import { ensureWalletOnChain } from "@/lib/chain";
 import { useAppAccount } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
@@ -11,6 +12,7 @@ export function NetworkPulse() {
   const { network } = useNetwork();
   const { isConnected, chainId } = useAppAccount();
   const onProduct = chainId === network.chainId;
+  const { switchChainAsync } = useSwitchChain();
   const [busy, setBusy] = useState(false);
 
   // On the right network (or not yet connected) there is no status chip: the
@@ -26,7 +28,10 @@ export function NetworkPulse() {
       disabled={busy}
       onClick={() => {
         setBusy(true);
-        void ensureWalletOnChain(network.chain).finally(() => setBusy(false));
+        // wagmi reaches wallet apps too; the direct call only a browser wallet
+        void switchChainAsync({ chainId: network.chainId })
+          .catch(() => ensureWalletOnChain(network.chain))
+          .finally(() => setBusy(false));
       }}
       className="inline-flex min-h-10 items-center rounded-full transition-opacity hover:opacity-80 disabled:opacity-60"
       title={`Switch to ${network.label}`}

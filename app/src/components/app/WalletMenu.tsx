@@ -14,7 +14,8 @@ import {
 } from "wagmi";
 import { exitDemo, useAppAccount } from "@/lib/demo";
 import { ensureRhTestnetWallet, ensureWalletOnChain, shortAddress } from "@/lib/chain";
-import type { GloamChainId } from "@/lib/networks";
+import { allNetworks, networkName, type GloamChainId } from "@/lib/networks";
+import { ORIGIN_CHAINS } from "@/lib/originChains";
 import {
   FEE_MANAGER,
   OUSD,
@@ -55,6 +56,17 @@ function detectVariant(el: HTMLElement | null): WalletMenuVariant {
   return "inline";
 }
 
+/**
+ * What to call the chain a wallet reports, for "Your wallet is on …": Gloam's
+ * own networks by name, the chains the bridge pays from by theirs, any other
+ * by its id.
+ */
+function walletChainName(id: number): string {
+  const own = allNetworks().find((n) => n.chainId === id);
+  if (own) return networkName(own);
+  return ORIGIN_CHAINS.find((c) => c.id === id)?.name ?? `chain ${id}`;
+}
+
 export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   const { address, isConnected, isConnecting, chainId, demo, connector } =
     useAppAccount();
@@ -71,6 +83,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   const closeWc = useCallback(() => setWcOpen(false), []);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [switchFailed, setSwitchFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const mounted = env.mounted;
@@ -124,6 +137,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
 
   async function onSwitch() {
     setBusy(true);
+    setSwitchFailed(false);
     try {
       try {
         await switchChain({ chainId: network.chainId });
@@ -133,7 +147,9 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
         await switchChain({ chainId: network.chainId });
       }
     } catch {
-      /* ignore */
+      // A wallet app connected before it had this chain refuses the switch
+      // until it connects again; say so instead of doing nothing.
+      setSwitchFailed(true);
     } finally {
       setBusy(false);
     }
@@ -336,6 +352,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   }
 
   if (wrong) {
+    const walletOn = chainId === undefined ? null : walletChainName(chainId);
     return (
       <div ref={root} className={compact ? "inline-flex" : undefined}>
         <button
@@ -350,6 +367,25 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               ? "Switch network"
               : `Switch to ${network.label}`}
         </button>
+        {!compact && (walletOn || switchFailed) && (
+          <p className={`mt-2 text-[12px] leading-snug ${switchFailed ? "text-danger" : "text-mute"}`}>
+            {walletOn && `Your wallet is on ${walletOn}. `}
+            {switchFailed &&
+              `It did not switch. Pick ${networkName(network)} in your wallet, then disconnect here and connect again.`}
+          </p>
+        )}
+        {!compact && switchFailed && (
+          <button
+            type="button"
+            onClick={() => {
+              setSwitchFailed(false);
+              disconnect();
+            }}
+            className="inline-flex min-h-10 items-center text-[12px] font-medium text-foreground underline underline-offset-2"
+          >
+            Disconnect
+          </button>
+        )}
       </div>
     );
   }

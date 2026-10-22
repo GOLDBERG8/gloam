@@ -74,7 +74,11 @@ export function useAppAccount() {
   const account = useAccount();
   const walletChainId = useChainId();
   const { network } = useNetwork();
-  if (!demo) return { ...account, chainId: walletChainId, demo };
+  // The chain the wallet itself reports. wagmi's useChainId only follows the
+  // wallet onto chains the config registers, so a wallet on any other chain
+  // read as still on the last one, and the app could ask a wallet that was
+  // already there to switch, or let one on the wrong chain try to sign.
+  if (!demo) return { ...account, chainId: account.chainId ?? walletChainId, demo };
   return {
     ...account,
     address: DEMO_ADDRESS,
