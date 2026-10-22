@@ -440,7 +440,7 @@ interface SyncedTree {
 }`}</code>
       </pre>
       <p>
-        The usual flow: <code>const synced = await syncTree(client, {"{"} pool
+        The usual flow: <code>const synced = await syncTree(client, {"{"} pool{" "}
         {"}"})</code>, then hand{" "}
         <code>await synced.pathForCommitment(note.commitment)</code> straight to{" "}
         <code>buildUnshieldIntent</code> or <code>buildPrivateSendIntent</code>.

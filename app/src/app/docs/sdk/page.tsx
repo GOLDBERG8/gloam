@@ -57,7 +57,7 @@ export default function DocsSdkPage() {
 
       <h2>Install</h2>
       <p>
-        The SDK ships TypeScript source, consumed through your bundler (Next
+        The SDK ships TypeScript source, consumed through your bundler (Next{" "}
         <code>transpilePackages</code>, Vite, tsx), the same way the reference
         app uses it. <code>snarkjs</code> is an optional peer, needed only when
         you generate proofs (shield, unshield, disclosure).
