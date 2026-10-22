@@ -174,6 +174,28 @@ export type BridgeQuote = {
   bitcoin: boolean;
 };
 
+/**
+ * Chains a connected wallet can pay from straight into the private balance:
+ * the wallet signs once and Relay makes the deposit when the money arrives
+ * (an approve and shieldBound run by Relay's router on Robinhood Chain or
+ * Tempo). A deposit address can't carry that call, so sending from an exchange
+ * still lands in the wallet first.
+ */
+export function privateBridgeable(chain: BridgeChain): boolean {
+  return chain.kind === "svm";
+}
+
+/** A Relay order that pays into the private balance, ready for the source wallet to sign. */
+export type PrivateBridgeQuote = {
+  requestId: string;
+  /** The unsigned Solana transaction, base64. */
+  solanaTx: string;
+  send: { amount: string; symbol: string; chain: string; chainId: number; logo: string; usd: number | null };
+  receive: { amount: string; symbol: string; chain: string; logo: string };
+  feeUsd: number;
+  timeSec: number;
+};
+
 export type BridgeStage = "waiting" | "moving" | "done" | "failed" | "refunded";
 
 export type BridgeStatus = { stage: BridgeStage; outTx: string | null };

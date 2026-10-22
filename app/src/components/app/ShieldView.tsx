@@ -995,6 +995,10 @@ export function ShieldView() {
                 void refreshBalances();
                 for (const ms of [4_000, 10_000]) window.setTimeout(() => void refreshBalances(), ms);
               }}
+              onPrivate={() => {
+                refreshNotes();
+                void refetchPool();
+              }}
             />
           )}
 
