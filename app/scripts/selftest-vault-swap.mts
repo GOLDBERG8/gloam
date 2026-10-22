@@ -41,10 +41,11 @@ const keyType = [
   { name: "hooks", type: "address" },
 ] as const;
 
-// Off until deployed.
-assert.equal(vaultSwapRouter(4663), null);
-assert.equal(vaultSwapRouter(4217), null);
-n += 2;
+// The routers deployed on 2026-10-23, and nothing on the testnets.
+assert.equal(vaultSwapRouter(4663), "0x34AB06208586A737Bf1607fa996Bc9162271c52d");
+assert.equal(vaultSwapRouter(4217), "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC");
+assert.equal(vaultSwapRouter(46630), null);
+n += 3;
 
 // The pool ids are the live ones the simulation used.
 const ids = RH_SWAP_POOLS.map((k) => keccak256(encodeAbiParameters([{ type: "tuple", components: keyType }], [k])).slice(0, 10));
@@ -143,6 +144,8 @@ async function refused(body: Record<string, unknown>, code: string) {
   await assert.rejects(relayVaultSwap(net, body), (e: unknown) => e instanceof RelayError && e.code === code);
   n++;
 }
+const deployed = VAULT_SWAP_ROUTERS[4663];
+VAULT_SWAP_ROUTERS[4663] = null;
 await refused(good, "no_swap");
 VAULT_SWAP_ROUTERS[4663] = "0x000000000000000000000000000000000000beef";
 await refused({ ...good, deposit: { ...good.deposit, asset: "0x20c0000000000000000000000000000000000000" } }, "swap_asset");
@@ -154,7 +157,7 @@ await refused({ ...good, spend: { ...good.spend, proof: "0x12" } }, "bad_request
 await refused({ ...good, refund: { ...good.refund, asset: GLOAM } }, "bad_request");
 await refused({ ...good, refund: { ...good.refund, amount: "20000001" } }, "bad_request");
 await refused({ ...good, refund: undefined }, "bad_request");
-VAULT_SWAP_ROUTERS[4663] = null;
+VAULT_SWAP_ROUTERS[4663] = deployed;
 
 if (process.argv.includes("--live")) {
   const rh = createPublicClient({ transport: http("https://rpc.mainnet.chain.robinhood.com") });

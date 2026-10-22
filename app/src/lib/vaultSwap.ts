@@ -28,8 +28,10 @@ import {
 
 /** The router per chain. null: swaps are off there. */
 export const VAULT_SWAP_ROUTERS: Record<number, Address | null> = {
-  4663: null,
-  4217: null,
+  // GloamVaultSwapV4, deployed 2026-10-23 (block 95481565); pools match RH_SWAP_POOLS
+  4663: "0x34AB06208586A737Bf1607fa996Bc9162271c52d",
+  // GloamVaultSwapTempo, deployed 2026-10-23 (block 45415156)
+  4217: "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC",
 };
 
 export function vaultSwapRouter(chainId: number): Address | null {
