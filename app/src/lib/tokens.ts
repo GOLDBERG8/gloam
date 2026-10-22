@@ -11,6 +11,8 @@ export type OnchainToken = {
   yahoo: string;
   /** A tokenized stock, a dollar stablecoin, or another token ($GLOAM). */
   kind: "stock" | "stablecoin" | "token";
+  /** CoinGecko's id, for a live USD price where the markets feed has none. */
+  coingecko?: string;
 };
 
 export const TESTNET_STOCK_TOKENS: OnchainToken[] = [
@@ -93,7 +95,7 @@ export const PAXOS_FAUCET_URL = "https://faucet.paxos.com/";
  */
 export const RH_MAINNET_TOKENS: OnchainToken[] = [
   { id: "usdg", symbol: "USDG", name: "Global Dollar", address: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", decimals: 6, yahoo: "", kind: "stablecoin" },
-  { id: "gloam", symbol: "GLOAM", name: "Gloam", address: "0xDcD885F5c60b3aD49F6D58718696417314e8724d", decimals: 18, yahoo: "", kind: "token" },
+  { id: "gloam", symbol: "GLOAM", name: "Gloam", address: "0xDcD885F5c60b3aD49F6D58718696417314e8724d", decimals: 18, yahoo: "", kind: "token", coingecko: "gloam" },
 ];
 
 /**

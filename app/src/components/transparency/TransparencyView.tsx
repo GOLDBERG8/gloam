@@ -28,6 +28,7 @@ import {
   type VaultHolding,
 } from "./ledger";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
+import { RH_MAINNET_TOKENS } from "@/lib/tokens";
 
 const LOGOS: Record<ChainFamily, string> = {
   robinhood: "/brand/logos/robinhood.png",
@@ -119,10 +120,14 @@ function useLedger(key: NetworkKey | null) {
 
 type Prices = { ethUsd: number | null; byAddress: Map<string, number> };
 
+/** Vault tokens the markets feed does not price, priced live from CoinGecko instead ($GLOAM). */
+const COINGECKO_PRICED = RH_MAINNET_TOKENS.filter((t) => t.coingecko);
+
 /**
- * USD marks the app already uses (/api/markets); stablecoins count as $1.
- * `waiting` stays true for a few seconds only, so a slow quote feed never
- * holds the page: the total then shows what is priced and says what is not.
+ * USD marks the app already uses (/api/markets), plus CoinGecko for the
+ * tokens above; stablecoins count as $1. `waiting` stays true for a few
+ * seconds only, so a slow quote feed never holds the page: the total then
+ * shows what is priced and says what is not.
  */
 function usePrices(): { prices: Prices | null; waiting: boolean } {
   const [prices, setPrices] = useState<Prices | null>(null);
@@ -133,19 +138,25 @@ function usePrices(): { prices: Prices | null; waiting: boolean } {
   }, []);
   useEffect(() => {
     let live = true;
-    fetch("/api/markets", { cache: "no-store" })
+    const markets = fetch("/api/markets", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { ethUsd?: number | null; markets?: { address?: string; mark?: number }[] } | null) => {
-        if (!live) return;
-        const byAddress = new Map<string, number>();
-        for (const m of d?.markets ?? []) {
-          if (m.address && typeof m.mark === "number" && m.mark > 0) byAddress.set(m.address.toLowerCase(), m.mark);
-        }
-        setPrices({ ethUsd: typeof d?.ethUsd === "number" ? d.ethUsd : null, byAddress });
-      })
-      .catch(() => {
-        if (live) setPrices({ ethUsd: null, byAddress: new Map() });
-      });
+      .catch(() => null) as Promise<{ ethUsd?: number | null; markets?: { address?: string; mark?: number }[] } | null>;
+    const ids = COINGECKO_PRICED.map((t) => t.coingecko).join(",");
+    const gecko = fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null) as Promise<Record<string, { usd?: number }> | null>;
+    void Promise.all([markets, gecko]).then(([d, g]) => {
+      if (!live) return;
+      const byAddress = new Map<string, number>();
+      for (const m of d?.markets ?? []) {
+        if (m.address && typeof m.mark === "number" && m.mark > 0) byAddress.set(m.address.toLowerCase(), m.mark);
+      }
+      for (const t of COINGECKO_PRICED) {
+        const usd = g?.[t.coingecko!]?.usd;
+        if (typeof usd === "number" && usd > 0) byAddress.set(t.address.toLowerCase(), usd);
+      }
+      setPrices({ ethUsd: typeof d?.ethUsd === "number" ? d.ethUsd : null, byAddress });
+    });
     return () => {
       live = false;
     };
