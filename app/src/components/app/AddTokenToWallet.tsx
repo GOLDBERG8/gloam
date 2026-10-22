@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Address } from "viem";
 import { useAccount, useWatchAsset } from "wagmi";
-import { getNetwork, allNetworks } from "@/lib/networks";
+import { allNetworks, getNetwork, networkName } from "@/lib/networks";
 import { knownTokens } from "@/lib/tokens";
 import { isNativeAsset } from "@/lib/shield";
 import { walletDeclined } from "@/lib/walletErrors";
@@ -23,6 +23,7 @@ export function AddTokenToWallet({ chainId, asset, to }: { chainId: number; asse
   const token = knownTokens(chainId).find((t) => t.address.toLowerCase() === asset.toLowerCase());
   if (!token || isNativeAsset(asset)) return null;
   const net = allNetworks().find((n) => n.chainId === chainId) ?? getNetwork("robinhood-mainnet");
+  const chainName = networkName(net);
   const mine = Boolean(address && to.toLowerCase() === address.toLowerCase());
 
   async function onAdd() {
@@ -58,8 +59,8 @@ export function AddTokenToWallet({ chainId, asset, to }: { chainId: number; asse
     <>
       <p className="mx-auto mt-1 max-w-[36ch] text-[13px] leading-relaxed text-mute">
         {mine
-          ? `If it doesn't show, switch the wallet to ${net.label} and import ${token.symbol} with this address:`
-          : `Import ${token.symbol} in that wallet to see it. Switch it to ${net.label}, then import this address:`}
+          ? `If it doesn't show, switch the wallet to ${chainName} and import ${token.symbol} with this address:`
+          : `Import ${token.symbol} in that wallet to see it. Switch it to ${chainName}, then import this address:`}
       </p>
       <div className="mx-auto mt-3 flex max-w-full items-center justify-center gap-2">
         <code className="tnum min-w-0 truncate rounded-lg bg-surface px-2.5 py-1.5 text-[12px] text-foreground">
@@ -79,7 +80,7 @@ export function AddTokenToWallet({ chainId, asset, to }: { chainId: number; asse
       </p>
       {added === "added" ? (
         <p className="mx-auto mt-1 max-w-[34ch] text-[13px] leading-relaxed text-mute">
-          It shows there now, on {net.label}.
+          It shows there now, on {chainName}.
         </p>
       ) : mine && added === "idle" ? (
         <>

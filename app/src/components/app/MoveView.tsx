@@ -2956,8 +2956,8 @@ function SweptWarning({
     <div role="alert" className="mt-3 rounded-[14px] bg-warn-soft px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
       <p className="font-medium text-warn">Check this address first</p>
       <p className="mt-1">
-        Money sent to {shortAddress(address, 4)} has been moved out automatically within seconds before, by another
-        account. If you didn&apos;t set that up, this wallet may be compromised and your cash out could be taken the
+        Money sent to {shortAddress(address, 4)}{" "}
+        has been moved out automatically within seconds before, by another account. If you didn&apos;t set that up, this wallet may be compromised and your cash out could be taken the
         same way.{" "}
         <a href={evidenceHref} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
           See it on the explorer
