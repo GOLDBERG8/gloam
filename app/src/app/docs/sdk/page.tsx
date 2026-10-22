@@ -14,7 +14,7 @@ export default function DocsSdkPage() {
       title="SDK"
       lede="The privacy layer for Robinhood Chain and Tempo, as a package. Give any app or agent shielded balances, private payments, and selective disclosure, without building a proving stack from scratch."
       glance={[
-        { label: "Package", value: "@gloamtrade/sdk 0.1.0" },
+        { label: "Package", value: "@gloamtrade/sdk 0.2.0" },
         { label: "Runtime", value: "browser + node" },
         { label: "Chains", value: "Mainnet 4663 · 4217, testnet 46630 · 42431" },
         { label: "Proofs", value: "Groth16 + Poseidon" },
@@ -290,8 +290,10 @@ const { proofBytes, publicSignals } = await prover(circomInput);`}</code>
         </li>
         <li>
           <strong>Private payments.</strong> Send to a receive tag; the recipient
-          scans the encrypted <code>GloamPayMemo</code> inbox and opens the note.
-          See <Link href="/docs/private-pay">Private pay</Link>.
+          scans the encrypted <code>GloamPayMemo</code> inbox and opens the note
+          (on mainnet, until it has a board, the payer hands over the sealed
+          code). See <Link href="/docs/private-pay">Private pay</Link> and{" "}
+          <a href="#receive">Take payments and read their notes</a>.
         </li>
         <li>
           <strong>Compliance without opacity.</strong> A holder proves one
@@ -304,6 +306,87 @@ const { proofBytes, publicSignals } = await prover(circomInput);`}</code>
           <Link href="/docs/agents">Agents</Link>.
         </li>
       </ul>
+
+      <h2 id="receive">Take payments and read their notes</h2>
+      <p>
+        New in 0.2.0. A service can ask to be paid privately, with a note on
+        each payment (an invoice number, an agent ID), and credit each payment
+        by its note. Only your key reads the note, and nothing on chain ties the
+        payer to it.
+      </p>
+      <ol>
+        <li>
+          <strong>Hold a receive key.</strong> <code>generateReceiveKey()</code>{" "}
+          gives you a Gloam address (<code>gloamr1.…</code>) to share and a
+          private key to keep on your server.
+        </li>
+        <li>
+          <strong>Make a request link.</strong>{" "}
+          <code>buildPaymentRequestLink</code> builds the same link the Gloam app
+          makes: your address, the network, the token, an optional amount, and
+          a note of up to 80 characters. A longer note is refused, not cut.
+        </li>
+        <li>
+          <strong>The payer pays it</strong> from their private balance in Gloam.
+          The note travels inside the payment, sealed to your address.
+        </li>
+        <li>
+          <strong>Find it.</strong> Where the network has a payment-message
+          board, <code>scanIncomingPayments</code> finds every payment sealed to
+          your key, with its amount, token and note. It only returns payments
+          that are in the vault and not yet spent, read at one block. Resume
+          each scan from <code>scannedTo + 1</code>.
+        </li>
+        <li>
+          <strong>Secure it, then credit.</strong> Until you move it, the payer
+          could still spend it back. <code>sweepReceivedNote</code> moves it into
+          a note only you know, through the Gloam relay, so your server needs no
+          gas. Credit the payment only when the sweep returns{" "}
+          <code>final: true</code>.
+        </li>
+      </ol>
+      <pre>
+        <code>{`import {
+  mainnetNetwork, generateReceiveKey, buildPaymentRequestLink,
+  scanIncomingPayments, openIncomingPayment, notePackageToExport,
+  sweepReceivedNote, sweepChainFromClient, relaySubmitter,
+} from "@gloamtrade/sdk";
+
+const net = mainnetNetwork("robinhood")!;
+const key = await generateReceiveKey();       // keep key.privateJwk secret
+
+const link = buildPaymentRequestLink({
+  payTo: key.tag, network: net, asset: "USDG", amount: "25", note: "agent:42",
+});
+
+// With a payment-message board: scan for payments to your key.
+const { payments, scannedTo } = await scanIncomingPayments({ client, network: net, receiveKey: key });
+
+// Without one (mainnet today): check the sealed code the payer hands over.
+const check = await openIncomingPayment({ client, network: net, receiveKey: key, sealedTicket: code });
+
+for (const p of payments) {
+  const r = await sweepReceivedNote({
+    note: await notePackageToExport(p.notePackage),
+    poolAddress: net.pool, chainId: net.chainId, prove,
+    chain: sweepChainFromClient(client, { pool: net.pool, fromBlock: net.deployBlock }),
+    submit: relaySubmitter(),
+    beforeSubmit: (fresh) => saveNote(fresh),  // persist before it is sent
+  });
+  if (r.final) creditAgent(p.note, p.amountWei);
+}`}</code>
+      </pre>
+      <p>
+        <strong>Mainnet today:</strong> Robinhood Chain and Tempo mainnet have
+        no payment-message board yet, so a payment to a Gloam address is not
+        posted on chain there. After paying, the payer&apos;s app shows a sealed
+        code (<code>gloam2t.…</code>). Take that code from the payer, for example
+        through a paste box or your API, and check it with{" "}
+        <code>openIncomingPayment</code>. It says whether the payment is ready,
+        has not landed yet, or was already spent. The testnets have boards, so{" "}
+        <code>scanIncomingPayments</code> works there now. A complete, runnable
+        version is in <code>packages/sdk/examples/receive-and-credit.ts</code>.
+      </p>
 
       <h2>Public inputs are pinned</h2>
       <p>
