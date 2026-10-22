@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { formatUnits, parseUnits, type Address, type Hex } from "viem";
+import { useAccount, useConfig } from "wagmi";
+import { getAccount, sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
 import {
   BRIDGE_CHAINS,
   BRIDGE_DESTINATIONS,
@@ -19,8 +21,9 @@ import {
   type PrivateBridgeQuote,
 } from "@/lib/bridge";
 import { prepareBridgeNote, settleBridgeNote } from "@/lib/bridgePrivate";
-import { useAppBalance, useAppSendTransaction, useAppTxReceipt } from "@/lib/demo";
+import { useAppBalance, useAppSendTransaction, useAppTxReceipt, useDemo } from "@/lib/demo";
 import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
+import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
 import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
@@ -41,7 +44,11 @@ type Stage =
   | { kind: "loading" }
   | { kind: "address"; quote: BridgeQuote; qr: string | null };
 
-/** Paying from a connected Solana wallet straight into the private balance. */
+/**
+ * Paying from the person's own wallet straight into the private balance: a
+ * Solana wallet (`wallet` and `account` set), or the connected EVM wallet on
+ * another chain or on this one (both null).
+ */
 type PrivateStage =
   | { kind: "idle" }
   | { kind: "working"; text: string }
@@ -49,16 +56,19 @@ type PrivateStage =
       kind: "review";
       quote: PrivateBridgeQuote;
       at: number;
-      wallet: SolanaWallet;
-      account: SolanaAccount;
+      wallet: SolanaWallet | null;
+      account: SolanaAccount | null;
       note: LocalNote;
       proof: Hex;
       signing: boolean;
+      /** What the wallet is being asked for right now, when there is more than one step. */
+      progress: string | null;
       error: string | null;
     }
-  | { kind: "sent"; quote: PrivateBridgeQuote; note: LocalNote; wallet: SolanaWallet; unsure: boolean }
+  | { kind: "sent"; quote: PrivateBridgeQuote; note: LocalNote; payer: string; hash: Hex | null; unsure: boolean }
   | { kind: "landed"; quote: PrivateBridgeQuote }
-  | { kind: "late"; quote: PrivateBridgeQuote };
+  | { kind: "late"; quote: PrivateBridgeQuote }
+  | { kind: "failed"; quote: PrivateBridgeQuote };
 
 /** A wallet's answer that means the person said no, so nothing was sent. */
 const DECLINED = /reject|denied|declin|cancel|closed/i;
@@ -209,14 +219,27 @@ function BridgeSheet({
   const [copied, setCopied] = useState(false);
   const token = chain.tokens.find((t) => t.symbol === symbol) ?? chain.tokens[0]!;
 
-  // Straight into the private balance from a Solana wallet in this browser,
-  // unless the person picks the deposit address (an exchange, another wallet).
+  // Straight into the private balance when the person's own wallet pays: a
+  // Solana wallet in this browser, the connected EVM wallet on another chain
+  // (a browser or WalletConnect wallet, which can switch chains), or the swap
+  // here. Off, it is the deposit address (an exchange) or the plain swap.
+  const config = useConfig();
+  const { connector } = useAccount();
+  const demo = useDemo();
   const solWallets = useSolanaWallets();
   const vault = useVaultStatus();
-  const canPrivate = privateBridgeable(chain) && !network.chain.testnet && Boolean(network.pool);
-  const [method, setMethod] = useState("");
-  const solWallet = canPrivate && method !== "address" ? (solWallets.find((w) => w.name === method) ?? solWallets[0] ?? null) : null;
-  const privately = Boolean(solWallet);
+  const [solName, setSolName] = useState("");
+  const solWallet = chain.kind === "svm" ? (solWallets.find((w) => w.name === solName) ?? solWallets[0] ?? null) : null;
+  const switchable = connector?.type === "injected" || connector?.type === "walletConnect";
+  const canPrivate =
+    !demo &&
+    !network.chain.testnet &&
+    Boolean(network.pool) &&
+    privateBridgeable(chain) &&
+    (chain.kind === "svm" ? Boolean(solWallet) : chain.swap ? true : switchable && Boolean(originChain(chain.id)));
+  const [privateOn, setPrivateOn] = useState(true);
+  const privately = canPrivate && privateOn;
+  const payerName = solWallet?.name ?? "your wallet";
   const [priv, setPriv] = useState<PrivateStage>({ kind: "idle" });
   // The note and proof for the amount typed, kept until it is sent so a fresh price reuses them.
   const prepared = useRef<{ key: string; note: LocalNote; proof: Hex } | null>(null);
@@ -249,7 +272,7 @@ function BridgeSheet({
   // so the rate and fees show before review. It is the same quote the review uses.
   const [preview, setPreview] = useState<{ amount: string; at: number; quote: BridgeQuote | null; error: string | null } | null>(null);
   const [tick, setTick] = useState(0);
-  const pricing = open && swapping && stage.kind === "form" && /^\d+(\.\d+)?$/.test(amount) && Number(amount) > 0;
+  const pricing = open && swapping && !privately && stage.kind === "form" && /^\d+(\.\d+)?$/.test(amount) && Number(amount) > 0;
   useEffect(() => {
     if (!pricing) return;
     const ctrl = new AbortController();
@@ -305,7 +328,7 @@ function BridgeSheet({
   const requestId =
     stage.kind === "address" && !stage.quote.tx
       ? stage.quote.requestId
-      : priv.kind === "sent"
+      : priv.kind === "sent" && !priv.quote.sameChain
         ? priv.quote.requestId
         : null;
   const finished = status?.stage === "done" || status?.stage === "failed" || status?.stage === "refunded";
@@ -351,7 +374,7 @@ function BridgeSheet({
   // seconds; after that the note stays pending and reconcileClaims settles it.
   const sentPriv = priv.kind === "sent" ? priv : null;
   useEffect(() => {
-    if (!sentPriv || !status) return;
+    if (!sentPriv || sentPriv.quote.sameChain || !status) return;
     if (status.stage === "refunded" || status.stage === "failed") {
       updateLocalNote(sentPriv.note.id, { status: "recovered", sweepPending: false });
       return;
@@ -374,6 +397,36 @@ function BridgeSheet({
       live = false;
     };
   }, [sentPriv, status, once]);
+
+  // The swap here makes the deposit in the same transaction: its receipt says
+  // whether the note landed, no bridge to follow.
+  useEffect(() => {
+    if (!sentPriv?.quote.sameChain || !sentPriv.hash) return;
+    const { hash, note, quote } = sentPriv;
+    let live = true;
+    void (async () => {
+      const rec = await waitForTransactionReceipt(config, { hash, chainId: network.chainId as GloamChainId }).catch(() => null);
+      if (!live) return;
+      if (rec?.status === "reverted") {
+        updateLocalNote(note.id, { status: "recovered", sweepPending: false });
+        setPriv({ kind: "failed", quote });
+        return;
+      }
+      for (let i = 0; i < 6 && live; i++) {
+        if (await settleBridgeNote(note, hash)) {
+          if (!live) return;
+          once(`private:${hash}`, "bridge_private_landed", { source: quote.send.chain, token: quote.send.symbol });
+          setPriv({ kind: "landed", quote });
+          return;
+        }
+        await new Promise((r) => window.setTimeout(r, 2500));
+      }
+      if (live) setPriv({ kind: "late", quote });
+    })();
+    return () => {
+      live = false;
+    };
+  }, [sentPriv, config, network.chainId, once]);
   useEffect(() => {
     if (shown?.tx && send.data && receipt.isSuccess) once(`swapped:${send.data}`, "swap_success", { token: shown.send.symbol });
   }, [shown, send.data, receipt.isSuccess, once]);
@@ -414,11 +467,11 @@ function BridgeSheet({
     return json.data;
   }
 
-  /** Connect the Solana wallet, make the note and its proof, and price the order. */
+  /** Connect the Solana wallet if it pays, make the note and its proof, and price the order. */
   async function startPrivate(e: React.FormEvent) {
     e.preventDefault();
     const wallet = solWallet;
-    if (!wallet || !network.pool) return;
+    if ((chain.kind === "svm" && !wallet) || !network.pool) return;
     if (vault.locked) {
       setStage({ kind: "form", error: "Unlock your private balance with your passkey first." });
       return;
@@ -427,8 +480,11 @@ function BridgeSheet({
     setStage({ kind: "form", error: null });
     let step = "connect";
     try {
-      setPriv({ kind: "working", text: `Connecting ${wallet.name}…` });
-      const account = await connectSolana(wallet);
+      let account: SolanaAccount | null = null;
+      if (wallet) {
+        setPriv({ kind: "working", text: `Connecting ${wallet.name}…` });
+        account = await connectSolana(wallet);
+      }
       step = "prepare";
       const key = `${network.key}:${dest.token.address}:${wei}`;
       let prep = prepared.current?.key === key ? prepared.current : null;
@@ -440,8 +496,19 @@ function BridgeSheet({
       }
       step = "price";
       setPriv({ kind: "working", text: "Getting a price…" });
-      const quote = await privateQuote(prep, amount, account.address);
-      setPriv({ kind: "review", quote, at: Date.now(), wallet, account, note: prep.note, proof: prep.proof, signing: false, error: null });
+      const quote = await privateQuote(prep, amount, account?.address ?? recipient);
+      setPriv({
+        kind: "review",
+        quote,
+        at: Date.now(),
+        wallet,
+        account,
+        note: prep.note,
+        proof: prep.proof,
+        signing: false,
+        progress: null,
+        error: null,
+      });
       once(`private-review:${quote.requestId}`, "bridge_private_review", { source: chain.name, token: token.symbol });
     } catch (err) {
       const msg = err instanceof Error ? err.message.split("\n")[0]! : "";
@@ -451,8 +518,8 @@ function BridgeSheet({
         error:
           step === "connect"
             ? DECLINED.test(msg)
-              ? `${wallet.name} didn't connect. Nothing moved.`
-              : `Couldn't connect ${wallet.name}. Try again.`
+              ? `${payerName} didn't connect. Nothing moved.`
+              : `Couldn't connect ${payerName}. Try again.`
             : step === "prepare"
               ? "Couldn't prepare your private deposit. Try again."
               : msg || "Something went wrong. Try again.",
@@ -464,41 +531,109 @@ function BridgeSheet({
   async function confirmPrivate() {
     if (priv.kind !== "review" || priv.signing) return;
     const r = priv;
-    setPriv({ ...r, signing: true, error: null });
+    setPriv({ ...r, signing: true, progress: null, error: null });
     let quote = r.quote;
     try {
-      // A Solana transaction is only good for about a minute: an older one is rebuilt first.
-      if (Date.now() - r.at > 40_000) quote = await privateQuote(r, r.quote.receive.amount, r.account.address);
+      // A quote (and a Solana transaction) is only good for about a minute: an older one is fetched again.
+      if (Date.now() - r.at > 40_000) quote = await privateQuote(r, r.quote.receive.amount, r.account?.address ?? recipient);
     } catch (err) {
       setPriv({ ...r, signing: false, error: err instanceof Error ? err.message : "Couldn't refresh the price. Try again." });
       return;
     }
+    const at = quote === r.quote ? r.at : Date.now();
     // The note's secret is the money: kept before anything is sent, out of the
     // balance until the vault shows it.
     saveLocalNote({ ...r.note, status: "open", sweepPending: true });
-    let unsure = false;
+
+    if (quote.solanaTx && r.wallet && r.account) {
+      let unsure = false;
+      try {
+        await paySolana(r.wallet, r.account, quote.solanaTx);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (DECLINED.test(msg) || NOT_SENT.test(msg)) {
+          dropUnsentNote(r.note.id);
+          setPriv({
+            ...r,
+            quote,
+            at,
+            signing: false,
+            error: DECLINED.test(msg) ? "You cancelled it in your wallet. Nothing moved." : (msg.split("\n")[0] ?? "It didn't send. Try again."),
+          });
+          return;
+        }
+        // The wallet may have sent it before it failed: keep the note and follow the order.
+        unsure = true;
+      }
+      prepared.current = null;
+      setStatus(null);
+      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure });
+      once(`private-sent:${quote.requestId}`, "bridge_private_sent", { source: quote.send.chain, token: quote.send.symbol });
+      return;
+    }
+
+    // An EVM wallet: an approve (for a token) that must land first, then the
+    // deposit or the swap, each on the paying chain. The note is dropped only
+    // when that last transaction never went out.
+    const txs = quote.evmTxs ?? [];
+    let hash: Hex | null = null;
+    let approved = false;
     try {
-      await paySolana(r.wallet, r.account, quote.solanaTx);
+      for (let i = 0; i < txs.length; i++) {
+        const tx = txs[i]!;
+        const last = i === txs.length - 1;
+        const chainId = tx.chainId as GloamChainId;
+        setPriv({
+          ...r,
+          quote,
+          at,
+          signing: true,
+          error: null,
+          progress: txs.length > 1 ? (last ? "Now confirm the payment in your wallet…" : "Approve in your wallet first (1 of 2)…") : null,
+        });
+        if (getAccount(config).chainId !== tx.chainId) await switchChain(config, { chainId });
+        const sent = await sendTransaction(config, { to: tx.to as Address, data: tx.data as Hex, value: BigInt(tx.value), chainId });
+        if (last) {
+          hash = sent;
+        } else {
+          const rec = await waitForTransactionReceipt(config, { hash: sent, chainId });
+          if (rec.status !== "success") throw new Error("The approval didn't go through.");
+          approved = true;
+        }
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
-      if (DECLINED.test(msg) || NOT_SENT.test(msg)) {
+      if (!hash) {
+        const msg = err instanceof Error ? err.message : "";
         dropUnsentNote(r.note.id);
         setPriv({
           ...r,
           quote,
-          at: quote === r.quote ? r.at : Date.now(),
+          at,
           signing: false,
-          error: DECLINED.test(msg) ? "You cancelled it in your wallet. Nothing moved." : (msg.split("\n")[0] ?? "It didn't send. Try again."),
+          progress: null,
+          error: DECLINED.test(msg)
+            ? approved
+              ? "You cancelled the payment. Nothing moved; the approval can be used next time."
+              : "You cancelled it in your wallet. Nothing moved."
+            : /chain|network/i.test(msg)
+              ? `Switch your wallet to ${quote.send.chain} to pay from there.`
+              : (msg.split("\n")[0] ?? "It didn't send. Try again."),
         });
         return;
       }
-      // The wallet may have sent it before it failed: keep the note and follow the order.
-      unsure = true;
     }
     prepared.current = null;
     setStatus(null);
-    setPriv({ kind: "sent", quote, note: r.note, wallet: r.wallet, unsure });
+    setPriv({ kind: "sent", quote, note: r.note, payer: "your wallet", hash, unsure: false });
     once(`private-sent:${quote.requestId}`, "bridge_private_sent", { source: quote.send.chain, token: quote.send.symbol });
+  }
+
+  /** After paying from another chain, put the wallet back on this network. */
+  function backToNetwork() {
+    if (getAccount(config).chainId === network.chainId) return;
+    void switchChain(config, { chainId: network.chainId as GloamChainId }).catch(() => {
+      /* the wallet can switch later; the app asks when it needs to */
+    });
   }
 
   async function getAddress(e: React.FormEvent) {
@@ -567,7 +702,7 @@ function BridgeSheet({
       return null;
     }
   })();
-  const overBalance = swapping && gasCoin != null && amountWei != null && amountWei > gasCoin.value;
+  const overBalance = swapping && !privately && gasCoin != null && amountWei != null && amountWei > gasCoin.value;
   const maxWei = gasCoin != null && gasCoin.value > SWAP_GAS_RESERVE_WEI ? gasCoin.value - SWAP_GAS_RESERVE_WEI : BigInt(0);
   const amountOk = privately
     ? /^\d+(\.\d{1,2})?$/.test(amount) && amountNum >= BRIDGE_MIN_USD
@@ -608,9 +743,11 @@ function BridgeSheet({
               {picking
                 ? `${CHAINS.length} chains. Sending from an exchange works too: pick the chain you withdraw on.`
                 : swapping
-                  ? `Swap ${token.symbol} for ${dest.token.symbol} in your wallet on ${dest.chain}.`
+                  ? privately
+                    ? `Swap ${token.symbol} for ${dest.token.symbol}, straight into your private balance.`
+                    : `Swap ${token.symbol} for ${dest.token.symbol} in your wallet on ${dest.chain}.`
                   : privately
-                    ? `From your Solana wallet, straight into your private balance on ${dest.chain}.`
+                    ? `From ${chain.kind === "svm" ? "your Solana wallet" : `this wallet on ${chain.name}`}, straight into your private balance on ${dest.chain}.`
                     : `From another chain or an exchange, into your wallet on ${dest.chain}.`}
             </p>
           </div>
@@ -722,24 +859,40 @@ function BridgeSheet({
               </div>
             )}
 
-            {canPrivate && solWallets.length > 0 && (
-              <div role="radiogroup" aria-label="How you're sending" className="grid gap-2">
+            {canPrivate && (
+              <PrivateToggle
+                on={privateOn}
+                onChange={setPrivateOn}
+                detail={
+                  privateOn
+                    ? swapping
+                      ? "One transaction swaps it and adds it privately."
+                      : `${solWallet ? `${solWallet.name} pays` : "Pay from this wallet"} and it arrives private. Sending from an exchange? Turn this off for a deposit address.`
+                    : swapping
+                      ? `It lands in your wallet as ${dest.token.symbol}, then you add it privately.`
+                      : `A deposit address: it lands in your wallet on ${dest.chain}, then you add it privately.`
+                }
+              />
+            )}
+
+            {privately && solWallets.length > 1 && (
+              <div role="radiogroup" aria-label="Solana wallet" className="flex flex-wrap gap-2">
                 {solWallets.map((w) => (
-                  <MethodOption
+                  <button
                     key={w.name}
-                    checked={solWallet?.name === w.name}
-                    onSelect={() => setMethod(w.name)}
-                    icon={w.icon}
-                    title={`From ${w.name}`}
-                    detail="One step. It lands in your private balance."
-                  />
+                    type="button"
+                    role="radio"
+                    aria-checked={solWallet?.name === w.name}
+                    onClick={() => setSolName(w.name)}
+                    className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
+                      solWallet?.name === w.name ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
+                    }`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
+                    <img src={w.icon} alt="" width={26} height={26} className="h-[26px] w-[26px] rounded-full" />
+                    {w.name}
+                  </button>
                 ))}
-                <MethodOption
-                  checked={!solWallet}
-                  onSelect={() => setMethod("address")}
-                  title="From an exchange or another wallet"
-                  detail={`A deposit address. It lands in your wallet on ${dest.chain}, then you add it privately.`}
-                />
               </div>
             )}
 
@@ -762,7 +915,10 @@ function BridgeSheet({
                   <span className="text-[14px] text-mute">{dest.token.symbol}</span>
                 </div>
                 <p className="mt-1.5 text-[12px] text-mute">
-                  Paid in {token.symbol} from {solWallet!.name}. You see the exact cost before you sign.
+                  Paid in {token.symbol}{" "}
+                  {solWallet ? `from ${solWallet.name}` : swapping ? "from this wallet" : `from this wallet on ${chain.name}`}.
+                  {swapping && gasCoin != null && ` You hold ${trimAmount(formatUnits(gasCoin.value, token.decimals))} ${token.symbol}.`} You
+                  see the exact cost before you sign.
                 </p>
               </div>
             ) : (
@@ -822,7 +978,7 @@ function BridgeSheet({
             </div>
             )}
 
-            {swapping && amountNum > 0 && !overBalance && (
+            {swapping && !privately && amountNum > 0 && !overBalance && (
               live?.error ? (
                 <p role="alert" className="rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
                   {live.error}
@@ -865,21 +1021,21 @@ function BridgeSheet({
                   ? swapping
                     ? "Getting a price…"
                     : "Getting an address…"
-                  : swapping
-                    ? "Review the swap"
-                    : privately
-                      ? "Continue"
+                  : privately
+                    ? "Continue"
+                    : swapping
+                      ? "Review the swap"
                       : "Get a deposit address")}
             </button>
             <p className="text-center text-[12px] leading-relaxed text-mute">
-              {swapping
-                ? "Swapping is public, like any deposit."
-                : privately
-                  ? "Your wallet signs once and Relay adds it to your private balance on arrival."
+              {privately
+                ? "Paying in is public, like any deposit. What you do with it after stays private."
+                : swapping
+                  ? "Swapping is public, like any deposit."
                   : "Bridging is public, like any deposit."}{" "}
               Powered by Relay.
             </p>
-            {canPrivate && solWallets.length === 0 && (
+            {chain.kind === "svm" && solWallets.length === 0 && !network.chain.testnet && (
               <p className="text-center text-[12px] leading-relaxed text-mute">
                 Using a Solana wallet app? Open gloam.trade in its browser to send straight to your private balance.
               </p>
@@ -895,16 +1051,20 @@ function BridgeSheet({
           />
         )}
 
-        {!picking && (priv.kind === "sent" || priv.kind === "landed" || priv.kind === "late") && (
+        {!picking && (priv.kind === "sent" || priv.kind === "landed" || priv.kind === "late" || priv.kind === "failed") && (
           <PrivateProgress
             stage={priv}
             status={status}
             onDone={() => {
               reset();
               setAmount("");
+              backToNetwork();
               onPrivate?.();
             }}
-            onReset={reset}
+            onReset={() => {
+              reset();
+              backToNetwork();
+            }}
           />
         )}
 
@@ -1042,60 +1202,44 @@ function StatusLine({ status, quote }: { status: BridgeStatus | null; quote: Bri
   );
 }
 
-/** One way to send, in the radio group above the amount. */
-function MethodOption({
-  checked,
-  onSelect,
-  icon,
-  title,
-  detail,
-}: {
-  checked: boolean;
-  onSelect: () => void;
-  icon?: string;
-  title: string;
-  detail: string;
-}) {
+/** "Land in private balance": on, the payer's own wallet pays straight into the private balance. */
+function PrivateToggle({ on, onChange, detail }: { on: boolean; onChange: (on: boolean) => void; detail: string }) {
   return (
     <button
       type="button"
-      role="radio"
-      aria-checked={checked}
-      onClick={onSelect}
-      className={`flex min-h-[60px] w-full items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-colors ${
-        checked ? "border-foreground" : "border-line hover:bg-surface"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-3.5 text-left transition-colors ${
+        on ? "border-sealed/40 bg-sealed-soft" : "border-line hover:bg-surface"
       }`}
     >
-      {icon ? (
-        // eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon
-        <img src={icon} alt="" width={28} height={28} className="h-7 w-7 shrink-0 rounded-lg" />
-      ) : (
-        <span aria-hidden className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface text-mute">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-            <rect x="4" y="4" width="6" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.8" />
-            <rect x="14" y="4" width="6" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.8" />
-            <rect x="4" y="14" width="6" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M14 14h2v2h-2zM18 18h2v2h-2zM14 18h2" stroke="currentColor" strokeWidth="1.8" />
-          </svg>
-        </span>
-      )}
       <span className="min-w-0 flex-1">
-        <span className="block text-[14.5px] text-foreground">{title}</span>
-        <span className="block text-[12.5px] leading-snug text-mute">{detail}</span>
+        <span className="block text-[14.5px] font-medium text-foreground">Land in private balance</span>
+        <span className="mt-0.5 block text-[12.5px] leading-snug text-mute">{detail}</span>
       </span>
       <span
         aria-hidden
-        className={`h-4 w-4 shrink-0 rounded-full border ${checked ? "border-[5px] border-foreground" : "border-foreground/30"}`}
-      />
+        className={`relative mt-0.5 inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors ${
+          on ? "bg-sealed" : "bg-foreground/20"
+        }`}
+      >
+        <span
+          className={`absolute h-5 w-5 rounded-full bg-panel shadow-sm transition-transform motion-reduce:transition-none ${
+            on ? "translate-x-[18px]" : "translate-x-0.5"
+          }`}
+        />
+      </span>
     </button>
   );
 }
 
-function arrivesText(timeSec: number): string {
-  return timeSec > 0 && timeSec < 60 ? "In under a minute" : `In about ${Math.max(1, Math.round(timeSec / 60))} min`;
+function arrivesText(q: PrivateBridgeQuote): string {
+  if (q.sameChain) return "In seconds";
+  return q.timeSec > 0 && q.timeSec < 60 ? "In under a minute" : `In about ${Math.max(1, Math.round(q.timeSec / 60))} min`;
 }
 
-/** What the Solana wallet pays, what lands privately, and the fee, before it signs. */
+/** What the wallet pays, what lands privately, and the fees, before it signs. */
 function PrivateReview({
   review,
   onConfirm,
@@ -1107,6 +1251,35 @@ function PrivateReview({
 }) {
   const q = review.quote;
   const pay = Number(q.send.amount).toLocaleString("en-US", { maximumFractionDigits: 6 });
+  const payer = review.wallet ? review.wallet.name : q.sameChain ? "this wallet" : `this wallet on ${q.send.chain}`;
+  const steps = q.evmTxs?.length ?? 1;
+  const confirm = review.wallet
+    ? `Confirm in ${review.wallet.name}`
+    : steps > 1
+      ? "Approve and pay"
+      : q.sameChain
+        ? "Swap and add privately"
+        : "Confirm in your wallet";
+  const rows: [string, React.ReactNode][] = [
+    [
+      "Added privately",
+      <span key="a" className="flex items-center gap-1.5 font-medium">
+        <TokenMark src={q.receive.logo} size={18} />
+        {fmtMoney(Number(q.receive.amount))} {q.receive.symbol}
+      </span>,
+    ],
+    ["On", q.receive.chain],
+    [q.sameChain ? "Swap fee" : "Bridge fee", q.feeUsd < 0.01 ? "Under a cent" : `about $${fmtMoney(q.feeUsd)}`],
+    ...(q.gasUsd !== null && q.gasUsd >= 0.01
+      ? ([["Network fee", `about $${fmtMoney(q.gasUsd)} on ${q.send.chain}`]] as [string, React.ReactNode][])
+      : q.evmTxs
+        ? ([["Network fee", `Shown in your wallet, on ${q.send.chain}`]] as [string, React.ReactNode][])
+        : []),
+    ...(q.extra && Number(q.extra) >= 0.01
+      ? ([["Back to your wallet", `about ${fmtMoney(Number(q.extra))} ${q.receive.symbol}`]] as [string, React.ReactNode][])
+      : []),
+    ["Arrives", arrivesText(q)],
+  ];
   return (
     <div className="mt-5" aria-live="polite">
       <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-relaxed text-foreground">
@@ -1115,33 +1288,27 @@ function PrivateReview({
         <span className="tnum font-medium">
           {pay} {q.send.symbol}
         </span>
-        from {review.wallet.name}
+        from {payer}
         {q.send.usd !== null && !q.send.symbol.startsWith("USD") && (
           <span className="tnum text-mute">(about ${fmtMoney(q.send.usd)})</span>
         )}
       </p>
 
       <dl className="mt-4 divide-y divide-line text-[14px]">
-        <div className="flex min-h-11 items-center justify-between gap-3">
-          <dt className="text-mute">Added privately</dt>
-          <dd className="tnum flex items-center gap-1.5 text-right font-medium text-foreground">
-            <TokenMark src={q.receive.logo} size={18} />
-            {fmtMoney(Number(q.receive.amount))} {q.receive.symbol}
-          </dd>
-        </div>
-        <div className="flex min-h-11 items-center justify-between gap-3">
-          <dt className="text-mute">On</dt>
-          <dd className="text-right text-foreground">{q.receive.chain}</dd>
-        </div>
-        <div className="flex min-h-11 items-center justify-between gap-3">
-          <dt className="text-mute">Bridge fee</dt>
-          <dd className="tnum text-right text-foreground">{q.feeUsd < 0.01 ? "Under a cent" : `about $${fmtMoney(q.feeUsd)}`}</dd>
-        </div>
-        <div className="flex min-h-11 items-center justify-between gap-3">
-          <dt className="text-mute">Arrives</dt>
-          <dd className="text-right text-foreground">{arrivesText(q.timeSec)}</dd>
-        </div>
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex min-h-11 items-center justify-between gap-3">
+            <dt className="text-mute">{k}</dt>
+            <dd className="tnum text-right text-foreground">{v}</dd>
+          </div>
+        ))}
       </dl>
+
+      {review.signing && review.progress && (
+        <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] text-foreground">
+          <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-foreground/50" />
+          {review.progress}
+        </p>
+      )}
 
       {review.error && (
         <p role="alert" className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
@@ -1150,7 +1317,7 @@ function PrivateReview({
       )}
 
       <button type="button" onClick={onConfirm} disabled={review.signing} className="btn btn-ink btn-lg btn-block mt-4">
-        {review.signing ? `Confirm in ${review.wallet.name}…` : `Confirm in ${review.wallet.name}`}
+        {review.signing ? "Waiting for your wallet…" : confirm}
       </button>
       {!review.signing && (
         <button type="button" onClick={onReset} className="btn btn-ghost btn-sm mt-3">
@@ -1158,21 +1325,23 @@ function PrivateReview({
         </button>
       )}
       <p className="mt-3 text-[12px] leading-relaxed text-mute">
-        It goes into your private balance as it arrives. If that can&apos;t happen, Relay sends it to your wallet on{" "}
-        {q.receive.chain} instead, and you add it privately from there.
+        {q.sameChain
+          ? `One transaction swaps it and adds it to your private balance. The few cents of price buffer come back to your wallet as ${q.receive.symbol}.`
+          : `It goes into your private balance as it arrives. If that can't happen, Relay sends it to your wallet on ${q.receive.chain} instead, and you add it privately from there.`}
+        {steps > 1 && " Your wallet asks twice: once to approve, once to pay."}
       </p>
     </div>
   );
 }
 
-/** A private payment on its way, landed, or slower than expected. */
+/** A private payment on its way, landed, slower than expected, or failed. */
 function PrivateProgress({
   stage,
   status,
   onDone,
   onReset,
 }: {
-  stage: Extract<PrivateStage, { kind: "sent" | "landed" | "late" }>;
+  stage: Extract<PrivateStage, { kind: "sent" | "landed" | "late" | "failed" }>;
   status: BridgeStatus | null;
   onDone: () => void;
   onReset: () => void;
@@ -1180,19 +1349,24 @@ function PrivateProgress({
   const q = stage.quote;
   const amount = `${fmtMoney(Number(q.receive.amount))} ${q.receive.symbol}`;
   const relay = status?.stage ?? "waiting";
-  const failed = stage.kind === "sent" && (relay === "refunded" || relay === "failed");
+  const failed =
+    stage.kind === "failed" || (stage.kind === "sent" && !q.sameChain && (relay === "refunded" || relay === "failed"));
   const text =
     stage.kind === "landed"
       ? `Added privately. ${amount} is in your private balance. Only you can see it.`
       : stage.kind === "late"
         ? `It arrived on ${q.receive.chain}. It shows in your private balance within a few minutes. If it doesn't, it's in your wallet as ${q.receive.symbol}: add it privately from there.`
-        : failed
-          ? `It didn't go through. Relay returns the money to your Solana wallet, or sends it as ${q.receive.symbol} to your wallet on ${q.receive.chain}.`
-          : relay === "waiting"
-            ? stage.unsure
-              ? `Checking whether ${stage.wallet.name} sent it…`
-              : `Sent from ${stage.wallet.name}. Waiting for Solana to confirm…`
-            : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
+        : stage.kind === "failed"
+          ? "The swap didn't go through, so nothing was added. Only the network fee was spent."
+          : failed
+            ? `It didn't go through. Relay returns the money to the wallet that paid, or sends it as ${q.receive.symbol} to your wallet on ${q.receive.chain}.`
+            : q.sameChain
+              ? `Swapping and adding ${amount} to your private balance…`
+              : relay === "waiting"
+                ? stage.unsure
+                  ? `Checking whether ${stage.payer} sent it…`
+                  : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
+                : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
   const done = stage.kind === "landed";
   return (
     <div className="mt-5" aria-live="polite">

@@ -176,23 +176,35 @@ export type BridgeQuote = {
 
 /**
  * Chains a connected wallet can pay from straight into the private balance:
- * the wallet signs once and Relay makes the deposit when the money arrives
- * (an approve and shieldBound run by Relay's router on Robinhood Chain or
- * Tempo). A deposit address can't carry that call, so sending from an exchange
- * still lands in the wallet first.
+ * the wallet signs and Relay makes the deposit when the money arrives (an
+ * approve and shieldBound run by Relay's router on Robinhood Chain or Tempo).
+ * That covers a Solana wallet, an EVM wallet on any listed chain, and the swap
+ * on the network's own chain. A deposit address can't carry that call, so
+ * sending from an exchange still lands in the wallet first.
  */
 export function privateBridgeable(chain: BridgeChain): boolean {
-  return chain.kind === "svm";
+  return chain.kind === "svm" || chain.kind === "evm";
 }
+
+/** One transaction an EVM wallet signs for a private bridge order. */
+export type PrivateBridgeTx = { to: string; data: string; value: string; chainId: number };
 
 /** A Relay order that pays into the private balance, ready for the source wallet to sign. */
 export type PrivateBridgeQuote = {
   requestId: string;
-  /** The unsigned Solana transaction, base64. */
-  solanaTx: string;
+  /** The unsigned Solana transaction, base64, when a Solana wallet pays. */
+  solanaTx: string | null;
+  /** The transactions an EVM wallet signs in order (an approve, then the deposit; or one swap). */
+  evmTxs: PrivateBridgeTx[] | null;
+  /** The swap on this chain: the deposit happens in the same transaction. */
+  sameChain: boolean;
   send: { amount: string; symbol: string; chain: string; chainId: number; logo: string; usd: number | null };
   receive: { amount: string; symbol: string; chain: string; logo: string };
+  /** The swap's price buffer, back to the wallet as the stablecoin. */
+  extra: string | null;
   feeUsd: number;
+  /** The paying chain's own network fee, when Relay prices it. */
+  gasUsd: number | null;
   timeSec: number;
 };
 

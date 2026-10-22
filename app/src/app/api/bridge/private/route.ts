@@ -2,13 +2,16 @@
 import { NextResponse } from "next/server";
 import {
   createPublicClient,
+  decodeFunctionData,
   encodeFunctionData,
   formatUnits,
   http,
   isAddress,
   parseAbi,
   parseUnits,
+  zeroAddress,
   type Address,
+  type Chain,
   type Hex,
 } from "viem";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
@@ -20,9 +23,12 @@ import {
   bridgeChain,
   bridgeToken,
   privateBridgeable,
+  swapSource,
   validRefundAddress,
   type PrivateBridgeQuote,
+  type PrivateBridgeTx,
 } from "@/lib/bridge";
+import { originChain } from "@/lib/originChains";
 import { buildSolanaTx, type RelaySolanaInstruction } from "@/lib/solanaTx";
 import { screenAddresses } from "@/lib/screeningServer";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
@@ -32,7 +38,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const RELAY_API = "https://api.relay.link";
-/** Orders per IP per minute. Each one is a fresh Relay order and a Solana simulation. */
+/** Orders per IP per minute. Each one is a fresh Relay order and a simulation. */
 const RATE_LIMIT = 12;
 
 const POOL_ABI = parseAbi([
@@ -44,7 +50,12 @@ const POOL_ABI = parseAbi([
   "function shieldVerifier() view returns (address)",
 ]);
 const VERIFIER_ABI = parseAbi(["function verify(bytes proof, uint256[] publicInputs) view returns (bool)"]);
-const ERC20_ABI = parseAbi(["function approve(address spender, uint256 amount) returns (bool)"]);
+const ERC20_ABI = parseAbi([
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function balanceOf(address owner) view returns (uint256)",
+]);
+
+const ROUTE_BUSY = "The bridge couldn't make a route right now. Try again.";
 
 function fail(status: number, message: string) {
   return NextResponse.json({ ok: false, error: { message } }, { status, headers: { "Cache-Control": "no-store" } });
@@ -61,16 +72,35 @@ function appFees(): { recipient: string; fee: string }[] | undefined {
 const units = (v: bigint, decimals: number) =>
   Number(formatUnits(v, decimals)).toLocaleString("en-US", { maximumFractionDigits: 2 });
 
+const isHex = (v: unknown): v is string => typeof v === "string" && /^0x[0-9a-fA-F]*$/.test(v);
+
+/** The EVM transactions of a Relay order, or null when any step isn't one plain transaction on `chainId`. */
+function evmSteps(steps: any[], chainId: number, sender: string): PrivateBridgeTx[] | null {
+  const txs: PrivateBridgeTx[] = [];
+  for (const s of steps) {
+    const x = s?.kind === "transaction" && s?.items?.length === 1 ? s.items[0]?.data : null;
+    if (!x || Number(x.chainId) !== chainId || !isAddress(String(x.to)) || !isHex(x.data)) return null;
+    if (x.from !== undefined && String(x.from).toLowerCase() !== sender.toLowerCase()) return null;
+    txs.push({ to: String(x.to), data: String(x.data), value: BigInt(x.value ?? 0).toString(), chainId });
+  }
+  return txs.length ? txs : null;
+}
+
 /**
- * A Relay order that pays from a Solana wallet straight into the private
- * balance: { chainId, symbol, network, amount, recipient, sender, commitment, proof }.
+ * A Relay order that pays from the person's own wallet straight into the
+ * private balance: { chainId, symbol, network, amount, recipient, sender, commitment, proof }.
  *
  * `amount` is what lands privately, in the network's stablecoin. The browser
  * made the note and its shield proof for exactly that amount; the order is
- * EXACT_OUTPUT, so Relay delivers exactly that to its router, which approves
- * the vault and calls shieldBound with the proof. If that call can't run,
- * Relay sends the stablecoin to `recipient` instead. Nothing here holds money
- * or a secret: the commitment and proof are public by design.
+ * EXACT_OUTPUT, so Relay delivers it to its router, which approves the vault
+ * and calls shieldBound with the proof. Three kinds of payer:
+ *   - a Solana wallet: one transaction, built and simulated here;
+ *   - an EVM wallet on another chain: an approve (for a token) and a deposit,
+ *     which the wallet signs on that chain;
+ *   - this chain's own coin (ETH on Robinhood Chain): one swap that also makes
+ *     the deposit, simulated here; the price buffer comes back to the wallet.
+ * If the call can't run, Relay sends the stablecoin to `recipient` instead.
+ * Nothing here holds money or a secret: the commitment and proof are public.
  */
 export async function POST(req: Request) {
   const rate = await hitRateLimit(clientIp(req), "bridge-private", RATE_LIMIT);
@@ -89,14 +119,22 @@ export async function POST(req: Request) {
   const dest = BRIDGE_DESTINATIONS[network.family];
   const asset = dest.token.address as Address;
 
-  const chain = bridgeChain(Number(body.chainId));
+  const swap = swapSource(network);
+  const chain = swap && Number(body.chainId) === swap.id ? swap : bridgeChain(Number(body.chainId));
   const token = chain && typeof body.symbol === "string" ? bridgeToken(chain, body.symbol) : null;
   if (!chain || !token || !privateBridgeable(chain)) return fail(400, "Pick where the money is coming from.");
+  const sameChain = Boolean(chain.swap);
+  const evm = chain.kind === "evm";
+  const evmChain: Chain | null = sameChain ? network.chain : evm ? originChain(chain.id) : null;
+  if (evm && !evmChain) return fail(400, "Pick where the money is coming from.");
 
   const recipient = typeof body.recipient === "string" ? body.recipient : "";
   if (!isAddress(recipient)) return fail(400, "Connect a wallet to receive the money.");
   const sender = typeof body.sender === "string" ? body.sender.trim() : "";
-  if (!validRefundAddress(chain.kind, sender)) return fail(400, "Connect your Solana wallet.");
+  // An EVM wallet pays for itself: the payer is the connected wallet.
+  if (evm ? sender.toLowerCase() !== recipient.toLowerCase() : !validRefundAddress(chain.kind, sender)) {
+    return fail(400, evm ? "Pay from the wallet that's connected." : "Connect your Solana wallet.");
+  }
 
   const amountText = typeof body.amount === "string" ? body.amount.trim() : "";
   if (!/^\d+(\.\d{1,2})?$/.test(amountText) || Number(amountText) < BRIDGE_MIN_USD) {
@@ -186,37 +224,41 @@ export async function POST(req: Request) {
     data = (await res.json().catch(() => null)) as Record<string, any> | null;
     if (!res.ok) {
       const msg = typeof data?.message === "string" ? data.message : "";
-      return fail(502, /amount|too (low|small)|insufficient/i.test(msg) ? "That amount is too small to bridge. Try a little more." : "The bridge couldn't make a route right now. Try again.");
+      return fail(502, /amount|too (low|small)|insufficient/i.test(msg) ? "That amount is too small to bridge. Try a little more." : ROUTE_BUSY);
     }
   } catch {
     return fail(502, "Couldn't reach the bridge. Try again.");
   }
 
-  // The order must do exactly what was asked: pay this amount of the vault's
-  // stablecoin on this chain and run these two calls. Anything else is refused
-  // rather than signed.
-  const step = data?.steps?.[0];
-  const item = step?.items?.[0]?.data;
+  // The order must do exactly what was asked: deliver this amount of the
+  // vault's stablecoin on this chain and run these two calls. Anything else is
+  // refused rather than signed.
+  const steps: any[] = Array.isArray(data?.steps) ? data.steps : [];
+  const requestId = steps.find((s) => typeof s?.requestId === "string")?.requestId;
   const out = data?.details?.currencyOut;
-  const output = data?.protocol?.v2?.orderData?.output;
-  const calls: string[] = Array.isArray(output?.calls) ? output.calls.map((c: unknown) => String(c).toLowerCase()) : [];
-  const ok =
-    data?.steps?.length === 1 &&
-    step?.kind === "transaction" &&
-    typeof step?.requestId === "string" &&
-    step?.items?.length === 1 &&
-    Array.isArray(item?.instructions) &&
-    item.instructions.length > 0 &&
-    Array.isArray(item?.addressLookupTableAddresses) &&
+  const inAmount = BigInt(data?.details?.currencyIn?.amount ?? -1);
+  const outAmount = BigInt(out?.amount ?? -1);
+  const outOk =
+    typeof requestId === "string" &&
+    inAmount > BigInt(0) &&
     Number(out?.currency?.chainId) === dest.chainId &&
     String(out?.currency?.address ?? "").toLowerCase() === asset.toLowerCase() &&
-    BigInt(out?.amount ?? -1) === amount &&
-    calls.length === 2 &&
-    calls[0]!.includes(approveData.slice(2).toLowerCase()) &&
-    calls[1]!.includes(shieldData.slice(2).toLowerCase()) &&
-    Array.isArray(output?.payments) &&
-    output.payments.every((p: Record<string, unknown>) => String(p?.currency).toLowerCase() === asset.toLowerCase() && BigInt(String(p?.minimumAmount ?? -1)) === amount);
-  if (!ok) return fail(502, "The bridge couldn't make a route right now. Try again.");
+    (sameChain ? outAmount >= amount : outAmount === amount);
+  if (!outOk) return fail(502, ROUTE_BUSY);
+  const approveHex = approveData.slice(2).toLowerCase();
+  const shieldHex = shieldData.slice(2).toLowerCase();
+  if (!sameChain) {
+    // A cross-chain order carries the calls Relay's router runs on arrival.
+    const output = data?.protocol?.v2?.orderData?.output;
+    const calls: string[] = Array.isArray(output?.calls) ? output.calls.map((c: unknown) => String(c).toLowerCase()) : [];
+    const callsOk =
+      calls.length === 2 &&
+      calls[0]!.includes(approveHex) &&
+      calls[1]!.includes(shieldHex) &&
+      Array.isArray(output?.payments) &&
+      output.payments.every((p: Record<string, unknown>) => String(p?.currency).toLowerCase() === asset.toLowerCase() && BigInt(String(p?.minimumAmount ?? -1)) === amount);
+    if (!callsOk) return fail(502, ROUTE_BUSY);
+  }
 
   const usdIn = Number(data?.details?.currencyIn?.amountUsd ?? NaN);
   const sendAmount = String(data?.details?.currencyIn?.amountFormatted ?? "");
@@ -224,27 +266,93 @@ export async function POST(req: Request) {
   if (Number.isFinite(usdIn) && usdIn > Number(amountText) * 1.1 + 2) {
     return fail(502, "Bridge fees are unusually high right now. Try again in a minute.");
   }
+  const notEnough = `That wallet doesn't hold enough for this. It needs ${sendAmount} ${token.symbol} on ${chain.name}, plus a little for the network fee.`;
 
-  const built = await buildSolanaTx(
-    sender,
-    item.instructions as RelaySolanaInstruction[],
-    (item.addressLookupTableAddresses as unknown[]).map(String)
-  );
-  if (!built.ok) {
-    return fail(
-      built.reason === "funds" ? 400 : 502,
-      built.reason === "funds"
-        ? `That wallet doesn't hold enough for this. It needs ${sendAmount} ${token.symbol}, plus a little SOL for the network fee.`
-        : built.reason === "rpc"
-          ? "Couldn't reach Solana. Try again."
-          : "The bridge couldn't make a route right now. Try again."
+  let solanaTx: string | null = null;
+  let evmTxs: PrivateBridgeTx[] | null = null;
+
+  if (chain.kind === "svm") {
+    const step = steps[0];
+    const item = step?.items?.[0]?.data;
+    const shapeOk =
+      steps.length === 1 &&
+      step?.kind === "transaction" &&
+      step?.items?.length === 1 &&
+      Array.isArray(item?.instructions) &&
+      item.instructions.length > 0 &&
+      Array.isArray(item?.addressLookupTableAddresses);
+    if (!shapeOk) return fail(502, ROUTE_BUSY);
+    const built = await buildSolanaTx(
+      sender,
+      item.instructions as RelaySolanaInstruction[],
+      (item.addressLookupTableAddresses as unknown[]).map(String)
     );
+    if (!built.ok) {
+      return fail(
+        built.reason === "funds" ? 400 : 502,
+        built.reason === "funds" ? notEnough : built.reason === "rpc" ? "Couldn't reach Solana. Try again." : ROUTE_BUSY
+      );
+    }
+    solanaTx = built.tx;
+  } else {
+    const txs = evmSteps(steps, chain.id, sender);
+    if (!txs) return fail(502, ROUTE_BUSY);
+    const native = token.address.toLowerCase() === zeroAddress;
+    const deposit = txs[txs.length - 1]!;
+    if (native) {
+      if (txs.length !== 1 || BigInt(deposit.value) !== inAmount) return fail(502, ROUTE_BUSY);
+    } else {
+      // A token pays with an exact approve to the deposit contract, then the deposit.
+      if (BigInt(deposit.value) !== BigInt(0) || txs.length > 2) return fail(502, ROUTE_BUSY);
+      if (txs.length === 2) {
+        const approve = txs[0]!;
+        let ok = false;
+        try {
+          const call = decodeFunctionData({ abi: ERC20_ABI, data: approve.data as Hex });
+          ok =
+            call.functionName === "approve" &&
+            approve.to.toLowerCase() === token.address.toLowerCase() &&
+            String(call.args[0]).toLowerCase() === deposit.to.toLowerCase() &&
+            call.args[1] === inAmount &&
+            BigInt(approve.value) === BigInt(0);
+        } catch {
+          ok = false;
+        }
+        if (!ok) return fail(502, ROUTE_BUSY);
+      }
+    }
+    if (sameChain && !(deposit.data.toLowerCase().includes(approveHex) && deposit.data.toLowerCase().includes(shieldHex))) {
+      return fail(502, ROUTE_BUSY);
+    }
+
+    // The wallet must hold enough on that chain. The same-chain swap is
+    // simulated whole (swap, approve and deposit); a cross-chain payment is
+    // checked by balance, since its deposit needs the approve to land first.
+    const origin = createPublicClient({ chain: evmChain!, transport: http(evmChain!.rpcUrls.default.http[0], { timeout: 10_000 }) });
+    if (sameChain) {
+      try {
+        await origin.call({ account: sender as Address, to: deposit.to as Address, data: deposit.data as Hex, value: BigInt(deposit.value) });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        return fail(400, /insufficient funds|exceeds balance|not enough/i.test(msg) ? notEnough : ROUTE_BUSY);
+      }
+    } else {
+      const held = await (native
+        ? origin.getBalance({ address: sender as Address })
+        : origin.readContract({ address: token.address as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [sender as Address] })
+      ).catch(() => null);
+      if (held !== null && held < inAmount) return fail(400, notEnough);
+    }
+    evmTxs = txs;
   }
 
   const feeUsd = ["relayer", "app"].reduce((sum, k) => sum + Number(data?.fees?.[k]?.amountUsd ?? 0), 0);
+  const gasUsd = Number(data?.fees?.gas?.amountUsd ?? NaN);
   const quote: PrivateBridgeQuote = {
-    requestId: String(step.requestId),
-    solanaTx: built.tx,
+    requestId,
+    solanaTx,
+    evmTxs,
+    sameChain,
     send: {
       amount: sendAmount,
       symbol: token.symbol,
@@ -254,7 +362,9 @@ export async function POST(req: Request) {
       usd: Number.isFinite(usdIn) ? Math.round(usdIn * 100) / 100 : null,
     },
     receive: { amount: amountText, symbol: dest.token.symbol, chain: dest.chain, logo: dest.token.logo },
+    extra: sameChain && outAmount > amount ? formatUnits(outAmount - amount, dest.token.decimals) : null,
     feeUsd: Math.round(feeUsd * 100) / 100,
+    gasUsd: Number.isFinite(gasUsd) ? Math.round(gasUsd * 100) / 100 : null,
     timeSec: Number(data?.details?.timeEstimate ?? 0),
   };
   return NextResponse.json({ ok: true, data: quote }, { headers: { "Cache-Control": "no-store" } });

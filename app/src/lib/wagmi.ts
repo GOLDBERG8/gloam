@@ -4,6 +4,7 @@ import { http, createConfig, createStorage, cookieStorage } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { robinhood, robinhoodTestnet } from "./chain";
 import { NETWORK_KEYS, tempoMainnet, tempoTestnet } from "./networks";
+import { ORIGIN_CHAINS } from "./originChains";
 import { turnkeyConnector } from "./turnkeyConnector";
 import { tempoFeeAware } from "./feeSponsor";
 import { tempoWalletConnector } from "./tempoWallet";
@@ -32,9 +33,14 @@ const mainnetChains = [
   ...(NETWORK_KEYS.includes("tempo-mainnet") ? [tempoMainnet] : []),
 ];
 
+// The chains a wallet can pay a private bridge order from (lib/originChains),
+// only alongside a mainnet: the wallet switches to one to sign there.
+const originChains = mainnetChains.length ? ORIGIN_CHAINS : [];
+
 // wagmi narrows hook `chainId` options to the registered ids. The type names
-// all four (GloamChainId); at runtime only the mainnets with a pool are there.
-const chains = [robinhoodTestnet, tempoTestnet, ...mainnetChains] as unknown as readonly [
+// all four (GloamChainId); at runtime only the mainnets with a pool are there,
+// plus the bridge's origin chains.
+const chains = [robinhoodTestnet, tempoTestnet, ...mainnetChains, ...originChains] as unknown as readonly [
   typeof robinhoodTestnet,
   typeof tempoTestnet,
   typeof robinhood,
@@ -56,6 +62,7 @@ export const wagmiConfig = createConfig({
     [tempoTestnet.id]: http("https://rpc.moderato.tempo.xyz"),
     [robinhood.id]: http("https://rpc.mainnet.chain.robinhood.com", { batch: { wait: 16 } }),
     [tempoMainnet.id]: http("https://rpc.tempo.xyz"),
+    ...Object.fromEntries(originChains.map((c) => [c.id, http()])),
   },
   ssr: true,
   storage: createStorage({
