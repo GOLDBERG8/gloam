@@ -102,6 +102,7 @@ import { PaymentTicketShare } from "./PaymentTicketShare";
 import { SentLinks } from "./SentLinks";
 import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
 import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
+import { surelyNotSent } from "@/lib/walletErrors";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
@@ -532,8 +533,10 @@ export function MoveView() {
   // Wallet reject / tx fail: drop ephemeral payment secrets
   useEffect(() => {
     if (!writeError) return;
-    // the wallet never sent it: drop what was kept ahead of the send
-    if (pendingAction.current === "send") forgetUnsent();
+    // Drop what was kept ahead of the send only when the wallet surely never
+    // sent it. A timeout or lost reply may come after it did: then the change
+    // and the code stay saved and settle once the chain shows them.
+    if (pendingAction.current === "send" && surelyNotSent(writeError)) forgetUnsent();
     keptBeforeSend.current = null;
     setBusy(false);
     setStatus(null);

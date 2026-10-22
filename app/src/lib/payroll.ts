@@ -41,7 +41,7 @@ import type { PayrollNote } from "@/lib/proofs";
 import { encryptTicketForTag, isReceiveTag } from "@/lib/receiveTag";
 import { ticketToMemoBytes } from "@/lib/payMemo";
 import { cleanPaymentNote } from "@/lib/paymentNote";
-import { saveBatch } from "@/lib/payrollStore";
+import { keepPaidCodes, saveBatch } from "@/lib/payrollStore";
 import { markPrivatePaid } from "@/lib/firstPayment";
 import { countLinkCreated } from "@/lib/funnel";
 import {
@@ -105,6 +105,8 @@ export type PayrollRow = {
   /** The opening of the payer's note this row spent: its spend marker is spendNullifier. */
   spendSecret?: Hex;
   spendAmount?: string;
+  /** Its code was copied to Sent links (lib/payrollStore keepPaidCodes), once. */
+  codeKept?: boolean;
 };
 
 export type PayrollBatch = {
@@ -406,21 +408,23 @@ async function syncUntil(deps: PayrollEngineDeps, commitment?: string, tries = 8
   return tree;
 }
 
-async function isSpent(client: PublicClient, pool: Address, nullifier: Hex): Promise<boolean> {
+async function isSpent(client: PublicClient, pool: Address, nullifier: Hex, blockNumber?: bigint): Promise<boolean> {
   return (await client.readContract({
     address: pool,
     abi: shieldPoolAbi,
     functionName: "isSpent",
     args: [nullifier],
+    ...(blockNumber !== undefined ? { blockNumber } : {}),
   })) as boolean;
 }
 
-async function commitmentSeen(client: PublicClient, pool: Address, commitment: Hex): Promise<boolean> {
+async function commitmentSeen(client: PublicClient, pool: Address, commitment: Hex, blockNumber?: bigint): Promise<boolean> {
   return (await client.readContract({
     address: pool,
     abi: shieldPoolAbi,
     functionName: "commitmentSeen",
     args: [commitment],
+    ...(blockNumber !== undefined ? { blockNumber } : {}),
   })) as boolean;
 }
 
@@ -489,8 +493,10 @@ const RESEND_BLOCKED = "Could not rebuild this payment exactly as it was sent, s
  *    it can never land and its codes can go.
  *  - pending: neither yet. It may still land, so the row keeps its codes.
  *  - unknown: the chain could not be read.
- * The spend is read first, so a payment landing between the two reads still
- * counts as landed (as lib/claimSweep settles a secured claim).
+ * Both are read at one block: a balanced RPC can send two reads to nodes a
+ * block apart, and "spent" from one with "not seen" from the other would call
+ * a payment that landed dead and throw its codes away. A node that doesn't
+ * have that block yet fails the read, which counts as unknown.
  */
 async function sentOutcome(
   client: PublicClient,
@@ -498,8 +504,12 @@ async function sentOutcome(
   row: PayrollRow
 ): Promise<"landed" | "dead" | "pending" | "unknown"> {
   if (!row.spendNullifier || !row.paymentCommitment) return "dead";
-  const spent = await isSpent(client, pool, row.spendNullifier).catch(() => null);
-  const seen = await commitmentSeen(client, pool, row.paymentCommitment).catch(() => null);
+  const blockNumber = await client.getBlockNumber().catch(() => null);
+  if (blockNumber === null) return "unknown";
+  const [spent, seen] = await Promise.all([
+    isSpent(client, pool, row.spendNullifier, blockNumber).catch(() => null),
+    commitmentSeen(client, pool, row.paymentCommitment, blockNumber).catch(() => null),
+  ]);
   if (seen === true) return "landed";
   if (seen === false && spent === true) return "dead";
   if (seen === null || spent === null) return "unknown";
@@ -807,6 +817,10 @@ async function settlePaid(batch: PayrollBatch, row: PayrollRow, deps: PayrollEng
   await finalizeTransfer(batch, row, deps);
   await notify(batch, row, deps, emit);
   row.status = "paid";
+  // A code only the payer holds (a claim link, a heads-up that didn't post)
+  // is money until the payee moves it: Sent links keeps it, backs it up and
+  // offers Take back.
+  await keepPaidCodes(batch).catch(() => undefined);
   await emit();
 }
 

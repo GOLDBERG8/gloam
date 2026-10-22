@@ -83,17 +83,34 @@ export type ClaimEnv = {
   relay: (t: Transfer) => Promise<Hex>;
   /** Where a commitment sits in the vault tree, once it is there. */
   leafIndexOf: (commitment: Hex) => Promise<number | undefined>;
+  /**
+   * A spend and a commitment read at one block, so two answers from nodes a
+   * block apart can't call a move that landed dead. Null fields: unread.
+   */
+  stateAt?: (nullifier: Hex | null, commitment: Hex) => Promise<{ spent: boolean | null; seen: boolean | null }>;
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function readBool(pool: Address, fn: "isSpent" | "commitmentSeen", arg: Hex): Promise<boolean> {
+function readBool(pool: Address, fn: "isSpent" | "commitmentSeen", arg: Hex, blockNumber?: bigint): Promise<boolean> {
   return getRhPublicClient().readContract({
     address: pool,
     abi: shieldPoolAbi,
     functionName: fn,
     args: [arg],
+    ...(blockNumber !== undefined ? { blockNumber } : {}),
   }) as Promise<boolean>;
+}
+
+/** Both reads at one block. A node without that block yet fails the read, which counts as unread. */
+async function readStateAt(pool: Address, nullifier: Hex | null, commitment: Hex) {
+  const block = await getRhPublicClient().getBlockNumber().catch(() => null);
+  if (block === null) return { spent: null, seen: null };
+  const [spent, seen] = await Promise.all([
+    nullifier ? readBool(pool, "isSpent", nullifier, block).catch(() => null) : Promise.resolve(null),
+    readBool(pool, "commitmentSeen", commitment, block).catch(() => null),
+  ]);
+  return { spent, seen };
 }
 
 /** The vault tree, waiting a little for a commitment that only just landed. */
@@ -132,6 +149,7 @@ export function appClaimEnv(onStage?: (text: string) => void): ClaimEnv {
     },
     relay: relayTransfer,
     leafIndexOf: async (commitment) => (await findLeaf(commitment))?.idx,
+    stateAt: (nullifier, commitment) => readStateAt(pool!, nullifier, commitment),
   };
 }
 
@@ -156,14 +174,17 @@ async function finalize(env: ClaimEnv, fresh: LocalNote, txHash: Hex | null) {
  * One pending fresh note, from what the chain shows. Seen in the vault: it is
  * counted and its claimed note retired. Not seen while the claimed note is
  * spent: it can never land, so it leaves the balance for good (kept as
- * history). Otherwise it stays pending. The spend is read first, so a move
- * landing between the two reads still counts as landed.
+ * history). Otherwise it stays pending. The app reads both at one block
+ * (stateAt), so answers from two nodes a block apart can't call a move that
+ * landed dead.
  */
 async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" | "dead" | "pending"> {
-  const spent = fresh.sweptFrom
-    ? await env.chain.isSpent(fresh.sweptFrom.nullifier).catch(() => null)
-    : null;
-  const seen = await env.chain.isCommitmentSeen(fresh.commitment).catch(() => null);
+  const { spent, seen } = env.stateAt
+    ? await env.stateAt(fresh.sweptFrom?.nullifier ?? null, fresh.commitment)
+    : {
+        spent: fresh.sweptFrom ? await env.chain.isSpent(fresh.sweptFrom.nullifier).catch(() => null) : null,
+        seen: await env.chain.isCommitmentSeen(fresh.commitment).catch(() => null),
+      };
   if (seen === true) {
     await finalize(env, fresh, null);
     return "landed";

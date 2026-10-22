@@ -9,17 +9,18 @@ const PAID = {
 };
 
 /**
- * A link that opens the vault on "receive" carries a payment in its fragment
- * (a payment to a Gloam address, or a claim link opened in the app), so its
- * preview in a chat says so, like /claim's, instead of the plain vault card.
+ * A payment link opens the vault on "receive" with its network named
+ * (lib/claimLink appClaimPath) and the payment in its fragment, so its preview
+ * in a chat says so, like /claim's. A plain Receive link has no network and
+ * keeps the vault card.
  */
 export async function generateMetadata({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<Metadata> {
-  const { mode } = await searchParams;
-  if (mode !== "receive") return { title: "Vault" };
+  const { mode, net } = await searchParams;
+  if (mode !== "receive" || typeof net !== "string" || !net) return { title: "Vault" };
   return {
     title: { absolute: PAID.title },
     description: PAID.description,

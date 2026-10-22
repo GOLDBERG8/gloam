@@ -34,7 +34,7 @@ const { saveLocalNote } = await import("../src/lib/shield");
 const { decodeNotePackage } = await import("../src/lib/notePackage");
 const { loadBatches, newBatch, runPayroll, saveBatch } = await import("../src/lib/payroll");
 const { PAYROLL_SAVED_EVENT, pendingPayrollRuns, restorePayrollRuns } = await import("../src/lib/payrollStore");
-const { makeSentLink } = await import("../src/lib/sentLinks");
+const { makeSentLink, paymentNullifier } = await import("../src/lib/sentLinks");
 const { loadSentLinks, markSentLinksUsed, openSentLinks, restoreSentLinks, saveSentLink } = await import(
   "../src/lib/sentLinksStore"
 );
@@ -112,6 +112,8 @@ function mockPool() {
       return hash;
     },
     client: {
+      // One chain head: the engine reads a spend and a commitment at the same block.
+      getBlockNumber: async () => BigInt(1),
       readContract: async ({ functionName, args }: { functionName: string; args: [Hex] }) => {
         if (functionName === "isSpent") return spent.has(lc(args[0]));
         if (functionName === "commitmentSeen") return index.has(lc(args[0]));
@@ -255,6 +257,11 @@ await test("a receipt that times out is still checking, never failed, and keeps 
   assert.equal(byId(spend.id).status, "recovered");
   assert.equal(byId(paid.changeNoteId!).leafIndex, pool.index.get(lc(byId(paid.changeNoteId!).commitment)));
   assert.equal((await pendingPayrollRuns()).some((b) => b.id === run.id), false, "settled runs leave the backup");
+  // ...but the payee's code does not: Sent links keeps it (and backs it up) until the money moves.
+  assert.ok(paid.codeKept, "the paid code was copied to Sent links");
+  const kept = (await openSentLinks()).find((r) => r.code === paid.ticket);
+  assert.ok(kept, "the paid code is in Sent links, carried by the backup");
+  assert.equal(kept!.nullifier, await paymentNullifier(paid.paymentSecret!, paid.paymentCommitment!), "checked by the payee's own spend");
 });
 
 await test("past the wait, a retry sends the very same payment, so it can only land once", async () => {
@@ -422,7 +429,7 @@ await test("Sent links: the backup carries every unused code, and a restore neve
   await saveSentLink(unused);
   await saveSentLink(spentOne);
   await markSentLinksUsed([spentOne.id]);
-  const carried = await openSentLinks();
+  const carried = (await openSentLinks()).filter((r) => r.id === unused.id || r.id === spentOne.id);
   assert.deepEqual(carried.map((r) => r.id), [unused.id], "only codes whose money has not moved");
 
   const fresh = link(3);

@@ -239,7 +239,28 @@ export async function decodeNotePackage(
   passphrase?: string,
   opts?: { tryTagDecrypt?: boolean }
 ): Promise<NotePackage> {
-  const s = paymentCodeIn(input);
+  try {
+    return await decodeCode(paymentCodeIn(input), passphrase, opts);
+  } catch (err) {
+    // A code an email or chat broke over lines reads short. Try it with the
+    // following pieces joined back on; only a reading that opens is taken
+    // (a plain code must parse, a locked or sealed one must decrypt).
+    for (const longer of wrappedCodeCandidates(input)) {
+      try {
+        return await decodeCode(longer, passphrase, opts);
+      } catch {
+        /* the next reading */
+      }
+    }
+    throw err;
+  }
+}
+
+async function decodeCode(
+  s: string,
+  passphrase?: string,
+  opts?: { tryTagDecrypt?: boolean }
+): Promise<NotePackage> {
 
   // Pay-to-tag sealed package, only recipient’s receive key opens it
   if (s.startsWith("gloam2t.")) {
@@ -397,9 +418,9 @@ const CODE_IN_TEXT = /gloam(?:2t|1e|1)\.[A-Za-z0-9_\-.]+/;
  * "gloam1." when a chat app linked just the start of it. All of these hold the
  * same code, so all of them claim.
  */
-export function paymentCodeIn(input: string): string {
+/** What was pasted, from the "#claim=" part on when there is one, with %-escapes undone. */
+function pastedText(input: string): string {
   let s = input.trim();
-  if (s.startsWith("{")) return s; // an old JSON package
   const hashAt = s.search(/(?:#|%23)claim(?:=|%3D)/i);
   if (hashAt !== -1) s = s.slice(hashAt).replace(/^(?:#|%23)claim(?:=|%3D)/i, "");
   if (s.includes("%")) {
@@ -409,6 +430,35 @@ export function paymentCodeIn(input: string): string {
       // keep it as pasted
     }
   }
+  return s;
+}
+
+/**
+ * Longer readings of a code that a line break or space cut short: the code
+ * with the next piece joined on, then the next two, and so on. A piece that
+ * ends in other punctuation ends the code.
+ */
+export function wrappedCodeCandidates(input: string): string[] {
+  const s = pastedText(input);
+  const at = s.search(CODE_IN_TEXT);
+  if (at === -1) return [];
+  const pieces = s.slice(at).split(/\s+/);
+  const out: string[] = [];
+  let joined = pieces[0]!.match(CODE_IN_TEXT)?.[0] ?? "";
+  if (joined.length !== pieces[0]!.length) return [];
+  for (let i = 1; i < pieces.length && i <= 8; i++) {
+    const piece = pieces[i]!.match(/^[A-Za-z0-9_\-.]+/)?.[0];
+    if (!piece) break;
+    joined += piece;
+    out.push(joined.replace(/\.+$/, ""));
+    if (piece.length !== pieces[i]!.length) break;
+  }
+  return out;
+}
+
+export function paymentCodeIn(input: string): string {
+  if (input.trim().startsWith("{")) return input.trim(); // an old JSON package
+  const s = pastedText(input);
   const found = s.match(CODE_IN_TEXT);
   if (found) return found[0].replace(/\.+$/, "");
   // "gloam1." lost on the way: a plain code's body is base64 JSON, which starts "eyJ".
