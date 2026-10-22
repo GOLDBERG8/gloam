@@ -246,7 +246,8 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     primaryAsset: { symbol: "ETH", address: null, decimals: 18 },
     stableAssets: [],
     status: "live",
-    payMemo: null,
+    // GloamPayMemo, deployed 2026-10-23 (no owner, holds nothing, never logs the poster)
+    payMemo: { address: "0x01B3172d9900Cb26d57E986429b9b23854c74598", deployBlock: 95_494_392n, emitsPoster: false },
     note: "Mainnet, real money: private USDG payments, and $GLOAM held privately.",
     explorerTx: (hash) => `${robinhood.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${robinhood.blockExplorers.default.url}/address/${addr}`,
@@ -267,7 +268,8 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     primaryAsset: { symbol: "USD", address: null, decimals: 18 },
     stableAssets: [],
     status: "live",
-    payMemo: null,
+    // GloamPayMemo, deployed 2026-10-23 (no owner, holds nothing, never logs the poster)
+    payMemo: { address: "0x342E3745967FDB4223902E196Ceb792c15d8C1c4", deployBlock: 45_417_629n, emitsPoster: false },
     note: "Mainnet, real money: private stablecoin payments (USDC.e, pathUSD, USDT0, OUSD).",
     explorerTx: (hash) => `${tempoMainnet.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${tempoMainnet.blockExplorers.default.url}/address/${addr}`,

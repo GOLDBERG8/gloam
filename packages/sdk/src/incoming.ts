@@ -57,8 +57,8 @@ export interface PayMemoBoard {
 export const PAY_MEMO_BOARDS: Record<number, PayMemoBoard | null> = {
   [RH_TESTNET_CHAIN_ID]: { address: GLOAM_PAY_MEMO, deployBlock: 90_421_567n, emitsPoster: true },
   [TEMPO_TESTNET_CHAIN_ID]: { address: TEMPO_PAY_MEMO, deployBlock: 37_410_900n, emitsPoster: false },
-  [RH_MAINNET_CHAIN_ID]: null,
-  [TEMPO_MAINNET_CHAIN_ID]: null,
+  [RH_MAINNET_CHAIN_ID]: { address: "0x01B3172d9900Cb26d57E986429b9b23854c74598", deployBlock: 95_494_392n, emitsPoster: false },
+  [TEMPO_MAINNET_CHAIN_ID]: { address: "0x342E3745967FDB4223902E196Ceb792c15d8C1c4", deployBlock: 45_417_629n, emitsPoster: false },
 };
 
 /** The payment-message board on a chain, or null where there is none. */

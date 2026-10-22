@@ -155,13 +155,15 @@ const someoneElse = await generateReceiveKey();
   assert(r.payments.map((p) => p.note).join(",") === pays.map((_, i) => `agent-${i}`).join(","), "oldest first");
 }
 
-// ── no board on mainnet yet ───────────────────────────────────────────────────
+// ── every network has a board (both mainnets since 2026-10-23); a chain without one says so ──
 {
-  assert(payMemoBoardFor(4663) === null && payMemoBoardFor(4217) === null, "no board on either mainnet in this version");
+  assert(payMemoBoardFor(4663)?.address === "0x01B3172d9900Cb26d57E986429b9b23854c74598", "Robinhood Chain mainnet board");
+  assert(payMemoBoardFor(4217)?.address === "0x342E3745967FDB4223902E196Ceb792c15d8C1c4", "Tempo mainnet board");
+  assert(payMemoBoardFor(4663)?.emitsPoster === false && payMemoBoardFor(4217)?.emitsPoster === false, "mainnet boards never log the poster");
   assert(payMemoBoardFor(46630)?.address && payMemoBoardFor(42431)?.address, "the testnets have boards");
   let err = null;
   try {
-    await scanIncomingPayments({ client: mockChain().client, network: net, receiveKey: raeto });
+    await scanIncomingPayments({ client: mockChain().client, network: { ...net, chainId: 999_999 }, receiveKey: raeto });
   } catch (e) {
     err = e;
   }
@@ -201,15 +203,10 @@ if (process.env.GLOAM_LIVE === "1") {
   for (const family of ["robinhood", "tempo"]) {
     const n = mainnetNetwork(family);
     const client = createPublicClient({ transport: http(n.rpcUrl) });
-    let err = null;
-    try {
-      await scanIncomingPayments({ client, network: n, receiveKey: fresh });
-    } catch (e) {
-      err = e;
-    }
-    assert(err instanceof NoPayMemoBoardError, `${n.label} mainnet reports no board yet`);
+    const r = await scanIncomingPayments({ client, network: n, receiveKey: fresh });
+    assert(r.payments.length === 0 && r.scannedTo >= payMemoBoardFor(n.chainId).deployBlock, `${n.label} mainnet board scans end to end`);
   }
-  live = "testnet boards scanned, mainnets report no board";
+  live = "testnet and mainnet boards scanned";
 }
 
 console.log(`incoming.selftest: ok (${checks} assertions; live: ${live})`);
