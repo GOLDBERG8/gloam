@@ -36,6 +36,7 @@
 import {
   askModel,
   askTeamChat,
+  botModel,
   systemPrompt,
   teamSystemPrompt,
   userPrompt,
@@ -46,6 +47,7 @@ import {
   type ModelMiss,
 } from "./answer";
 import { personaName } from "./persona";
+import { groupAnswerModel } from "./raetoRoute";
 import { buildReport, teamContext } from "./report";
 import {
   MAX_IMAGE_BYTES,
@@ -572,10 +574,20 @@ type Compose = {
 
 /** The model's answer after the reply rules (or null), and its signal about a picture. */
 async function compose(x: Compose): Promise<{ reply: string | null; sentinel: Sentinel }> {
+  // Raeto may pick the fast model for a simple text question (lib/telegramBot/raetoRoute)
+  const model = await groupAnswerModel(
+    {
+      text: x.input.text,
+      context: [x.input.repliedTo?.text ?? "", x.input.taggedBy?.text ?? ""],
+      picture: Boolean(x.image || x.input.picture),
+    },
+    botModel(),
+  );
   const raw = await askModel(
     systemPrompt({ persona: x.c.persona, testingOpen: x.c.testingOpen, admins: x.c.admins }),
     userPrompt({ persona: x.c.persona, ...x.input }),
     x.image,
+    model,
   );
   if (!raw) return { reply: null, sentinel: null };
   if (x.image) await count("images");
