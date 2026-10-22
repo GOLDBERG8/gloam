@@ -9,7 +9,7 @@
     "4663": {
       "network": "Robinhood Chain",
       "rpc": "https://rpc.mainnet.chain.robinhood.com",
-      "explorer": "https://explorer.mainnet.chain.robinhood.com",
+      "explorer": "https://robinhoodchain.blockscout.com",
       "ShieldPoolPayments": "0x39e28cde55cab798874746ac52cb4b5cc99a0194",
       "deployBlock": 94194599,
       "deployTx": "0x585d7310a3b2c29d024ea1dd80ab6b58730df933c470f3ec928fa035d05917bd",

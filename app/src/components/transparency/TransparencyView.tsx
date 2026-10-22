@@ -48,8 +48,10 @@ function tabLabel(key: NetworkKey): string {
 
 /* ---------------------------------------------------------------- data */
 
-type NetState = { ledger: Ledger | null; error: string | null; progress: number; refreshing: boolean };
-const EMPTY: NetState = { ledger: null, error: null, progress: 0, refreshing: false };
+type NetState = { ledger: Ledger | null; error: string | null; progress: number; refreshing: boolean; resuming: boolean };
+const EMPTY: NetState = { ledger: null, error: null, progress: 0, refreshing: false, resuming: false };
+/** After a pass that read only part of the vault, the next ones start this long after (then the person can ask). */
+const RESUME_AFTER_MS = [2_000, 5_000, 10_000, 20_000, 30_000];
 
 function friendlyError(key: NetworkKey): string {
   return `Could not reach ${networkName(getNetwork(key))} just now. Public nodes sometimes slow down or limit requests, so try again in a moment.`;
@@ -62,10 +64,13 @@ function useLedger(key: NetworkKey | null) {
   );
   const [nonce, setNonce] = useState(0);
   const forceNext = useRef(false);
+  // Passes in a row that read only part of the vault, per network.
+  const resumes = useRef(new Map<NetworkKey, number>());
 
   useEffect(() => {
     if (!key) return;
     let live = true;
+    let resumeTimer: number | undefined;
     const force = forceNext.current;
     forceNext.current = false;
     const patch = (p: Partial<NetState>) => {
@@ -78,7 +83,12 @@ function useLedger(key: NetworkKey | null) {
     });
     loadLedger(key, { force, onProgress: (progress) => patch({ progress }) })
       .then((ledger) => {
-        patch({ ledger, error: null, refreshing: false, progress: 1 });
+        // Part of it read: show that, and pick up where it stopped on its own.
+        const tries = ledger.incomplete ? (resumes.current.get(key) ?? 0) : 0;
+        resumes.current.set(key, ledger.incomplete ? tries + 1 : 0);
+        const again = ledger.incomplete && tries < RESUME_AFTER_MS.length;
+        patch({ ledger, error: null, refreshing: false, progress: 1, resuming: Boolean(again) });
+        if (again && live) resumeTimer = window.setTimeout(() => setNonce((x) => x + 1), RESUME_AFTER_MS[tries]);
         // the other chain on the same side (testnet or mainnet)
         const other = NETWORK_KEYS.find((k) => k !== key && getNetwork(k).testnet === getNetwork(key).testnet);
         if (other) {
@@ -87,9 +97,10 @@ function useLedger(key: NetworkKey | null) {
           });
         }
       })
-      .catch(() => patch({ error: friendlyError(key), refreshing: false }));
+      .catch(() => patch({ error: friendlyError(key), refreshing: false, resuming: false }));
     return () => {
       live = false;
+      window.clearTimeout(resumeTimer);
     };
   }, [key, nonce]);
 
@@ -99,6 +110,7 @@ function useLedger(key: NetworkKey | null) {
     refresh: () => {
       if (!key) return;
       forceNext.current = true;
+      resumes.current.set(key, 0);
       setStates((s) => ({ ...s, [key]: { ...s[key], refreshing: true, error: null, progress: 0 } }));
       setNonce((n) => n + 1);
     },
@@ -652,7 +664,7 @@ export function TransparencyView() {
   const [active, setActive] = useState<NetworkKey | null>(null);
   const shown: NetworkKey = active ?? "robinhood";
   const net = getNetwork(shown);
-  const { ledger, error, progress, refreshing, refresh } = useLedger(active);
+  const { ledger, error, progress, refreshing, resuming, refresh } = useLedger(active);
   const { prices, waiting } = usePrices();
 
   // ?chain=tempo opens on Tempo; read after mount so server and client match.
@@ -799,6 +811,20 @@ export function TransparencyView() {
                     <button type="button" onClick={refresh} className="font-medium underline underline-offset-4">
                       Try again
                     </button>
+                  </p>
+                )}
+                {!error && ledger.incomplete && (
+                  <p aria-live="polite" className="mb-4 flex flex-wrap items-center gap-x-2 rounded-xl bg-surface px-4 py-3 text-[13px] leading-relaxed text-soft">
+                    {ledger.incomplete.logsFrom
+                      ? `Read up to block ${intFmt.format(Number(ledger.scannedTo))} so far. Public nodes are slow right now, so the counts below are what's read yet.`
+                      : "The vault's balances didn't load this time, so these are the last ones read."}{" "}
+                    {resuming || refreshing ? (
+                      "Reading the rest…"
+                    ) : (
+                      <button type="button" onClick={refresh} className="font-medium text-foreground underline underline-offset-4">
+                        Keep reading
+                      </button>
+                    )}
                   </p>
                 )}
                 <div className="grid items-start gap-4 lg:grid-cols-[1.1fr_0.9fr]">

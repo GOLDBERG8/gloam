@@ -107,7 +107,7 @@ const READ_MORE: { label: string; href: string }[] = [
   { label: "Agents: the Gloam MCP server", href: "/docs/agents" },
   { label: "Live vault totals", href: "/transparency" },
   { label: "Check a proof", href: "/verify" },
-  { label: "The pool on Robinhood Chain", href: `https://explorer.mainnet.chain.robinhood.com/address/${POOL}` },
+  { label: "The pool on Robinhood Chain", href: `https://robinhoodchain.blockscout.com/address/${POOL}` },
   { label: "The pool on Tempo", href: `https://explore.tempo.xyz/address/${POOL}` },
   { label: "Trusted setup transcript", href: "https://github.com/cryptoduke01/gloam/releases/tag/ceremony-final" },
 ];

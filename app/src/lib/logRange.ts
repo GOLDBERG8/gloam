@@ -25,13 +25,17 @@ function isRateLimit(e: unknown): boolean {
   return status === 429 || /429|too many requests|rate ?limit/i.test(errText(e));
 }
 
-/** getLogs for one range: retries transient failures, halves the range when the node says it is too wide. */
-export async function getLogsSafe(
-  fetchRange: (from: bigint, to: bigint) => Promise<Log[]>,
+/**
+ * getLogs for one range: retries transient failures, halves the range when the
+ * node says it is too wide. Generic so typed event logs (getLogs with `events`)
+ * keep their decoded args.
+ */
+export async function getLogsSafe<T = Log>(
+  fetchRange: (from: bigint, to: bigint) => Promise<T[]>,
   from: bigint,
   to: bigint,
   depth = 0
-): Promise<Log[]> {
+): Promise<T[]> {
   let last: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {

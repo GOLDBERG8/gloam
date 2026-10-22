@@ -10,10 +10,13 @@ export const robinhood = defineChain({
       http: ["https://rpc.mainnet.chain.robinhood.com"],
     },
   },
+  // Blockscout, the explorer viem lists for chain 4663. The explorer.mainnet
+  // host the testnet pattern suggests fails its TLS handshake, so every link
+  // built on it went nowhere (checked 2026-10-22).
   blockExplorers: {
     default: {
-      name: "Robinhood Explorer",
-      url: "https://explorer.mainnet.chain.robinhood.com",
+      name: "Blockscout",
+      url: "https://robinhoodchain.blockscout.com",
     },
   },
   // Multicall3 at its usual address, so batched reads go out as one call

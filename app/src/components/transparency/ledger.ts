@@ -25,6 +25,7 @@ import {
 } from "viem";
 import { getNetwork, type GloamNetwork, type NetworkKey } from "@/lib/networks";
 import { erc20BalanceOfAbi, shieldTokensFor, supportsNativeShield } from "@/lib/tokens";
+import { getLogsSafe } from "@/lib/logRange";
 
 export type ActivityKind = "deposit" | "transfer" | "cashout" | "trade";
 
@@ -75,6 +76,12 @@ export type Ledger = {
   tookMs: number;
   /** Blocks read by the last pass. */
   blocksRead: string;
+  /**
+   * Set when a pass could not read everything: the vault's logs from
+   * `logsFrom` on (null: all read), and whether the balances are the last
+   * ones read rather than fresh. The next pass resumes from there.
+   */
+  incomplete?: { logsFrom: string | null; holdings: boolean };
 };
 
 const RECENT_KEEP = 12;
@@ -90,6 +97,18 @@ const SPAN: Record<number, bigint> = { 46630: 4_000_000n, 4663: 4_000_000n };
 export function logSpan(n: GloamNetwork): bigint {
   return SPAN[n.chainId] ?? n.logRange;
 }
+/**
+ * Span per getLogs on the transparency read. Smaller than logSpan: Robinhood
+ * Chain makes about 370,000 blocks a day, and one query over the whole history
+ * grew slow enough to time out on a phone, failing the page at "50%".
+ */
+const LEDGER_SPAN: Record<number, bigint> = { 46630: 1_000_000n, 4663: 500_000n };
+/**
+ * Blocks left unread at the head. A balanced RPC can answer getLogs from a
+ * node a block behind the one that gave the head, and returns nothing for
+ * blocks it doesn't have yet; reading to the very head would mark them read.
+ */
+const HEAD_LAG: Record<number, bigint> = { 46630: 20n, 4663: 20n };
 const FRESH_MS = 30_000;
 const CACHE_PREFIX = "gloam_transparency_v1";
 
@@ -128,8 +147,6 @@ export function clientFor(n: GloamNetwork): PublicClient {
   return c;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 const gates = new Map<number, { active: number; waiting: (() => void)[] }>();
 
 /** Every RPC call for a chain goes through here, so at most PARALLEL run at once. */
@@ -155,50 +172,9 @@ async function runAll<T>(count: number, run: (i: number) => Promise<T>): Promise
   return Promise.all(Array.from({ length: count }, (_, i) => run(i)));
 }
 
-function errText(e: unknown): string {
-  if (e && typeof e === "object") {
-    const o = e as { details?: unknown; shortMessage?: unknown; message?: unknown };
-    return String(o.details ?? o.shortMessage ?? o.message ?? e);
-  }
-  return String(e);
-}
-
-/** The node refusing a span as too wide or too big (not a rate limit). */
-const RANGE_ERROR =
-  /block range|range (is )?too|exceeds? (the )?max|max(imum)? block|more than \d+ (results|logs)|too many (results|logs)|response size|query timeout|limit exceeded/i;
-
-function isRateLimit(e: unknown): boolean {
-  const status = (e as { status?: number })?.status;
-  return status === 429 || /429|too many requests|rate ?limit/i.test(errText(e));
-}
-
-/**
- * getLogs for one range: retries transient failures, and splits the range in
- * half when the node says it is too wide or returns too much.
- */
-export async function getLogsSafe<T>(
-  fetchRange: (from: bigint, to: bigint) => Promise<T[]>,
-  from: bigint,
-  to: bigint,
-  depth = 0
-): Promise<T[]> {
-  let last: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      return await fetchRange(from, to);
-    } catch (e) {
-      last = e;
-      if (!isRateLimit(e) && RANGE_ERROR.test(errText(e)) && to > from && depth < 8) {
-        const mid = from + (to - from) / 2n;
-        const a = await getLogsSafe(fetchRange, from, mid, depth + 1);
-        const b = await getLogsSafe(fetchRange, mid + 1n, to, depth + 1);
-        return [...a, ...b];
-      }
-      await sleep(1500 * (attempt + 1));
-    }
-  }
-  throw last;
-}
+// The shared reader (retries, halves a span the node refuses as too wide or
+// too big). Re-exported for lib/walletActivity, which reads through this module.
+export { getLogsSafe };
 
 export function ranges(from: bigint, to: bigint, step: bigint): [bigint, bigint][] {
   const out: [bigint, bigint][] = [];
@@ -273,7 +249,7 @@ export function loadLedger(
     return running.promise;
   }
   const prev = cachedLedger(key);
-  if (prev && !opts.force && Date.now() - prev.checkedAt < FRESH_MS) {
+  if (prev && !prev.incomplete && !opts.force && Date.now() - prev.checkedAt < FRESH_MS) {
     return Promise.resolve(prev);
   }
   const listeners = new Set<Progress>(opts.onProgress ? [opts.onProgress] : []);
@@ -292,14 +268,16 @@ async function readLedger(key: NetworkKey, prev: Ledger | null, progress: Progre
   const c = clientFor(n);
 
   const id = n.chainId;
-  const latest = await gated(id, () => c.getBlockNumber());
+  const head = await gated(id, () => c.getBlockNumber());
+  const lag = HEAD_LAG[id] ?? 2n;
+  const latest = head > lag ? head - lag : head;
   const fromBlock = n.deployBlock;
   const resume = prev && BigInt(prev.scannedTo) >= fromBlock ? BigInt(prev.scannedTo) + 1n : fromBlock;
   const memo = n.payMemo;
   const memoFrom = memo ? (memo.deployBlock > fromBlock ? memo.deployBlock : fromBlock) : 0n;
   const memoResume = resume > memoFrom ? resume : memoFrom;
 
-  const span = SPAN[n.chainId] ?? n.logRange;
+  const span = LEDGER_SPAN[id] ?? logSpan(n);
   const poolRanges = resume <= latest ? ranges(resume, latest, span) : [];
   const memoRanges = memo && memoResume <= latest ? ranges(memoResume, latest, span) : [];
   const total = poolRanges.length + memoRanges.length + 1; // +1: balances
@@ -307,14 +285,20 @@ async function readLedger(key: NetworkKey, prev: Ledger | null, progress: Progre
   const tick = () => progress(Math.min(1, ++done / total));
   progress(0);
 
-  const [poolLogs, memoCounts, holdings, startTs] = await Promise.all([
+  // A range or the balances failing no longer fails the page: each part is
+  // kept or marked missing, and what was read is shown while the rest is
+  // read again.
+  const kept = <T,>(p: Promise<T>): Promise<T | null> => p.then((v) => v, () => null);
+  const [poolParts, memoParts, freshHoldings, startTs] = await Promise.all([
     runAll(poolRanges.length, async (i) => {
       const [a, b] = poolRanges[i];
-      const logs = await getLogsSafe(
-        (from, to) =>
-          gated(id, () => c.getLogs({ address: vault, events: POOL_EVENTS, fromBlock: from, toBlock: to })),
-        a,
-        b
+      const logs = await kept(
+        getLogsSafe(
+          (from, to) =>
+            gated(id, () => c.getLogs({ address: vault, events: POOL_EVENTS, fromBlock: from, toBlock: to })),
+          a,
+          b
+        )
       );
       tick();
       return logs;
@@ -322,16 +306,14 @@ async function readLedger(key: NetworkKey, prev: Ledger | null, progress: Progre
     memo
       ? runAll(memoRanges.length, async (i) => {
           const [a, b] = memoRanges[i];
-          const logs = await getLogsSafe(
-            (from, to) => gated(id, () => c.getLogs({ address: memo.address, fromBlock: from, toBlock: to })),
-            a,
-            b
+          const logs = await kept(
+            getLogsSafe((from, to) => gated(id, () => c.getLogs({ address: memo.address, fromBlock: from, toBlock: to })), a, b)
           );
           tick();
-          return logs.filter((l) => l.topics[0] && MEMO_TOPICS.has(l.topics[0])).length;
+          return logs;
         })
-      : Promise.resolve([] as number[]),
-    readHoldings(n, c, vault).then((h) => {
+      : Promise.resolve([]),
+    kept(readHoldings(n, c, vault)).then((h) => {
       tick();
       return h;
     }),
@@ -342,13 +324,37 @@ async function readLedger(key: NetworkKey, prev: Ledger | null, progress: Progre
           .catch(() => 0),
   ]);
 
+  // Only an unbroken run of ranges from where the last pass stopped counts.
+  // A range that failed, and everything after it, is read again next pass, so
+  // nothing is counted twice or skipped.
+  const readThrough = (parts: (unknown[] | null)[], rs: [bigint, bigint][], start: bigint) => {
+    let end = start - 1n;
+    for (let i = 0; i < rs.length; i++) {
+      if (parts[i] === null) break;
+      end = rs[i]![1];
+    }
+    return end;
+  };
+  const poolEnd = readThrough(poolParts, poolRanges, resume);
+  const memoEnd = memo ? (memoRanges.length ? readThrough(memoParts, memoRanges, memoResume) : latest) : latest;
+  const scannedTo = poolEnd < memoEnd ? poolEnd : memoEnd;
+  const upTo = <L extends { blockNumber: bigint | null }>(parts: (L[] | null)[]) =>
+    parts.flatMap((p) => p ?? []).filter((l) => (l.blockNumber ?? 0n) <= scannedTo);
+  const poolLogs = upTo(poolParts);
+  if (!prev && poolRanges.length > 0 && poolEnd < poolRanges[0]![0] && freshHoldings === null) {
+    // Nothing at all came back: there is nothing to show yet.
+    throw new Error(`Could not read ${n.label}.`);
+  }
+
   const counts = prev
     ? { ...prev.counts }
     : { deposits: 0, transfers: 0, cashouts: 0, trades: 0, memos: 0 };
-  counts.memos += memoCounts.reduce((a, b) => a + b, 0);
+  counts.memos += upTo(memoParts).filter((l) => l.topics[0] && MEMO_TOPICS.has(l.topics[0])).length;
+  const holdings = freshHoldings ?? prev?.holdings ?? [];
+  const logsFrom = scannedTo < latest ? String(scannedTo + 1n) : null;
 
   const fresh: PublicEvent[] = [];
-  for (const log of poolLogs.flat()) {
+  for (const log of poolLogs) {
     const base = {
       block: String(log.blockNumber ?? 0n),
       logIndex: log.logIndex ?? 0,
@@ -400,14 +406,15 @@ async function readLedger(key: NetworkKey, prev: Ledger | null, progress: Progre
     pool: vault,
     memo: memo?.address ?? null,
     fromBlock: String(fromBlock),
-    scannedTo: String(latest),
+    scannedTo: String(scannedTo >= fromBlock ? scannedTo : fromBlock - 1n),
     startTs,
     counts,
     recent: timed,
     holdings,
     checkedAt: Date.now(),
     tookMs: Math.round(performance.now() - started),
-    blocksRead: String(latest >= resume ? latest - resume + 1n : 0n),
+    blocksRead: String(scannedTo >= resume ? scannedTo - resume + 1n : 0n),
+    ...(logsFrom || freshHoldings === null ? { incomplete: { logsFrom, holdings: freshHoldings === null } } : {}),
   };
   saveLedger(n, ledger);
   progress(1);

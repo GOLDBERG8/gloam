@@ -87,8 +87,8 @@ export default function DocsNetworksPage() {
             <tr>
               <td>Explorer</td>
               <td>
-                <a href="https://explorer.mainnet.chain.robinhood.com" target="_blank" rel="noreferrer">
-                  explorer.mainnet.chain.robinhood.com
+                <a href="https://robinhoodchain.blockscout.com" target="_blank" rel="noreferrer">
+                  robinhoodchain.blockscout.com
                 </a>
               </td>
               <td>

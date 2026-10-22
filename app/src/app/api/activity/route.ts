@@ -5,7 +5,6 @@ import { NETWORK_KEYS } from "@/lib/networks";
 
 const EXPLORER_API = "https://explorer.testnet.chain.robinhood.com/api";
 /** Robinhood Chain mainnet's explorer answers the same account API (checked 2026-10-20). */
-const RH_MAINNET_EXPLORER_API = "https://explorer.mainnet.chain.robinhood.com/api";
 
 /**
  * Which explorer to ask. No chainId: the testnet, as always. A mainnet Gloam
@@ -14,7 +13,10 @@ const RH_MAINNET_EXPLORER_API = "https://explorer.mainnet.chain.robinhood.com/ap
  */
 function explorerFor(chainId: string | null): string | null | "bad" {
   if (chainId === null) return EXPLORER_API;
-  if (chainId === "4663" && NETWORK_KEYS.includes("robinhood-mainnet")) return RH_MAINNET_EXPLORER_API;
+  // Robinhood Chain mainnet's explorer API sits behind a bot check a server
+  // can't pass; the app reads that history straight from the chain instead
+  // (lib/walletActivity), so this answers empty, as for Tempo.
+  if (chainId === "4663" && NETWORK_KEYS.includes("robinhood-mainnet")) return null;
   if (chainId === "4217" && NETWORK_KEYS.includes("tempo-mainnet")) return null;
   return "bad";
 }
