@@ -299,8 +299,12 @@ contract VaultSwapTest is Test {
         // the refund note: the amount less the vault's highest possible fee (1%)
         k.r = GloamVaultSwap.Deposit(hex"00", bytes32(c + 0x1000), assetIn, amount - amount / 100);
         k.route = route;
-        address escrow =
-            on.escrowFor(assetIn, k.d.commitment, assetOut, amountOut, k.r.commitment, k.r.amount, keccak256(route));
+        address escrow = on.escrowFor(
+            assetIn,
+            GloamVaultSwap.EscrowKey(
+                bytes32(nul), amount, k.d.commitment, assetOut, amountOut, k.r.commitment, k.r.amount, keccak256(route)
+            )
+        );
         k.s = GloamVaultSwap.Spend(abi.encode(escrow), pool.currentRoot(), bytes32(nul), assetIn, amount);
     }
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {SwapEscrow} from "./SwapEscrow.sol";
+
 /// @notice The vault calls a swap makes. unshield and shieldBound are proof-gated in the vault.
 interface IGloamVault {
     function unshield(
@@ -22,25 +24,6 @@ interface IERC20Swap {
 }
 
 /**
- * @notice One swap's drop-off point. The vault pays a swap's input here (the
- *         unshield proof names this address as `to`), and the router deploys
- *         it with CREATE2 in the same transaction: the constructor hands the
- *         whole balance to the router and leaves no code behind.
- */
-contract SwapEscrow {
-    constructor(address token) {
-        uint256 amount = IERC20Swap(token).balanceOf(address(this));
-        if (amount != 0) {
-            (bool ok, bytes memory ret) = token.call(abi.encodeWithSelector(0xa9059cbb, msg.sender, amount));
-            require(ok && (ret.length == 0 || abi.decode(ret, (bool))), "escrow transfer");
-        }
-        assembly {
-            return(0, 0)
-        }
-    }
-}
-
-/**
  * @title GloamVaultSwap
  * @notice A private swap through a live Gloam vault, in one transaction:
  *         take one note out of the vault, buy an exact amount of another asset
@@ -50,24 +33,29 @@ contract SwapEscrow {
  *         amounts are public, as on any DEX trade.
  *
  * What binds what. The vault's unshield proof has one free public input, `to`.
- * A swap sets it to an escrow address that CREATE2 derives from everything
- * the swap must do: the new note (commitment, asset, amount), a refund note
- * (commitment, amount) and the route. So:
+ * A swap sets it to an escrow address that CREATE2 derives from everything the
+ * swap must do: the note spent (nullifier, amount), the new note (commitment,
+ * asset, amount), a refund note (commitment, amount) and the route. So:
  *  - only the note's owner can start a swap (the proof needs its secret);
  *  - a caller who copies the call and changes the new note, the refund note
  *    or the route gets a different escrow, and the vault rejects the proof;
+ *  - no two notes ever share an escrow;
  *  - the new note's shield proof binds it to exactly `amountOut` of the asset.
  *
  * If someone sends the unshield alone (the proof is public once broadcast),
  * the money waits at the escrow, which only this router can open. The same
  * swap call then sees the note already spent and puts the money back into the
  * vault as the owner's refund note, made beforehand for what is sure to have
- * arrived (the note's amount less the vault's highest possible fee).
+ * arrived (the note's amount less the vault's highest possible fee). That call
+ * needs only the refund note's proof: the spend's proof and root and the new
+ * note's proof are not used on that path.
  *
- * Holds nothing between transactions: every token this contract has at the
- * end (the unspent input, any extra output, anything sent here by mistake)
- * goes to the immutable treasury, and every approval is set back to zero.
- * No owner, no admin, no upgrade.
+ * Leftovers (the input the swap did not need, any extra output, anything sent
+ * here by mistake) go to the immutable treasury when it can receive them. A
+ * treasury the token issuer blocks never stops a swap or a refund: what it
+ * can't take stays here, and every amount a swap uses is measured as a change
+ * in balance, so it is never spent on anyone's behalf. Every approval is set
+ * back to zero. No owner, no admin, no upgrade.
  */
 abstract contract GloamVaultSwap {
     struct Spend {
@@ -83,6 +71,18 @@ abstract contract GloamVaultSwap {
         bytes32 commitment;
         address asset;
         uint256 amount;
+    }
+
+    /// @notice What a swap's escrow address is derived from (with the input asset).
+    struct EscrowKey {
+        bytes32 nullifier;
+        uint256 amountIn;
+        bytes32 outCommitment;
+        address assetOut;
+        uint256 amountOut;
+        bytes32 refundCommitment;
+        uint256 refundAmount;
+        bytes32 routeHash;
     }
 
     IGloamVault public immutable vault;
@@ -131,18 +131,10 @@ abstract contract GloamVaultSwap {
     /**
      * @notice The address a swap's unshield proof must name as `to`.
      * @param assetIn The note's asset (the escrow hands this token on).
-     * @param routeHash keccak256 of the route bytes passed to swap().
+     * @param k The swap: routeHash is keccak256 of the route bytes passed to swap().
      */
-    function escrowFor(
-        address assetIn,
-        bytes32 outCommitment,
-        address assetOut,
-        uint256 amountOut,
-        bytes32 refundCommitment,
-        uint256 refundAmount,
-        bytes32 routeHash
-    ) public view returns (address) {
-        return _escrowAt(_salt(outCommitment, assetOut, amountOut, refundCommitment, refundAmount, routeHash), assetIn);
+    function escrowFor(address assetIn, EscrowKey calldata k) external view returns (address) {
+        return _escrowAt(keccak256(abi.encode(k)), assetIn);
     }
 
     /**
@@ -169,10 +161,9 @@ abstract contract GloamVaultSwap {
         uint256 available = _collect(s, d, r, route, refunding);
 
         if (refunding) {
-            // A note spent some other way leaves its escrow empty: nothing to put back.
             if (available < r.amount) revert BadRefund();
             _deposit(r);
-            _sweep(s.asset);
+            _trySweep(s.asset);
             emit VaultSwapRefund(s.nullifier, r.commitment, r.asset, r.amount);
             return 0;
         }
@@ -184,9 +175,24 @@ abstract contract GloamVaultSwap {
         if (got < d.amount) revert ShortOutput(got, d.amount);
 
         _deposit(d);
-        uint256 leftover = _sweep(s.asset);
-        _sweep(d.asset);
-        emit VaultSwap(s.nullifier, d.commitment, s.asset, d.asset, amountIn, d.amount, leftover);
+        _trySweep(s.asset);
+        _trySweep(d.asset);
+        emit VaultSwap(s.nullifier, d.commitment, s.asset, d.asset, amountIn, d.amount, available - amountIn);
+    }
+
+    /// @dev Buy exactly `amountOut` of `assetOut` with at most `maxIn` of
+    ///      `assetIn` held here, leaving the output here. Returns what it spent.
+    function _swapExactOut(
+        address assetIn,
+        address assetOut,
+        uint256 amountOut,
+        uint256 maxIn,
+        bytes calldata route
+    ) internal virtual returns (uint256 amountIn);
+
+    /// @dev True while a swap is running, for venue callbacks.
+    function _inSwap() internal view returns (bool) {
+        return _entered == 1;
     }
 
     /// @dev Takes the note out to the swap's escrow (unless that already
@@ -195,7 +201,7 @@ abstract contract GloamVaultSwap {
         private
         returns (uint256 available)
     {
-        bytes32 salt = _salt(d.commitment, d.asset, d.amount, r.commitment, r.amount, keccak256(route));
+        bytes32 salt = _salt(s, d, r, keccak256(route));
         address escrow = _escrowAt(salt, s.asset);
         if (!spent) {
             _unshieldTo(s, escrow);
@@ -213,35 +219,27 @@ abstract contract GloamVaultSwap {
         vault.unshield(s.proof, s.root, s.nullifier, s.asset, to, s.amount);
     }
 
-    function _salt(
-        bytes32 outCommitment,
-        address assetOut,
-        uint256 amountOut,
-        bytes32 refundCommitment,
-        uint256 refundAmount,
-        bytes32 routeHash
-    ) private pure returns (bytes32) {
-        return keccak256(abi.encode(outCommitment, assetOut, amountOut, refundCommitment, refundAmount, routeHash));
+    /// @dev keccak256(abi.encode(EscrowKey)), field by field.
+    function _salt(Spend calldata s, Deposit calldata d, Deposit calldata r, bytes32 routeHash)
+        private
+        pure
+        returns (bytes32)
+    {
+        EscrowKey memory k;
+        k.nullifier = s.nullifier;
+        k.amountIn = s.amount;
+        k.outCommitment = d.commitment;
+        k.assetOut = d.asset;
+        k.amountOut = d.amount;
+        k.refundCommitment = r.commitment;
+        k.refundAmount = r.amount;
+        k.routeHash = routeHash;
+        return keccak256(abi.encode(k));
     }
 
     function _escrowAt(bytes32 salt, address token) private view returns (address) {
         bytes32 codeHash = keccak256(abi.encodePacked(type(SwapEscrow).creationCode, abi.encode(token)));
         return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, codeHash)))));
-    }
-
-    /// @dev Buy exactly `amountOut` of `assetOut` with at most `maxIn` of
-    ///      `assetIn` held here, leaving the output here. Returns what it spent.
-    function _swapExactOut(
-        address assetIn,
-        address assetOut,
-        uint256 amountOut,
-        uint256 maxIn,
-        bytes calldata route
-    ) internal virtual returns (uint256 amountIn);
-
-    /// @dev True while a swap is running, for venue callbacks.
-    function _inSwap() internal view returns (bool) {
-        return _entered == 1;
     }
 
     /// @dev Deploys the swap's escrow, which sends this contract what the vault paid it. Once per swap.
@@ -264,10 +262,13 @@ abstract contract GloamVaultSwap {
         return IERC20Swap(token).balanceOf(address(this));
     }
 
-    /// @dev Everything held of `token` goes to the treasury. Returns the amount.
-    function _sweep(address token) internal returns (uint256 amount) {
-        amount = _balance(token);
-        if (amount != 0) _transfer(token, treasury, amount);
+    /// @dev Everything held of `token` to the treasury, if it can take it. A
+    ///      refusal (an issuer block, a pause) is ignored: the tokens stay here.
+    function _trySweep(address token) private {
+        uint256 amount = _balance(token);
+        if (amount == 0) return;
+        (bool ok, ) = token.call(abi.encodeWithSelector(0xa9059cbb, treasury, amount));
+        ok; // best effort, on purpose
     }
 
     function _transfer(address token, address to, uint256 amount) internal {
