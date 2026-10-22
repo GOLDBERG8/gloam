@@ -59,6 +59,7 @@ import {
   type PayrollRow,
   type PayrollRowStatus,
 } from "@/lib/payroll";
+import { holdsPendingPayment } from "@/lib/payrollStore";
 import {
   cadenceLabel,
   dayLabel,
@@ -87,6 +88,7 @@ const STATUS_LABEL: Record<PayrollRowStatus, string> = {
   sending: "Sending",
   confirming: "Confirming",
   notifying: "Letting them know",
+  unconfirmed: "Still checking",
   paid: "Paid",
   failed: "Failed",
 };
@@ -1549,7 +1551,8 @@ export function PayrollView() {
                   const paid = b.rows.filter((r) => r.status === "paid");
                   const opt = assetOptions.find((o) => o.address === b.asset);
                   const sum = paid.reduce((s, r) => s + BigInt(r.amount), 0n);
-                  const untouched = b.rows.every((r) => r.status === "queued");
+                  // A run holding a sent payment is never deleted: its codes may be the only copy.
+                  const untouched = b.rows.every((r) => r.status === "queued" && !holdsPendingPayment(r));
                   return (
                     <li key={b.id} className="flex items-center gap-2 rounded-[12px] transition-colors hover:bg-surface">
                       <button
@@ -1648,13 +1651,15 @@ function RunRow({
   copied: string | null;
   onCopy: (key: string, text: string) => void;
 }) {
-  const busy = r.status !== "paid" && r.status !== "failed" && r.status !== "queued";
+  // Still checking waits on the chain, not on this tab, so it gets no spinner.
+  const checking = r.status === "unconfirmed";
+  const busy = r.status !== "paid" && r.status !== "failed" && r.status !== "queued" && !checking;
   const chip =
     r.status === "paid"
       ? "bg-sealed-soft text-sealed"
       : r.status === "failed"
         ? "bg-danger-soft text-danger"
-        : busy
+        : busy || checking
           ? "bg-panel text-foreground shadow-card"
           : "text-faint";
   return (
@@ -1688,7 +1693,9 @@ function RunRow({
           )}
         </p>
         {r.note && <PaymentNoteLine note={r.note} label="Private note" className="mt-0.5 text-[12.5px] text-soft" />}
-        {r.error && r.status !== "paid" && <p className="mt-0.5 truncate text-[12px] text-danger">{r.error}</p>}
+        {r.error && r.status !== "paid" && (
+          <p className={`mt-0.5 truncate text-[12px] ${checking ? "text-mute" : "text-danger"}`}>{r.error}</p>
+        )}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1.5">
         <Amount

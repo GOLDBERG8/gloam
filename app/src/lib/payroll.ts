@@ -15,8 +15,13 @@
  *     the payments. The public sees private transfers, never who or how much.
  *
  * Crash safety: before a payment is submitted, its change note and the batch
- * row are persisted. On resume a row that was mid-flight is reconciled against
- * the pool's `spent` map, so a refresh can never lose or double-pay money.
+ * row are persisted. A row is paid only once the pool holds that row's own
+ * payment commitment. A payment whose fate is unclear is never written off:
+ * the row keeps its codes, and a retry sends that very same payment again
+ * (the same note into the same payment and change), so at most one copy can
+ * ever land. Its codes go only once the chain shows they never can: the note
+ * it spends went into another payment. A refresh can never lose or
+ * double-pay money.
  *
  * Proving the total: each row also keeps the payee note's secret and the
  * opening of the note it spent (sealed at rest with the batch, like claim
@@ -26,8 +31,8 @@
  */
 import type { Address, Hex, PublicClient } from "viem";
 import { claimLinkFor } from "./claimLink";
-import { fieldToHex, noteCommitmentPoseidon, noteNullifierPoseidon, randomSecretField } from "@gloamtrade/sdk";
-import { buildTransferWitness } from "@/lib/proverTransfer";
+import { fieldToHex, hexToField, noteCommitmentPoseidon, noteNullifierPoseidon, randomSecretField } from "@gloamtrade/sdk";
+import { buildTransferWitness, type TransferWitness } from "@/lib/proverTransfer";
 import { fieldToBytes32, proveTransferInBrowser } from "@/lib/proveClient";
 import { syncShieldTree, type SyncedTree } from "@/lib/treeSync";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
@@ -36,7 +41,7 @@ import type { PayrollNote } from "@/lib/proofs";
 import { encryptTicketForTag, isReceiveTag } from "@/lib/receiveTag";
 import { ticketToMemoBytes } from "@/lib/payMemo";
 import { cleanPaymentNote } from "@/lib/paymentNote";
-import { openJson, sealJson } from "@/lib/noteVault";
+import { saveBatch } from "@/lib/payrollStore";
 import { markPrivatePaid } from "@/lib/firstPayment";
 import { countLinkCreated } from "@/lib/funnel";
 import {
@@ -62,6 +67,8 @@ export type PayrollRowStatus =
   | "sending"
   | "confirming"
   | "notifying"
+  /** Sent, and the chain has not settled it yet. Never written off: resuming checks again. */
+  | "unconfirmed"
   | "paid"
   | "failed";
 
@@ -83,6 +90,9 @@ export type PayrollRow = {
   spendNullifier?: Hex;
   changeNoteId?: string;
   paymentCommitment?: Hex;
+  /** The change output, so a retry can send this exact payment again (zero change included). */
+  changeSecret?: Hex;
+  changeCommitment?: Hex;
   /** encrypted to their Gloam address, or a plain claim code for links */
   ticket?: string;
   txHash?: Hex;
@@ -279,40 +289,8 @@ export function fundingPlan(amounts: bigint[], notes: bigint[]): { covered: numb
 
 // ------------------------------------------------------------------ storage
 
-const STORE_KEY = "gloam.payroll.v1";
-
-async function readAll(): Promise<PayrollBatch[]> {
-  if (typeof window === "undefined") return [];
-  const all = await openJson<PayrollBatch[]>(window.localStorage.getItem(STORE_KEY));
-  return Array.isArray(all) ? all : [];
-}
-
-async function writeAll(batches: PayrollBatch[]): Promise<void> {
-  // Claim links are money: stored encrypted under the same device key as notes.
-  window.localStorage.setItem(STORE_KEY, await sealJson(batches.slice(0, 30)));
-}
-
-export async function loadBatches(chainId: number, pool: Address): Promise<PayrollBatch[]> {
-  return (await readAll())
-    .filter((b) => b.chainId === chainId && b.pool.toLowerCase() === pool.toLowerCase())
-    .sort((a, b) => b.createdAt - a.createdAt);
-}
-
-let writeQueue: Promise<void> = Promise.resolve();
-export function saveBatch(batch: PayrollBatch): Promise<void> {
-  writeQueue = writeQueue.then(async () => {
-    const all = await readAll();
-    await writeAll([batch, ...all.filter((b) => b.id !== batch.id)]);
-  });
-  return writeQueue;
-}
-
-export async function deleteBatch(id: string): Promise<void> {
-  writeQueue = writeQueue.then(async () => {
-    await writeAll((await readAll()).filter((b) => b.id !== id));
-  });
-  return writeQueue;
-}
+// Runs are stored in lib/payrollStore, which the recovery backup reads too.
+export { deleteBatch, loadBatches, saveBatch } from "@/lib/payrollStore";
 
 export function newBatch(args: {
   title: string;
@@ -409,16 +387,19 @@ export type PayrollEngineDeps = {
   waitForTx: (hash: Hex) => Promise<"success" | "reverted">;
   onUpdate: (batch: PayrollBatch) => void;
   shouldStop: () => boolean;
+  /** The vault tree and the prover: the app's own unless a test passes its own (scripts/selftest-payroll.mts). */
+  syncTree?: () => Promise<SyncedTree | null>;
+  prove?: (input: TransferWitness["circomInput"]) => Promise<{ proofBytes: Hex }>;
 };
 
 export class PayrollStop extends Error {}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function syncUntil(client: PublicClient, commitment?: string, tries = 8): Promise<SyncedTree | null> {
+async function syncUntil(deps: PayrollEngineDeps, commitment?: string, tries = 8): Promise<SyncedTree | null> {
   let tree: SyncedTree | null = null;
   for (let i = 0; i < tries; i++) {
-    tree = await syncShieldTree(client);
+    tree = await (deps.syncTree ? deps.syncTree() : syncShieldTree(deps.client));
     if (!commitment || tree?.indexByCommitment.has(commitment.toLowerCase())) return tree;
     await sleep(1_250);
   }
@@ -434,10 +415,20 @@ async function isSpent(client: PublicClient, pool: Address, nullifier: Hex): Pro
   })) as boolean;
 }
 
+async function commitmentSeen(client: PublicClient, pool: Address, commitment: Hex): Promise<boolean> {
+  return (await client.readContract({
+    address: pool,
+    abi: shieldPoolAbi,
+    functionName: "commitmentSeen",
+    args: [commitment],
+  })) as boolean;
+}
+
 /**
  * Run (or resume) a payroll batch. Mutates and persists `batch` as it goes and
  * reports every change through deps.onUpdate. Resolves when every row is paid
- * or failed, or when stopped / out of funds (batch.status says which).
+ * or failed, or when stopped / out of funds / waiting on the chain (batch.status
+ * says which).
  */
 export async function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<PayrollBatch> {
   const { client } = deps;
@@ -453,23 +444,18 @@ export async function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): 
       if (row.status === "paid" || row.status === "failed") continue;
       if (deps.shouldStop()) throw new PayrollStop();
 
-      // Resume: a row that was mid-flight landed, failed, or may still land.
-      if (row.spendNullifier && (row.status === "sending" || row.status === "confirming" || row.status === "notifying")) {
+      // Resume: a payment on record landed, can never land, or may still land.
+      if (row.spendNullifier) {
         const outcome = await sentOutcome(client, batch.pool, row);
         if (outcome === "landed") {
-          await finalizeTransfer(batch, row, client);
-          await notify(batch, row, deps, emit);
-          row.status = "paid";
-          await emit();
+          await settlePaid(batch, row, deps, emit);
           continue;
         }
-        if (outcome === "unknown") {
-          row.error = STILL_CONFIRMING;
-          await emit();
-          throw new PayrollStop();
+        if (outcome === "unknown" || (outcome === "pending" && (await mayStillLand(client, row)))) {
+          await holdUnconfirmed(row, STILL_CONFIRMING, emit);
         }
-        discardPending(row);
-        row.status = "queued";
+        if (outcome === "dead") discardDead(row);
+        // Still pending past its window: payRow sends that same payment again.
       }
 
       await payRow(batch, row, deps, emit);
@@ -488,28 +474,78 @@ export async function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): 
   return batch;
 }
 
-/** Ten minutes after a send with the note still unspent, it is not going to land. */
+/** How long a sent payment gets to land before the run sends that same payment again. */
 const LAND_WINDOW_MS = 10 * 60_000;
 const STILL_CONFIRMING = "Sent. The network hasn't confirmed it yet. Resume the run in a minute to check.";
+const NOT_CONFIRMED =
+  "Not confirmed yet. Gloam keeps this payment as it is, and it can only ever land once. Resume the run to check again.";
+const RESEND_BLOCKED = "Could not rebuild this payment exactly as it was sent, so it is kept as it is.";
 
 /**
- * What became of a payment that was, or may have been, sent. "unknown" while the
- * chain can't be read or it could still land: the row must be kept as it is,
- * because discarding it would lose the payee's code if the payment lands later.
+ * What the chain shows for this row's payment:
+ *  - landed: the pool holds this row's own payment commitment. A spent note
+ *    alone is not enough, another send could have spent it.
+ *  - dead: the note it spends is spent and the payment is not in the pool, so
+ *    it can never land and its codes can go.
+ *  - pending: neither yet. It may still land, so the row keeps its codes.
+ *  - unknown: the chain could not be read.
+ * The spend is read first, so a payment landing between the two reads still
+ * counts as landed (as lib/claimSweep settles a secured claim).
  */
-async function sentOutcome(client: PublicClient, pool: Address, row: PayrollRow): Promise<"landed" | "failed" | "unknown"> {
-  if (!row.spendNullifier) return "failed";
+async function sentOutcome(
+  client: PublicClient,
+  pool: Address,
+  row: PayrollRow
+): Promise<"landed" | "dead" | "pending" | "unknown"> {
+  if (!row.spendNullifier || !row.paymentCommitment) return "dead";
   const spent = await isSpent(client, pool, row.spendNullifier).catch(() => null);
-  if (spent === true) return "landed";
-  if (spent === null) return "unknown";
-  if (row.txHash) {
-    const receipt = await client.getTransactionReceipt({ hash: row.txHash }).catch(() => null);
-    if (receipt?.status === "reverted") return "failed";
-  }
-  if (!row.sentAt) return "failed"; // never handed to a wallet or the relay
-  return Date.now() - row.sentAt > LAND_WINDOW_MS ? "failed" : "unknown";
+  const seen = await commitmentSeen(client, pool, row.paymentCommitment).catch(() => null);
+  if (seen === true) return "landed";
+  if (seen === false && spent === true) return "dead";
+  if (seen === null || spent === null) return "unknown";
+  return "pending";
 }
 
+/**
+ * The last send went out under ten minutes ago with no final answer, so give it
+ * time before sending the same payment again. A reverted receipt is final, and a
+ * payment never handed to a wallet or the relay has nothing in flight.
+ */
+async function mayStillLand(client: PublicClient, row: PayrollRow): Promise<boolean> {
+  if (!row.sentAt || Date.now() - row.sentAt > LAND_WINDOW_MS) return false;
+  if (!row.txHash) return true;
+  const receipt = await client.getTransactionReceipt({ hash: row.txHash }).catch(() => null);
+  return receipt?.status !== "reverted";
+}
+
+/** After a good receipt: the pool shows this row's payment (read a few times, for a lagging RPC). */
+async function confirmLanded(client: PublicClient, pool: Address, row: PayrollRow): Promise<boolean> {
+  for (let i = 0; i < 4; i++) {
+    if ((await sentOutcome(client, pool, row)) === "landed") return true;
+    if (i < 3) await sleep(1_250);
+  }
+  return false;
+}
+
+/** Keep the row and its payment exactly as they are, and stop until the chain settles it. */
+async function holdUnconfirmed(row: PayrollRow, why: string, emit: () => Promise<void>): Promise<never> {
+  row.status = "unconfirmed";
+  row.error = why;
+  await emit();
+  throw new PayrollStop();
+}
+
+/** The wallet prompt was turned down, so this send never went out. */
+function isDeclined(e: unknown): boolean {
+  let x = e as { name?: string; code?: number; message?: string; cause?: unknown } | undefined;
+  for (let i = 0; x && i < 6; i++, x = x.cause as typeof x) {
+    if (x.name === "UserRejectedRequestError" || x.code === 4001) return true;
+    if (typeof x.message === "string" && /user (rejected|denied)/i.test(x.message)) return true;
+  }
+  return false;
+}
+
+/** Only for a payment the chain shows can never land (or that was never handed out). */
 function discardPending(row: PayrollRow) {
   // The change note never reached the pool; hide it so it is not counted.
   if (row.changeNoteId) updateLocalNote(row.changeNoteId, { status: "recovered" });
@@ -517,12 +553,86 @@ function discardPending(row: PayrollRow) {
   row.spendNullifier = undefined;
   row.changeNoteId = undefined;
   row.paymentCommitment = undefined;
+  row.changeSecret = undefined;
+  row.changeCommitment = undefined;
   row.ticket = undefined;
   row.txHash = undefined;
   row.sentAt = undefined;
   row.paymentSecret = undefined;
   row.spendSecret = undefined;
   row.spendAmount = undefined;
+}
+
+/** Its note went into another payment: retire that note here too, then drop this one. */
+function discardDead(row: PayrollRow) {
+  if (row.spendNoteId) updateLocalNote(row.spendNoteId, { status: "recovered" });
+  discardPending(row);
+}
+
+/**
+ * The payment on record for this row, proven again against today's vault: the
+ * same note spent into the same payment and change. Sending it again can never
+ * pay twice. Both copies spend one note, so at most one lands, and whichever
+ * does makes exactly the notes (and the payee's code) this row already holds.
+ */
+async function samePaymentWitness(
+  batch: PayrollBatch,
+  row: PayrollRow,
+  tree: SyncedTree | null
+): Promise<TransferWitness> {
+  const local = loadLocalNotes(batch.employer);
+  const spent = local.find((n) => n.id === row.spendNoteId);
+  const secret = row.spendSecret ?? spent?.secret;
+  const amountIn = row.spendAmount ?? spent?.amountWei;
+  if (!tree || !secret || !amountIn || !row.paymentSecret || !row.paymentCommitment || !row.spendNullifier) {
+    throw new Error(RESEND_BLOCKED);
+  }
+  const commitment =
+    spent?.commitment ?? fieldToHex(await noteCommitmentPoseidon(hexToField(secret), BigInt(amountIn), batch.asset));
+  const leaf = spent?.leafIndex ?? tree.indexByCommitment.get(commitment.toLowerCase());
+  const path = leaf != null ? ((await tree.pathForLeaf(leaf)) as PoseidonMerklePath | null) : null;
+  if (!path) throw new Error("Could not read the vault. Try again.");
+  const w = await buildTransferWitness({
+    secretHex: secret,
+    amountIn: BigInt(amountIn),
+    amountPay: BigInt(row.amount),
+    asset: batch.asset,
+    path,
+  });
+  if (w.blocker) throw new Error(w.blocker);
+  if (fieldToBytes32(w.publicInputs.nullifier).toLowerCase() !== row.spendNullifier.toLowerCase()) {
+    throw new Error(RESEND_BLOCKED);
+  }
+
+  // Swap the fresh outputs for the ones on record, each checked against its commitment.
+  const opens = async (s: Hex, amount: string, c: Hex) =>
+    (await noteCommitmentPoseidon(hexToField(s), BigInt(amount), batch.asset)) === hexToField(c);
+  const pay = { secret: row.paymentSecret, commitment: row.paymentCommitment };
+  if (!(await opens(pay.secret, w.paymentNote.amountWei, pay.commitment))) throw new Error(RESEND_BLOCKED);
+  const changeNote = row.changeNoteId ? local.find((n) => n.id === row.changeNoteId) : undefined;
+  const change =
+    row.changeSecret && row.changeCommitment
+      ? { secret: row.changeSecret, commitment: row.changeCommitment }
+      : changeNote
+        ? { secret: changeNote.secret, commitment: changeNote.commitment }
+        : null;
+  if (change && !(await opens(change.secret, w.changeNote.amountWei, change.commitment))) {
+    throw new Error(RESEND_BLOCKED);
+  }
+  // No change on record only ever means a zero change, which holds nothing to keep.
+  if (!change && BigInt(w.changeNote.amountWei) > 0n) throw new Error(RESEND_BLOCKED);
+  const c0 = hexToField(pay.commitment);
+  const c1 = change ? hexToField(change.commitment) : w.publicInputs.newCommitment1;
+  return {
+    ...w,
+    circomInput: {
+      ...w.circomInput,
+      secretPay: hexToField(pay.secret).toString(),
+      newCommitment0: c0.toString(),
+      ...(change ? { secretChange: hexToField(change.secret).toString(), newCommitment1: c1.toString() } : {}),
+    },
+    publicInputs: { ...w.publicInputs, newCommitment0: c0, newCommitment1: c1 },
+  };
 }
 
 async function payRow(
@@ -539,118 +649,152 @@ async function payRow(
     row.error = undefined;
     await emit();
 
-    const tree = await syncUntil(deps.client);
-    const notes = fundingNotes(batch.employer, batch.asset, tree)
-      .filter((n) => BigInt(n.amountWei) >= amount)
-      .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1));
-    const note = notes[0];
-    if (!note) {
-      batch.status = "needs_funds";
-      row.status = "queued";
-      row.error = "Not enough in one private balance entry for this payment. Add money privately, then resume.";
-      await emit();
-      throw new PayrollStop();
+    const tree = await syncUntil(deps);
+    // A payment already on record (sent before, maybe still landing) goes out
+    // again exactly as it was. Otherwise a new one is built.
+    let note: LocalNote | undefined;
+    if (!row.spendNullifier) {
+      note = fundingNotes(batch.employer, batch.asset, tree)
+        .filter((n) => BigInt(n.amountWei) >= amount)
+        .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1))[0];
+      if (!note) {
+        batch.status = "needs_funds";
+        row.status = "queued";
+        row.error = "Not enough in one private balance entry for this payment. Add money privately, then resume.";
+        await emit();
+        throw new PayrollStop();
+      }
     }
 
+    let declined = false;
     try {
-      const path = (await tree!.pathForLeaf(note.leafIndex!)) as PoseidonMerklePath | null;
-      if (!path) throw new Error("Could not read the vault. Try again.");
-      const w = await buildTransferWitness({
-        secretHex: note.secret,
-        amountIn: BigInt(note.amountWei),
-        amountPay: amount,
-        asset: batch.asset,
-        path,
-      });
-      if (w.blocker) throw new Error(w.blocker);
-      const { proofBytes } = await proveTransferInBrowser(w.circomInput);
+      let w: TransferWitness;
+      if (note) {
+        const path = (await tree!.pathForLeaf(note.leafIndex!)) as PoseidonMerklePath | null;
+        if (!path) throw new Error("Could not read the vault. Try again.");
+        w = await buildTransferWitness({
+          secretHex: note.secret,
+          amountIn: BigInt(note.amountWei),
+          amountPay: amount,
+          asset: batch.asset,
+          path,
+        });
+        if (w.blocker) throw new Error(w.blocker);
+      } else {
+        w = await samePaymentWitness(batch, row, tree);
+      }
+      const { proofBytes } = deps.prove ? await deps.prove(w.circomInput) : await proveTransferInBrowser(w.circomInput);
 
-      const pack = buildNotePackage({
-        pool: batch.pool,
-        asset: batch.asset,
-        amountWei: w.paymentNote.amountWei,
-        secret: w.paymentNote.secret,
-        commitment: w.paymentNote.commitment,
-        note: row.note,
-      });
-      const plain = encodeNotePackage(pack);
-      const ticket = row.kind === "gloam" ? await encryptTicketForTag(plain, row.recipient) : plain;
-
-      // Persist the change note and the row BEFORE submitting (crash safety).
-      let changeNoteId: string | undefined;
-      if (BigInt(w.changeNote.amountWei) > 0n) {
-        changeNoteId = `chg-pr-${row.id}-${attempt}`;
-        saveLocalNote({
-          id: changeNoteId,
-          chainId: batch.chainId,
+      if (note) {
+        const pack = buildNotePackage({
           pool: batch.pool,
           asset: batch.asset,
-          amountWei: w.changeNote.amountWei,
-          commitment: w.changeNote.commitment,
-          secret: w.changeNote.secret,
-          nullifier: w.changeNote.nullifier,
-          bound: true,
-          scheme: "poseidon",
-          from: batch.employer,
-          createdAt: Date.now(),
-          status: "open",
-          source: "local",
+          amountWei: w.paymentNote.amountWei,
+          secret: w.paymentNote.secret,
+          commitment: w.paymentNote.commitment,
+          note: row.note,
         });
+        const plain = encodeNotePackage(pack);
+        const ticket = row.kind === "gloam" ? await encryptTicketForTag(plain, row.recipient) : plain;
+
+        // Persist the change note and the row BEFORE submitting (crash safety).
+        let changeNoteId: string | undefined;
+        if (BigInt(w.changeNote.amountWei) > 0n) {
+          // Never reused: a later payment for this row must not overwrite an earlier change.
+          changeNoteId = `chg-pr-${row.id}-${Date.now()}`;
+          saveLocalNote({
+            id: changeNoteId,
+            chainId: batch.chainId,
+            pool: batch.pool,
+            asset: batch.asset,
+            amountWei: w.changeNote.amountWei,
+            commitment: w.changeNote.commitment,
+            secret: w.changeNote.secret,
+            nullifier: w.changeNote.nullifier,
+            bound: true,
+            scheme: "poseidon",
+            from: batch.employer,
+            createdAt: Date.now(),
+            status: "open",
+            source: "local",
+          });
+        }
+        row.spendNoteId = note.id;
+        row.spendNullifier = fieldToBytes32(w.publicInputs.nullifier);
+        row.changeNoteId = changeNoteId;
+        row.paymentCommitment = fieldToBytes32(w.publicInputs.newCommitment0);
+        row.changeSecret = w.changeNote.secret;
+        row.changeCommitment = w.changeNote.commitment;
+        row.ticket = ticket;
+        row.paymentSecret = w.paymentNote.secret;
+        row.spendSecret = note.secret;
+        row.spendAmount = note.amountWei;
       }
-      row.spendNoteId = note.id;
-      row.spendNullifier = fieldToBytes32(w.publicInputs.nullifier);
-      row.changeNoteId = changeNoteId;
-      row.paymentCommitment = fieldToBytes32(w.publicInputs.newCommitment0);
-      row.ticket = ticket;
-      row.paymentSecret = w.paymentNote.secret;
-      row.spendSecret = note.secret;
-      row.spendAmount = note.amountWei;
+      const lastSend = { sentAt: row.sentAt, txHash: row.txHash };
       row.status = "sending";
       row.sentAt = Date.now();
+      row.txHash = undefined;
       await emit();
 
-      const hash = await deps.submitTransfer({
-        proof: proofBytes,
-        root: fieldToBytes32(w.publicInputs.root),
-        nullifier: row.spendNullifier,
-        commitments: [row.paymentCommitment, fieldToBytes32(w.publicInputs.newCommitment1)],
-      });
+      let hash: Hex;
+      try {
+        hash = await deps.submitTransfer({
+          proof: proofBytes,
+          root: fieldToBytes32(w.publicInputs.root),
+          nullifier: row.spendNullifier!,
+          commitments: [row.paymentCommitment!, fieldToBytes32(w.publicInputs.newCommitment1)],
+        });
+      } catch (e) {
+        if (isDeclined(e)) {
+          declined = true;
+          row.sentAt = lastSend.sentAt;
+          row.txHash = lastSend.txHash;
+        }
+        throw e;
+      }
       row.txHash = hash;
       row.status = "confirming";
       await emit();
 
       const outcome = await deps.waitForTx(hash);
       if (outcome !== "success") throw new Error("The payment was rejected on-chain.");
+      // A good receipt is not enough: paid means the pool holds this row's own payment.
+      if (!(await confirmLanded(deps.client, batch.pool, row))) throw new Error(STILL_CONFIRMING);
 
-      await finalizeTransfer(batch, row, deps.client);
-      await notify(batch, row, deps, emit);
-      row.status = "paid";
-      await emit();
+      await settlePaid(batch, row, deps, emit);
       return;
     } catch (e) {
       if (e instanceof PayrollStop) throw e;
       const msg = e instanceof Error ? e.message : "Payment failed";
-      // It may have landed despite the error (a receipt timeout, a lost relay reply).
-      const outcome = await sentOutcome(deps.client, batch.pool, row);
-      if (outcome === "landed") {
-        await finalizeTransfer(batch, row, deps.client);
-        await notify(batch, row, deps, emit);
-        row.status = "paid";
-        await emit();
-        return;
+      if (row.spendNullifier && declined && !row.sentAt) {
+        // Turned down before this payment ever went out: nothing can land.
+        discardPending(row);
+      } else if (row.spendNullifier) {
+        // It may have landed despite the error (a receipt timeout, a lost relay reply).
+        const outcome = await sentOutcome(deps.client, batch.pool, row);
+        if (outcome === "landed") {
+          await settlePaid(batch, row, deps, emit);
+          return;
+        }
+        if (outcome === "unknown" || (outcome === "pending" && (await mayStillLand(deps.client, row)))) {
+          // keep the row and the payee's code: resuming settles it from the chain
+          await holdUnconfirmed(row, STILL_CONFIRMING, emit);
+        }
+        if (outcome === "dead") discardDead(row);
       }
-      if (outcome === "unknown") {
-        // keep the row and the payee's code: resuming settles it from the chain
-        row.error = STILL_CONFIRMING;
+      row.error = msg;
+      if (declined) {
+        // Resuming asks the wallet again (for the same payment, if one is still on record).
+        row.status = "queued";
         await emit();
         throw new PayrollStop();
       }
-      discardPending(row);
-      row.error = msg;
-      if (attempt === 3 || /rejected|denied|cancel/i.test(msg)) {
+      if (attempt === 3) {
+        // Handed out before and not ruled out by the chain: never called failed.
+        if (row.spendNullifier && row.sentAt) await holdUnconfirmed(row, NOT_CONFIRMED, emit);
+        discardPending(row);
         row.status = "failed";
         await emit();
-        if (/denied|cancel/i.test(msg)) throw new PayrollStop();
         return;
       }
       await sleep(1_500);
@@ -658,7 +802,15 @@ async function payRow(
   }
 }
 
-async function finalizeTransfer(batch: PayrollBatch, row: PayrollRow, client: PublicClient) {
+/** The row's own payment is in the pool: book it, let a Gloam-address payee know, mark it paid. */
+async function settlePaid(batch: PayrollBatch, row: PayrollRow, deps: PayrollEngineDeps, emit: () => Promise<void>) {
+  await finalizeTransfer(batch, row, deps);
+  await notify(batch, row, deps, emit);
+  row.status = "paid";
+  await emit();
+}
+
+async function finalizeTransfer(batch: PayrollBatch, row: PayrollRow, deps: PayrollEngineDeps) {
   // A payroll payment is a private payment too (retires the first-payment nudge).
   markPrivatePaid(batch.chainId);
   // A payee paid by link got a claim link, which the claim-link counts include (lib/funnel).
@@ -667,7 +819,7 @@ async function finalizeTransfer(batch: PayrollBatch, row: PayrollRow, client: Pu
   if (row.changeNoteId) {
     const notes = loadLocalNotes(batch.employer);
     const change = notes.find((n) => n.id === row.changeNoteId);
-    const tree = await syncUntil(client, change?.commitment);
+    const tree = await syncUntil(deps, change?.commitment);
     const idx = change ? tree?.indexByCommitment.get(change.commitment.toLowerCase()) : undefined;
     updateLocalNote(row.changeNoteId, { leafIndex: idx, txHash: row.txHash });
   }
