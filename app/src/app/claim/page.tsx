@@ -7,7 +7,7 @@ import { SealDots } from "@/components/ui/SealDots";
 import { appClaimPath, codeFromHash } from "@/lib/claimLink";
 import { countLinkOpened, isClaimLink } from "@/lib/funnel";
 import { getNetwork, isNetworkKey, type NetworkKey } from "@/lib/networks";
-import { decodeNotePackage, isEncryptedPackage } from "@/lib/notePackage";
+import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/notePackage";
 import { inWalletBrowser } from "@/lib/passkey";
 import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
 import { formatAssetLabel } from "@/lib/shield";
@@ -24,47 +24,80 @@ type View =
   | { kind: "missing" }
   | { kind: "ready"; code: string; net: NetworkKey; amount: string | null; locked: boolean; note?: string };
 
+/** A claim view for a code, with its amount and note when the code is not locked. */
+async function readyView(code: string, net: NetworkKey): Promise<View> {
+  let amount: string | null = null;
+  let note: string | undefined;
+  const locked = isEncryptedPackage(code);
+  if (!locked) {
+    try {
+      const pack = await decodeNotePackage(code);
+      amount = formatAssetLabel(pack.amountWei, pack.asset);
+      note = pack.note;
+    } catch {
+      amount = null;
+    }
+  }
+  return { kind: "ready", code, net, amount, locked, note };
+}
+
+/** The network a link or pasted message names (?net=...), or null. */
+function netIn(text: string): NetworkKey | null {
+  const m = text.match(/[?&]net=([a-z-]+)/i);
+  return m && isNetworkKey(m[1]) ? m[1] : null;
+}
+
 export default function ClaimPage() {
   const [view, setView] = useState<View>({ kind: "loading" });
   const [walletBrowser, setWalletBrowser] = useState(false);
   const [copied, setCopied] = useState(false);
+  // The network the link names, known on every screen (the missing-payment one too).
+  const [linkNet, setLinkNet] = useState<NetworkKey | null>(null);
+  const [pasted, setPasted] = useState("");
+  const [pasteError, setPasteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const code = codeFromHash(window.location.hash);
     const q = new URLSearchParams(window.location.search).get("net");
-    const net: NetworkKey = isNetworkKey(q) ? q : "tempo";
+    const known = isNetworkKey(q) ? q : null;
+    const net: NetworkKey = known ?? "tempo";
     void (async () => {
       const wb = inWalletBrowser();
       if (!code || !isClaimLink(code)) {
         if (!cancelled) {
           setWalletBrowser(wb);
+          setLinkNet(known);
           setView({ kind: "missing" });
         }
         return;
       }
       countLinkOpened(code, q);
-      let amount: string | null = null;
-      let note: string | undefined;
-      const locked = isEncryptedPackage(code);
-      if (!locked) {
-        try {
-          const pack = await decodeNotePackage(code);
-          amount = formatAssetLabel(pack.amountWei, pack.asset);
-          note = pack.note;
-        } catch {
-          amount = null;
-        }
-      }
+      const ready = await readyView(code, net);
       if (!cancelled) {
         setWalletBrowser(wb);
-        setView({ kind: "ready", code, net, amount, locked, note });
+        setLinkNet(known);
+        setView(ready);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  /** A message pasted on the missing-payment screen: the whole link, or the rest of a link a chat app cut. */
+  async function openPasted() {
+    const code = paymentCodeIn(pasted);
+    if (!isClaimLink(code)) {
+      setPasteError("That doesn't look like a Gloam payment. Paste the whole message the link came in.");
+      return;
+    }
+    setPasteError(null);
+    const net = netIn(pasted) ?? linkNet ?? "tempo";
+    countLinkOpened(code, net);
+    setLinkNet(netIn(pasted) ?? linkNet);
+    setView(await readyView(code, net));
+  }
 
   async function copyLink() {
     try {
@@ -76,8 +109,11 @@ export default function ClaimPage() {
     }
   }
 
-  // A link made on a mainnet is real money; anything else reads as before.
-  const realNet = view.kind === "ready" && !getNetwork(view.net).testnet ? getNetwork(view.net) : null;
+  // The link's own network: real money on a mainnet, play money on a testnet,
+  // and no claim either way when the link names none.
+  const shownNet = view.kind === "ready" ? view.net : linkNet;
+  const net = shownNet ? getNetwork(shownNet) : null;
+  const realNet = net && !net.testnet ? net : null;
 
   return (
     <div className="relative flex min-h-[100svh] flex-col bg-surface text-foreground">
@@ -89,7 +125,7 @@ export default function ClaimPage() {
           </svg>
           Gloam
         </Link>
-        <span className="text-[12.5px] text-mute">{realNet ? "Mainnet" : "Testnet"}</span>
+        {net && <span className="text-[12.5px] text-mute">{realNet ? "Mainnet" : "Testnet"}</span>}
       </header>
 
       <main className="mx-auto flex w-full max-w-[560px] flex-1 flex-col px-5 pb-10 pt-8">
@@ -104,13 +140,42 @@ export default function ClaimPage() {
         {view.kind === "missing" && (
           <div className="rounded-[24px] bg-panel p-7 shadow-card">
             <p className="t-label">Claim link</p>
-            <h1 className="mt-3 text-[30px] font-light leading-[1.1] tracking-[-0.02em]">This link is missing its payment</h1>
+            <h1 className="mt-3 text-[30px] font-light leading-[1.1] tracking-[-0.02em]">This link lost its payment on the way</h1>
             <p className="mt-4 text-[15px] leading-relaxed text-soft">
-              The part after <span className="whitespace-nowrap">#claim=</span> was cut off, often when a link is copied by hand.
-              Ask the sender to send the full link again, or paste the code under Pay, then Receive in the app.
+              Some chat apps cut long links short. The payment is still in the message you got: copy the whole message and
+              paste it here.
             </p>
-            <Link href="/app/vault?tab=move&mode=receive" className="btn btn-ink btn-lg btn-block mt-7">
-              Open Gloam
+            <label htmlFor="claim-paste" className="mt-6 block text-[13px] text-mute">
+              The whole message
+            </label>
+            <textarea
+              id="claim-paste"
+              value={pasted}
+              onChange={(e) => {
+                setPasted(e.target.value);
+                setPasteError(null);
+              }}
+              rows={4}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Paste it here"
+              className="mt-1.5 w-full resize-none rounded-xl border border-line bg-panel px-3.5 py-3 text-[16px] text-foreground outline-none placeholder:text-faint focus:border-foreground/40 sm:text-[14px]"
+            />
+            {pasteError && (
+              <p role="alert" className="mt-2 text-[13px] leading-relaxed text-danger">
+                {pasteError}
+              </p>
+            )}
+            <button
+              type="button"
+              disabled={!pasted.trim()}
+              onClick={() => void openPasted()}
+              className="btn btn-ink btn-lg btn-block mt-4"
+            >
+              Open the payment
+            </button>
+            <Link href="/app/vault?tab=move&mode=receive" className="btn btn-ghost btn-sm mt-3">
+              Or open Gloam
             </Link>
           </div>
         )}
@@ -203,7 +268,9 @@ export default function ClaimPage() {
         <p className="mt-auto pt-10 text-center text-[12.5px] leading-relaxed text-mute">
           {realNet
             ? `This is real money on ${realNet.label}.`
-            : "Gloam runs on testnet: this is play money with no real value."}{" "}
+            : net
+              ? "This link is on a testnet: it's play money with no real value."
+              : "Gloam runs on Robinhood Chain and Tempo."}{" "}
           <Link href="/docs/private-pay" className="underline underline-offset-4">
             How private payments work
           </Link>

@@ -8,7 +8,9 @@
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-claim-codes.mts
  */
 import assert from "node:assert/strict";
-import { buildNotePackage, decodeNotePackage, encodeNotePackage } from "../src/lib/notePackage";
+import { buildNotePackage, decodeNotePackage, encodeNotePackage, paymentCodeIn } from "../src/lib/notePackage";
+import { appClaimPath, claimLinkFor, codeFromHash } from "../src/lib/claimLink";
+import { isClaimLink } from "../src/lib/funnel";
 
 const pack = buildNotePackage({
   pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194",
@@ -37,4 +39,30 @@ for (const [label, text] of reads) {
 }
 await assert.rejects(decodeNotePackage(`${code.slice(0, 40)}\nHello there`), "a cut-off code is refused");
 n++;
+
+// Links carry only characters chat apps keep inside a URL: no "." and no "%2E" after the prefix.
+const link = claimLinkFor(code, "robinhood-mainnet");
+const frag = link.slice(link.indexOf("#"));
+assert.match(frag, /^#claim=gloam1-[A-Za-z0-9_-]+$/, "the link's code is all URL-safe characters");
+assert.equal(codeFromHash(frag), code, "the link reads back as the code");
+assert.ok(isClaimLink(codeFromHash(frag)!) && isClaimLink(frag.slice(7)), "both spellings count as claim links");
+assert.equal((await decodeNotePackage(link)).secret, pack.secret, "the whole new link claims");
+assert.equal((await decodeNotePackage(frag.slice(7))).secret, pack.secret, "the hyphen code alone claims");
+assert.ok(appClaimPath(code, "robinhood-mainnet").includes("#claim=gloam1-"));
+n += 6;
+
+// Links sent before this keep working: the dot, and the dot written %2E.
+const oldPct = `https://www.gloam.trade/claim?net=robinhood-mainnet#claim=${code.replace(".", "%2E")}`;
+assert.equal(codeFromHash(oldPct.slice(oldPct.indexOf("#"))), code);
+assert.equal((await decodeNotePackage(oldPct)).secret, pack.secret);
+assert.equal((await decodeNotePackage(`https://www.gloam.trade/claim#claim=${code}`)).secret, pack.secret);
+n += 3;
+
+// WhatsApp cut the link at "gloam1" and left the rest as text starting "%2E".
+const leftover = code.replace(/^gloam1\./, "%2E");
+assert.equal(paymentCodeIn(leftover), code, "the text WhatsApp left over reads as the code");
+assert.equal((await decodeNotePackage(leftover)).secret, pack.secret, "and claims");
+const whole = `https://www.gloam.trade/claim?net=robinhood-mainnet#claim=gloam1\n${leftover}`;
+assert.equal((await decodeNotePackage(whole)).secret, pack.secret, "the whole cut message pasted back claims");
+n += 3;
 console.log(`${n} claim-code checks passed`);

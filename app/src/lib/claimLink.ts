@@ -11,13 +11,19 @@ export function claimLinkFor(code: string, networkKey: string, origin = "https:/
 }
 
 /**
- * The code for a URL. Its dot ("gloam1.eyJ...") is written as %2E: chat apps
- * like Telegram end an auto-link at a dot followed by more text, which cut every
- * shared link to "gloam1". decodeURIComponent turns it back into a dot.
+ * The code for a URL, made only of characters every chat app keeps inside a
+ * link. Its one dot ("gloam1.eyJ...") becomes a hyphen ("gloam1-eyJ..."):
+ * Telegram ended an auto-link at the dot, and WhatsApp at the %2E that
+ * replaced it, which cut shared links to "gloam1". codeFromHash and the code
+ * reader (lib/notePackage) turn it back. Older links with "." or %2E still read.
  */
 function linkSafe(code: string): string {
-  return encodeURIComponent(code.trim()).replace(/\./g, "%2E");
+  return encodeURIComponent(code.trim().replace(CODE_DOT, "$1-")).replace(/\./g, "%2E");
 }
+
+/** A code's prefix and its separator: "gloam1." in a code, "gloam1-" in a link. */
+const CODE_DOT = /^(gloam1e|gloam2t|gloam1)\./;
+const LINK_DASH = /^(gloam1e|gloam2t|gloam1)-/;
 
 /** The in-app claim screen for a code, which the /claim page sends people to. */
 export function appClaimPath(code: string, networkKey: string): string {
@@ -28,7 +34,7 @@ export function appClaimPath(code: string, networkKey: string): string {
 export function codeFromHash(hash: string): string | null {
   if (!hash.startsWith("#claim=")) return null;
   try {
-    const code = decodeURIComponent(hash.slice("#claim=".length)).trim();
+    const code = decodeURIComponent(hash.slice("#claim=".length)).trim().replace(LINK_DASH, "$1.");
     return code || null;
   } catch {
     return null;
