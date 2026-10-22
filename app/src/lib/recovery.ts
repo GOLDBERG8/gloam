@@ -2,7 +2,9 @@
  * Recovery: get your private balance back on any device by signing in.
  *
  * This browser keeps an encrypted copy of its private balance (the notes it
- * can spend, plus its receive keys) on Gloam's server. The key comes from one
+ * can spend, plus its receive keys) on Gloam's server, with the payment codes
+ * only it may hold: sent codes whose money has not moved (Sent links) and
+ * payroll runs with a payment that may still land. The key comes from one
  * of two places:
  *  - a wallet signature over a fixed message. A browser wallet signs the same
  *    message the same way every time, so the same wallet always rebuilds the
@@ -17,7 +19,11 @@ import { hexToBytes, keccak256, type Address, type Hex } from "viem";
 import { readDemo } from "./demoFlag";
 import { getAllNotes, onNotesSaved, openJson, sealJson, setAllNotes } from "./noteVault";
 import { PROMPT_DID_NOT_OPEN } from "./passkey";
+import type { PayrollBatch } from "./payroll";
+import { PAYROLL_SAVED_EVENT, pendingPayrollRuns, restorePayrollRuns } from "./payrollStore";
 import { RECEIVE_IDENTITY_EVENT, exportReceiveKeys, importReceiveKeys } from "./receiveTag";
+import type { SentLink } from "./sentLinks";
+import { openSentLinks, restoreSentLinks, subscribeSentLinks } from "./sentLinksStore";
 import type { LocalNote } from "./shield";
 
 export const RECOVERY_MESSAGE = [
@@ -238,6 +244,10 @@ type Payload = {
   savedAt: number;
   notes: LocalNote[];
   receive: ReceiveKeys;
+  /** Sent codes whose money has not moved. For a claim link this may be the only copy. */
+  links?: SentLink[];
+  /** Payroll runs holding a payment that may still land, with its codes and secrets. */
+  payroll?: PayrollBatch[];
 };
 
 function spendable(n: LocalNote): boolean {
@@ -245,7 +255,14 @@ function spendable(n: LocalNote): boolean {
 }
 
 async function collect(): Promise<Payload> {
-  return { v: 1, savedAt: Date.now(), notes: getAllNotes().filter(spendable), receive: await exportReceiveKeys() };
+  return {
+    v: 1,
+    savedAt: Date.now(),
+    notes: getAllNotes().filter(spendable),
+    receive: await exportReceiveKeys(),
+    links: await openSentLinks(),
+    payroll: await pendingPayrollRuns(),
+  };
 }
 
 async function aesKey(keys: RecoveryKeys): Promise<CryptoKey> {
@@ -301,6 +318,17 @@ function mergeNotes(restored: LocalNote[], owner?: string | null): number {
   }
   if (added.length) setAllNotes([...added, ...local]);
   return added.length;
+}
+
+/**
+ * Takes in a backup: its notes, then the codes it carries, each added only
+ * where this browser does not have it yet. Returns how many notes were added.
+ */
+async function mergePayload(p: Payload, owner?: string | null): Promise<number> {
+  const added = mergeNotes(p.notes, owner);
+  await restoreSentLinks(p.links);
+  await restorePayrollRuns(p.payroll, owner);
+  return added;
 }
 
 /* ------------------------------------------------------------ server */
@@ -410,7 +438,7 @@ async function upload(c: Config): Promise<void> {
       const remote = await fetchRemote(current.id);
       if (remote) {
         const p = await open(current, remote.c);
-        mergeNotes(p.notes);
+        await mergePayload(p);
         await importReceiveKeys({ current: null, previous: [p.receive?.current, ...(p.receive?.previous ?? [])] });
         current = { ...current, n: remote.n };
         continue;
@@ -460,6 +488,8 @@ export function startRecoverySync() {
   if (started || typeof window === "undefined" || readDemo()) return;
   started = true;
   onNotesSaved(schedule);
+  subscribeSentLinks(schedule);
+  window.addEventListener(PAYROLL_SAVED_EVENT, schedule);
   window.addEventListener(RECEIVE_IDENTITY_EVENT, schedule);
   void loadConfig();
 }
@@ -496,7 +526,7 @@ export async function connectRecovery(
     let added = 0;
     if (remote) {
       const p = await open(keys, remote.c);
-      added = mergeNotes(p.notes, owner);
+      added = await mergePayload(p, owner);
       await importReceiveKeys(p.receive);
     }
     const next: Config = { ...keys, n: remote?.n ?? 0, savedAt: remote?.t ?? null };

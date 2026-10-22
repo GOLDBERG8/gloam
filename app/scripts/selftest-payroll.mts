@@ -11,7 +11,8 @@
  * original landing while the retry is out, a good receipt for some other
  * transaction, the note spent by another payment (the only case its codes
  * go), a wallet prompt turned down, a relay that sent it but lost its reply,
- * and the store: unsettled runs are never pruned and come back from a backup.
+ * and the backup side: unsettled runs are never pruned and come back from a
+ * backup, and Sent links carry every unused code.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-payroll.mts
  */
@@ -33,6 +34,10 @@ const { saveLocalNote } = await import("../src/lib/shield");
 const { decodeNotePackage } = await import("../src/lib/notePackage");
 const { loadBatches, newBatch, runPayroll, saveBatch } = await import("../src/lib/payroll");
 const { PAYROLL_SAVED_EVENT, pendingPayrollRuns, restorePayrollRuns } = await import("../src/lib/payrollStore");
+const { makeSentLink } = await import("../src/lib/sentLinks");
+const { loadSentLinks, markSentLinksUsed, openSentLinks, restoreSentLinks, saveSentLink } = await import(
+  "../src/lib/sentLinksStore"
+);
 type LocalNote = import("../src/lib/shield").LocalNote;
 type PayrollBatch = import("../src/lib/payroll").PayrollBatch;
 type PayrollEngineDeps = import("../src/lib/payroll").PayrollEngineDeps;
@@ -399,6 +404,33 @@ await test("a run holding a payment that may land is never pruned", async () => 
   const kept = await loadBatches(net.chainId, POOL);
   assert.ok(kept.some((b) => b.id === run.id), "the unsettled run survives 35 newer runs");
   assert.equal(kept.filter((b) => b.id.startsWith("pr-done-")).length, 30);
+});
+
+await test("Sent links: the backup carries every unused code, and a restore never rolls a status back", async () => {
+  const link = (n: number) =>
+    makeSentLink({
+      code: `gloam1.${Buffer.from(`payroll-test-${n}`).toString("base64url")}`,
+      chainId: net.chainId,
+      pool: POOL,
+      asset: ASSET,
+      symbol: "USD",
+      amountWei: "1000",
+      now: 1_700_000_000_000 + n,
+    });
+  const unused = link(1);
+  const spentOne = link(2);
+  await saveSentLink(unused);
+  await saveSentLink(spentOne);
+  await markSentLinksUsed([spentOne.id]);
+  const carried = await openSentLinks();
+  assert.deepEqual(carried.map((r) => r.id), [unused.id], "only codes whose money has not moved");
+
+  const fresh = link(3);
+  const added = await restoreSentLinks([{ ...spentOne, usedAt: undefined }, fresh]);
+  assert.equal(added, 1);
+  const list = await loadSentLinks(net.chainId, POOL);
+  assert.ok(list.find((r) => r.id === spentOne.id)?.usedAt, "a used code stays used");
+  assert.ok(list.some((r) => r.code === fresh.code));
 });
 
 await test("a backup brings an unsettled run back on a new device, under the wallet signed in there", async () => {

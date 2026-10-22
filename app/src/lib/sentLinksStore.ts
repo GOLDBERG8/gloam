@@ -7,7 +7,8 @@
  * (lib/noteVault), so a passkey lock covers them, a localStorage dump yields
  * ciphertext, and turning the passkey on or off re-seals them with everything
  * else. Writes run one at a time. A stored list that cannot be opened is set
- * aside, never overwritten, before a fresh list starts.
+ * aside, never overwritten, before a fresh list starts. The recovery backup
+ * carries every code whose money has not moved (lib/recovery).
  *
  * The recording demo keeps its links in this tab's memory and never reads the
  * chain: its codes are for a pretend wallet.
@@ -17,7 +18,7 @@ import { readDemo } from "./demoFlag";
 import { openJson, sealJson } from "./noteVault";
 import { getRhPublicClient } from "./rhClient";
 import { shieldPoolAbi } from "./shield";
-import { addSentLink, capSentLinks, parseSentLinks, sameScope, type SentLink } from "./sentLinks";
+import { addSentLink, capSentLinks, needsCheck, parseSentLinks, sameScope, type SentLink } from "./sentLinks";
 
 const STORE_KEY = "gloam.sentlinks.v1";
 /** A list that could not be opened is copied here before a new one is written. */
@@ -73,6 +74,30 @@ function update(fn: (list: SentLink[]) => SentLink[]): Promise<void> {
 export async function loadSentLinks(chainId: number, pool: Address): Promise<SentLink[]> {
   await writeQueue;
   return (await readAll()).filter((r) => sameScope(r, chainId, pool));
+}
+
+/** Every code on any network whose money has not moved: what the recovery backup carries. */
+export async function openSentLinks(): Promise<SentLink[]> {
+  await writeQueue;
+  return (await readAll()).filter(needsCheck);
+}
+
+/**
+ * Take in records from a backup. A code already in this browser is kept as it
+ * is, so a status seen here (used, taken back) is never rolled back. Returns
+ * how many were added.
+ */
+export async function restoreSentLinks(value: unknown): Promise<number> {
+  const incoming = parseSentLinks(value);
+  if (typeof window === "undefined" || !incoming.length) return 0;
+  let added = 0;
+  await update((list) => {
+    const codes = new Set(list.map((r) => r.code));
+    const fresh = incoming.filter((r) => !codes.has(r.code));
+    added = fresh.length;
+    return [...fresh, ...list];
+  });
+  return added;
 }
 
 export function saveSentLink(rec: SentLink): Promise<void> {
