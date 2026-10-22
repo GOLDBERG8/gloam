@@ -9,6 +9,7 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { faucetFor } from "@/lib/faucet";
 import { MAINNET_ENABLED, getNetwork, NETWORK_KEYS, isNetworkKey, type NetworkKey } from "@/lib/networks";
+import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import {
   buildPaymentRequestLink,
@@ -355,6 +356,12 @@ async function vaultStats(args: Args, ctx: ToolContext): Promise<CallToolResult>
       chainId: n.chainId,
       pool: n.pool,
       vaultSince: n.vaultSince ? new Date(n.vaultSince * 1000).toISOString() : null,
+      // Mainnet counts start at the public launch; balances are always live.
+      countedSince: (n.testnet ?? getNetwork(n.key).testnet)
+        ? n.vaultSince
+          ? new Date(n.vaultSince * 1000).toISOString()
+          : null
+        : MAINNET_LAUNCH_ISO,
       heldUsd: Math.round(n.heldUsd * 100) / 100,
       unpriced: n.unpriced,
       holdings: n.assets.map((a) => ({ symbol: a.symbol, stablecoin: a.stable, held: a.held, heldUsd: a.heldUsd })),
@@ -390,7 +397,7 @@ async function vaultStats(args: Args, ctx: ToolContext): Promise<CallToolResult>
             : {}),
         }),
     about:
-      "Vault-level totals anyone can read from public nodes, the same figures as /transparency. Amounts of private transfers and who holds what inside a vault are not public, and are not here.",
+      "Vault-level totals anyone can read from public nodes. Deposits, private transfers and cash outs are counted since countedSince: on mainnet that is the public launch, 21 Oct 2026 13:00 UTC, so the team's own checks before launch are not counted, while holdings are the live balance. That is why a vault can hold money with no deposit counted. Amounts of private transfers and who holds what inside a vault are not public, and are not here.",
     transparency: `${ctx.origin}/transparency`,
   });
 }

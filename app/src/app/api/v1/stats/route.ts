@@ -1,6 +1,7 @@
 import { ApiError, withApiKey } from "@/lib/partnersApi";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import { getNetwork } from "@/lib/networks";
+import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,8 @@ export async function GET(req: Request) {
           chainId: n.chainId,
           pool: n.pool,
           vaultSince: n.vaultSince,
+          // Counts start here: the public launch on mainnet, the vault's deploy on a testnet. Holdings are live.
+          countedSince: (n.testnet ?? getNetwork(n.key).testnet) ? n.vaultSince : Math.floor(Date.parse(MAINNET_LAUNCH_ISO) / 1000),
           scannedTo: n.scannedTo,
           deposits: n.deposits,
           transfers: n.transfers,
