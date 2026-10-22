@@ -10,13 +10,13 @@ export const robinhood = defineChain({
       http: ["https://rpc.mainnet.chain.robinhood.com"],
     },
   },
-  // Blockscout, the explorer viem lists for chain 4663. The explorer.mainnet
-  // host the testnet pattern suggests fails its TLS handshake, so every link
-  // built on it went nowhere (checked 2026-10-22).
+  // RobinScan, Etherscan's explorer for Robinhood Chain, which people use and
+  // ask for. (The explorer.mainnet host the testnet pattern suggests fails its
+  // TLS handshake, so links built on it went nowhere; checked 2026-10-22.)
   blockExplorers: {
     default: {
-      name: "Blockscout",
-      url: "https://robinhoodchain.blockscout.com",
+      name: "RobinScan",
+      url: "https://robin.etherscan.io",
     },
   },
   // Multicall3 at its usual address, so batched reads go out as one call
