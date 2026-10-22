@@ -57,6 +57,11 @@ const SPECIAL_LOGOS: Record<string, string> = {
   gloam: "/brand/kit/gloam-avatar-ink.png",
 };
 
+/** The logo file for a token id, or undefined when it has none (a monogram shows instead). */
+export function tokenLogoPath(id: string): string | undefined {
+  return resolveLogo(id);
+}
+
 function resolveLogo(id: string): string | undefined {
   const key = id.toLowerCase();
   if (SPECIAL_LOGOS[key]) return SPECIAL_LOGOS[key];

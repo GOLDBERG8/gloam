@@ -120,6 +120,8 @@ import { freshPath, matchesRecentIncoming, roundDownToWhole, splitForCashOut } f
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
+import { AddTokenToWallet } from "./AddTokenToWallet";
+import { checkSweep, type SweepCheck, type SweepReader } from "@/lib/sweepCheck";
 
 /** How securing a claim ended (lib/claimSweep), or "error" when it threw. */
 type SweepStatus = SweepResult["status"] | "error";
@@ -184,6 +186,12 @@ export function MoveView() {
   const [cashOutWhen, setCashOutWhen] = useState<"now" | CashOutWindow>("now");
   const [cashOutDest, setCashOutDest] = useState<"mine" | "other">("mine");
   const [otherTo, setOtherTo] = useState("");
+  // The cash-out address's sweep check (lib/sweepCheck), keyed by network, address and token.
+  const [sweepResults, setSweepResults] = useState<Record<string, SweepCheck>>({});
+  const [sweepOkFor, setSweepOkFor] = useState<string | null>(null);
+  const sweepRuns = useRef(new Map<string, Promise<SweepCheck>>());
+  /** Where the last cash out went, for the "see it in your wallet" step after it lands. */
+  const [cashedOut, setCashedOut] = useState<{ to: Address; asset: Address } | null>(null);
   const [scheduledNotice, setScheduledNotice] = useState<{ at: number; label: string } | null>(null);
   const [sendAmount, setSendAmount] = useState(
     () => request?.amount ?? suggestion?.amount ?? ""
@@ -721,6 +729,33 @@ export function MoveView() {
     poolForCashOut != null &&
     poolForCashOut < cashOutAmount;
 
+  // Does money sent to this address get swept out? Read in the background; a
+  // failed read is no warning, never a blocked cash out.
+  const sweepKey =
+    mode === "cashout" && cashOutTo && selected && !demoMode
+      ? `${network.chainId}:${cashOutTo.toLowerCase()}:${selected.asset.toLowerCase()}`
+      : null;
+  function runSweepCheck(key: string, to: Address, asset: Address, chainId: number): Promise<SweepCheck> {
+    const known = sweepRuns.current.get(key);
+    if (known) return known;
+    const run = checkSweep(getRhPublicClient() as unknown as SweepReader, chainId, to, isNativeAsset(asset) ? null : asset).then(
+      (result) => {
+        setSweepResults((m) => ({ ...m, [key]: result }));
+        return result;
+      }
+    );
+    sweepRuns.current.set(key, run);
+    return run;
+  }
+  useEffect(() => {
+    if (!sweepKey || !cashOutTo || !selected) return;
+    const t = window.setTimeout(() => void runSweepCheck(sweepKey, cashOutTo, selected.asset as Address, network.chainId), 350);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sweepKey]);
+  const sweepNow = sweepKey ? (sweepResults[sweepKey] ?? null) : null;
+  const sweepHold = Boolean(sweepNow?.swept) && sweepOkFor !== sweepKey;
+
   async function onCashOut() {
     if (!selected || !address || !network.pool || !poseidonMode) return;
     setError(null);
@@ -757,6 +792,16 @@ export function MoveView() {
       setError(targetProblem);
       return;
     }
+    // Money sent here has been swept out within seconds before: only on purpose.
+    // A check still running gets a few seconds; one that fails is no warning.
+    const sweepFor = `${network.chainId}:${to.toLowerCase()}:${selected.asset.toLowerCase()}`;
+    if (!demoMode && sweepOkFor !== sweepFor) {
+      const result = await Promise.race([
+        runSweepCheck(sweepFor, to, selected.asset as Address, network.chainId),
+        new Promise<null>((r) => window.setTimeout(() => r(null), 4_000)),
+      ]);
+      if (result?.swept) return; // the warning under "To" says why and how to go ahead
+    }
     // The wallet it pays, relay or not (on Tempo, also checked against the
     // asset's TIP-403 issuer policy).
     const screen = await screenWallets([to], {
@@ -776,6 +821,7 @@ export function MoveView() {
     handledHash.current = null;
     pendingAction.current = "cashout";
     pendingChange.current = null;
+    setCashedOut(null);
 
     let splitDone = false;
     try {
@@ -858,6 +904,7 @@ export function MoveView() {
       if (relayOn) {
         setStatus("Sending through the Gloam relay…");
         const h = await relayUnshield(call);
+        setCashedOut({ to, asset: target.asset as Address });
         setRelayHash(h);
         setSuccessTitle("Cashed out");
         setCashOutInput("");
@@ -872,6 +919,7 @@ export function MoveView() {
         gas: gasFor(network.chainId, SHIELD_GAS_LIMIT),
         chainId: network.chainId,
       });
+      setCashedOut({ to, asset: target.asset as Address });
       setSuccessTitle("Cashed out");
       setCashOutInput("");
       void import("@/lib/track").then(({ track }) => {
@@ -2268,6 +2316,23 @@ export function MoveView() {
                         For privacy, a fresh wallet that never added money to Gloam is best.
                       </p>
                     ) : null}
+                    {sweepNow?.swept && cashOutTo ? (
+                      <SweptWarning
+                        address={cashOutTo}
+                        evidenceHref={network.explorerTx(sweepNow.swept.evidenceTx)}
+                        accepted={!sweepHold}
+                        onOtherAddress={() => {
+                          setCashOutDest("other");
+                          setOtherTo("");
+                        }}
+                        onAccept={() => setSweepOkFor(sweepKey)}
+                      />
+                    ) : sweepNow?.delegated ? (
+                      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                        This address hands control to a contract (EIP-7702). Some smart wallets do that on purpose. If you
+                        didn&apos;t set it up, cash out to another address.
+                      </p>
+                    ) : null}
                   </div>
 
                   <div>
@@ -2327,6 +2392,7 @@ export function MoveView() {
                         cashOutFeeUnknown ||
                         cashOutAmountInvalid ||
                         !cashOutTo ||
+                        sweepHold ||
                         (cashOutWhen !== "now" && !relayAvailable)
                       }
                       onClick={() => void onCashOut()}
@@ -2341,6 +2407,8 @@ export function MoveView() {
                         "Not enough in the vault yet"
                       ) : cashOutFeeUnknown ? (
                         "Loading the cash-out fee…"
+                      ) : sweepHold ? (
+                        "Check the address first"
                       ) : cashOutWhen !== "now" ? (
                         "Schedule the cash out"
                       ) : cashOutDest === "other" ? (
@@ -2849,6 +2917,8 @@ export function MoveView() {
         footer={
           paidPrivately ? (
             <PrivatePayShare chainId={network.chainId} networkLabel={network.label} testnet={network.testnet} />
+          ) : successTitle === "Cashed out" && cashedOut ? (
+            <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
           ) : undefined
         }
         onClose={() => {
@@ -2864,6 +2934,51 @@ export function MoveView() {
  * Pay → Note: an optional private note that travels inside the payment
  * (lib/paymentNote), like "Invoice 042". One quiet button until it is wanted.
  */
+/**
+ * Money sent to this address was moved out within seconds before, by another
+ * account (lib/sweepCheck): the wallet's key is likely in someone else's hands.
+ * The cash out waits until they pick another address or go ahead on purpose.
+ */
+function SweptWarning({
+  address,
+  evidenceHref,
+  accepted,
+  onOtherAddress,
+  onAccept,
+}: {
+  address: Address;
+  evidenceHref: string;
+  accepted: boolean;
+  onOtherAddress: () => void;
+  onAccept: () => void;
+}) {
+  return (
+    <div role="alert" className="mt-3 rounded-[14px] bg-warn-soft px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
+      <p className="font-medium text-warn">Check this address first</p>
+      <p className="mt-1">
+        Money sent to {shortAddress(address, 4)} has been moved out automatically within seconds before, by another
+        account. If you didn&apos;t set that up, this wallet may be compromised and your cash out could be taken the
+        same way.{" "}
+        <a href={evidenceHref} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
+          See it on the explorer
+        </a>
+      </p>
+      {accepted ? (
+        <p className="mt-2 text-[12.5px] text-mute">You chose to cash out to this address anyway.</p>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={onOtherAddress} className="btn btn-ink btn-sm">
+            Use another address
+          </button>
+          <button type="button" onClick={onAccept} className="btn btn-ghost btn-sm">
+            Cash out anyway
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PayNoteField({
   value,
   open,
