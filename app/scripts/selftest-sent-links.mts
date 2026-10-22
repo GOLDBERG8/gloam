@@ -3,7 +3,8 @@
  *
  *  - a record's kind and lock follow its code; the note is cleaned
  *  - records survive a JSON round trip (what sealJson stores) and junk is dropped
- *  - at most 100 per network and pool, newest kept, the same code never twice
+ *  - at most 100 per network and pool, newest kept, the same code never twice,
+ *    and a code whose money has not moved is never dropped
  *  - status mapping: taken back, used, not used yet, couldn't check, checking,
  *    and which rows offer Take back and Remove
  *  - the nullifier matches the one the app derives for its own notes
@@ -124,9 +125,12 @@ await test("a damaged nullifier or note is dropped, the record kept", () => {
   assert.equal(back.note, undefined);
 });
 
+/** A record whose money has moved (claimed and secured), so it may make room. */
+const used = (r: SentLink): SentLink => ({ ...r, usedAt: r.createdAt + 1 });
+
 await test(`cap: ${SENT_LINKS_MAX} per network and pool, newest kept`, () => {
   const base = 1_700_000_000_000;
-  const a = Array.from({ length: 130 }, (_, i) => rec({ code: code("gloam1", 100 + i), now: base + i }));
+  const a = Array.from({ length: 130 }, (_, i) => used(rec({ code: code("gloam1", 100 + i), now: base + i })));
   const b = Array.from({ length: 20 }, (_, i) => rec({ code: code("gloam1", 300 + i), pool: POOL_B, chainId: 42431, now: base + i }));
   const otherChainSamePool = Array.from({ length: 5 }, (_, i) => rec({ code: code("gloam1", 400 + i), chainId: 4663, now: base + i }));
   const capped = capSentLinks([...b, ...a, ...otherChainSamePool]);
@@ -138,10 +142,28 @@ await test(`cap: ${SENT_LINKS_MAX} per network and pool, newest kept`, () => {
   assert.equal(capped.filter((r) => r.chainId === 4663).length, 5);
 });
 
+await test("cap never drops a code whose money has not moved", () => {
+  const base = 1_700_000_000_000;
+  const open = Array.from({ length: 130 }, (_, i) => rec({ code: code("gloam1", 900 + i), now: base + i }));
+  assert.equal(capSentLinks(open).length, 130, "every unused code stays, even past the cap");
+
+  // Half unused, half used or taken back: every unused one stays, the newest settled ones fill the rest.
+  const mixed = Array.from({ length: 120 }, (_, i) => {
+    const r = rec({ code: code("gloam1", 1100 + i), now: base + i });
+    return i % 2 ? r : i % 4 ? used(r) : { ...r, takenBackAt: r.createdAt + 1 };
+  });
+  const kept = capSentLinks(mixed);
+  assert.equal(kept.length, SENT_LINKS_MAX);
+  assert.equal(kept.filter(needsCheck).length, 60);
+  const settled = kept.filter((r) => !needsCheck(r));
+  assert.equal(settled.length, 40);
+  assert.equal(Math.min(...settled.map((r) => r.createdAt)), base + 40, "the oldest settled ones made room");
+});
+
 await test("cap treats the pool address case-insensitively", () => {
   const base = 1_700_000_000_000;
   const mixed = Array.from({ length: 101 }, (_, i) =>
-    rec({ code: code("gloam1", 500 + i), pool: (i % 2 ? POOL_A : POOL_A.toLowerCase()) as Address, now: base + i })
+    used(rec({ code: code("gloam1", 500 + i), pool: (i % 2 ? POOL_A : POOL_A.toLowerCase()) as Address, now: base + i }))
   );
   assert.equal(capSentLinks(mixed).length, 100);
 });
@@ -153,9 +175,10 @@ await test("adding keeps one record per code and stays capped", () => {
   list = addSentLink(list, rec({ code: c, now: 2 }));
   assert.equal(list.length, 1);
   assert.equal(list[0].createdAt, 2);
-  for (let i = 0; i < 120; i++) list = addSentLink(list, rec({ code: code("gloam1", 700 + i), now: 10 + i }));
+  for (let i = 0; i < 120; i++) list = addSentLink(list, used(rec({ code: code("gloam1", 700 + i), now: 10 + i })));
   assert.equal(list.length, 100);
   assert.equal(list[0].createdAt, 129);
+  assert.ok(list.some((r) => r.code === c), "the oldest record, still unused, is kept");
 });
 
 await test("status mapping", () => {

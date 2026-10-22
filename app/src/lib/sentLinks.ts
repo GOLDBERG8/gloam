@@ -22,7 +22,7 @@ import { noteNullifierPoseidon } from "./notePoseidon";
 import { fieldToHex, hexToField } from "./poseidon";
 import { cleanPaymentNote } from "./paymentNote";
 
-/** Records kept per network and pool. */
+/** Records kept per network and pool, unless more codes than that still hold money. */
 export const SENT_LINKS_MAX = 100;
 
 /** A claim link anyone with the code can claim, or a payment sealed to someone's Gloam address. */
@@ -166,15 +166,22 @@ function scopeKey(r: Pick<SentLink, "chainId" | "pool">): string {
   return `${r.chainId}:${r.pool.toLowerCase()}`;
 }
 
-/** Newest first, at most `max` per network and pool. */
+/**
+ * Newest first, at most `max` per network and pool. A code whose money has not
+ * moved is never dropped (this record may be its only copy), so only used and
+ * taken-back records make room, oldest first.
+ */
 export function capSentLinks(list: SentLink[], max = SENT_LINKS_MAX): SentLink[] {
   const sorted = [...list].sort((a, b) => b.createdAt - a.createdAt);
-  const seen = new Map<string, number>();
+  const open = new Map<string, number>();
+  for (const r of sorted) if (needsCheck(r)) open.set(scopeKey(r), (open.get(scopeKey(r)) ?? 0) + 1);
+  const settled = new Map<string, number>();
   return sorted.filter((r) => {
+    if (needsCheck(r)) return true;
     const k = scopeKey(r);
-    const n = (seen.get(k) ?? 0) + 1;
-    seen.set(k, n);
-    return n <= max;
+    const n = (settled.get(k) ?? 0) + 1;
+    settled.set(k, n);
+    return (open.get(k) ?? 0) + n <= max;
   });
 }
 
