@@ -88,9 +88,15 @@ export type ClaimEnv = {
    * A spend and a commitment read at one block, so two answers from nodes a
    * block apart can't call a move that landed dead. Null fields: unread.
    */
-  stateAt?: (nullifier: Hex | null, commitment: Hex) => Promise<{ spent: boolean | null; seen: boolean | null }>;
-  /** A private swap's refund note: does its money wait at the swap's escrow? Null: unread. */
-  escrowWaiting?: (n: LocalNote) => Promise<boolean | null>;
+  stateAt?: (
+    nullifier: Hex | null,
+    commitment: Hex
+  ) => Promise<{ spent: boolean | null; seen: boolean | null; block?: bigint | null }>;
+  /**
+   * A private swap's refund note: does its money wait at the swap's escrow, at
+   * `block` (the block stateAt read)? Null: unread.
+   */
+  escrowWaiting?: (n: LocalNote, block: bigint) => Promise<boolean | null>;
   /** Puts a swap's waiting money back as its refund note (lib/vaultSwapRun). */
   finishRefund?: (n: LocalNote) => Promise<void>;
 };
@@ -110,12 +116,12 @@ function readBool(pool: Address, fn: "isSpent" | "commitmentSeen", arg: Hex, blo
 /** Both reads at one block. A node without that block yet fails the read, which counts as unread. */
 async function readStateAt(pool: Address, nullifier: Hex | null, commitment: Hex) {
   const block = await getRhPublicClient().getBlockNumber().catch(() => null);
-  if (block === null) return { spent: null, seen: null };
+  if (block === null) return { spent: null, seen: null, block: null };
   const [spent, seen] = await Promise.all([
     nullifier ? readBool(pool, "isSpent", nullifier, block).catch(() => null) : Promise.resolve(null),
     readBool(pool, "commitmentSeen", commitment, block).catch(() => null),
   ]);
-  return { spent, seen };
+  return { spent, seen, block };
 }
 
 /** The vault tree, waiting a little for a commitment that only just landed. */
@@ -155,9 +161,9 @@ export function appClaimEnv(onStage?: (text: string) => void): ClaimEnv {
     relay: relayTransfer,
     leafIndexOf: async (commitment) => (await findLeaf(commitment))?.idx,
     stateAt: (nullifier, commitment) => readStateAt(pool!, nullifier, commitment),
-    escrowWaiting: async (n) => {
+    escrowWaiting: async (n, block) => {
       if (!n.vaultSwap || !n.sweptFrom) return false;
-      return escrowHolds(getRhPublicClient(), n.vaultSwap, n.sweptFrom.nullifier, n.commitment, BigInt(n.amountWei)).catch(
+      return escrowHolds(getRhPublicClient(), n.vaultSwap, n.sweptFrom.nullifier, n.commitment, BigInt(n.amountWei), block).catch(
         () => null
       );
     },
@@ -178,6 +184,8 @@ async function nullifierOf(n: LocalNote): Promise<Hex> {
 async function finalize(env: ClaimEnv, fresh: LocalNote, txHash: Hex | null) {
   const leafIndex = await env.leafIndexOf(fresh.commitment);
   updateLocalNote(fresh.id, {
+    // counted again even if an earlier sync gave it up (a refund that landed late)
+    status: "open",
     sweepPending: false,
     ...(leafIndex != null ? { leafIndex } : {}),
     ...(txHash ? { txHash } : {}),
@@ -199,11 +207,12 @@ async function finalize(env: ClaimEnv, fresh: LocalNote, txHash: Hex | null) {
  * escrow holds it (or can't be read) the note is "refund" or pending, never dead.
  */
 async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" | "dead" | "pending" | "refund"> {
-  const { spent, seen } = env.stateAt
+  const { spent, seen, block } = env.stateAt
     ? await env.stateAt(fresh.sweptFrom?.nullifier ?? null, fresh.commitment)
     : {
         spent: fresh.sweptFrom ? await env.chain.isSpent(fresh.sweptFrom.nullifier).catch(() => null) : null,
         seen: await env.chain.isCommitmentSeen(fresh.commitment).catch(() => null),
+        block: null,
       };
   if (seen === true) {
     await finalize(env, fresh, null);
@@ -211,7 +220,10 @@ async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" 
   }
   if (seen === false && spent === true) {
     if (fresh.vaultSwap) {
-      const waiting = env.escrowWaiting ? await env.escrowWaiting(fresh).catch(() => null) : null;
+      // The escrow is read at the same block, or a refund landing in between
+      // would read as "spent, not seen, escrow empty" and be given up.
+      if (block == null) return "pending";
+      const waiting = env.escrowWaiting ? await env.escrowWaiting(fresh, block).catch(() => null) : null;
       if (waiting === true) return "refund";
       if (waiting === null) return "pending";
     }

@@ -32,6 +32,9 @@ const { claimNoteId, isUnsecuredClaim, reconcileClaims, secureClaim } = await im
 type LocalNote = import("../src/lib/shield").LocalNote;
 type ClaimEnv = import("../src/lib/claimSweep").ClaimEnv;
 
+/** The block the mock pool's pinned reads report. */
+const BLOCK = BigInt(1);
+
 let passed = 0;
 async function test(name: string, fn: () => Promise<void>) {
   await fn();
@@ -92,6 +95,8 @@ function mockPool() {
         prove: async () => ({ proofBytes: "0xdeadbeef" }),
         relay: (t) => this.transfer([t.proof, t.root, t.nullifier, t.commitments]),
         leafIndexOf: async (c) => index.get(lc(c)),
+        // both reads at one "block", as the app does
+        stateAt: async (nf, c) => ({ spent: nf ? spent.has(lc(nf)) : null, seen: index.has(lc(c)), block: BLOCK }),
         ...over,
       };
     },
@@ -435,6 +440,31 @@ await test("swap: once the swap landed, the empty escrow lets the refund note go
   await reconcileClaims(pool.env({ escrowWaiting: async () => false }));
   assert.equal(byId(out.id).sweepPending, false, "the new note counts");
   assert.equal(byId(refund.id).status, "recovered", "the refund note can never land");
+});
+
+await test("swap: a refund landing between the reads is never given up", async () => {
+  const pool = mockPool();
+  const { spentNote, refund } = await swapNotes(pool, 10_000_000n);
+  pool.spent.add(lc(spentNote.nullifier!));
+  // At the pinned block the escrow still held the money; by the latest block the
+  // refund has landed and emptied it. The escrow must be read at the pinned block.
+  const reads: (bigint | undefined)[] = [];
+  const env = pool.env({
+    escrowWaiting: async (_n, block) => {
+      reads.push(block);
+      return block === BLOCK;
+    },
+    finishRefund: async () => {},
+  });
+  await reconcileClaims(env);
+  assert.deepEqual(reads, [BLOCK], "the escrow is read at the block the vault was read at");
+  assert.equal(byId(refund.id).status, "open", "not given up");
+  // and with no pinned block at all, it waits rather than guessing
+  await reconcileClaims(pool.env({ stateAt: async () => ({ spent: true, seen: false, block: null }), escrowWaiting: async () => false }));
+  assert.equal(byId(refund.id).status, "open");
+  await pool.insert(refund.commitment);
+  await reconcileClaims(env);
+  assert.equal(byId(refund.id).sweepPending, false, "it lands and counts");
 });
 
 // The note store's writes land on disk encrypted, never as plaintext.

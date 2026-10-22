@@ -211,7 +211,7 @@ export async function runVaultSwap(args: {
   const at = await freshPath(landed.commitment);
   updateLocalNote(target.id, { status: "recovered", txHash: hash });
   updateLocalNote(unused.id, { status: "recovered", sweepPending: false });
-  updateLocalNote(landed.id, { sweepPending: false, txHash: hash, ...(at ? { leafIndex: at.leafIndex } : {}) });
+  updateLocalNote(landed.id, { status: "open", sweepPending: false, txHash: hash, ...(at ? { leafIndex: at.leafIndex } : {}) });
   return {
     hash,
     refunded,

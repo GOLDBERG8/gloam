@@ -178,10 +178,17 @@ export async function escrowHolds(
   info: VaultSwapRefundInfo,
   nullifier: Hex,
   refundCommitment: Hex,
-  refundAmount: bigint
+  refundAmount: bigint,
+  blockNumber?: bigint
 ): Promise<boolean> {
   const escrow = escrowAddress(info.router, info.assetIn, refundEscrowKey(info, nullifier, refundCommitment, refundAmount));
-  const held = await client.readContract({ address: info.assetIn, abi: balanceOfAbi, functionName: "balanceOf", args: [escrow] });
+  const held = await client.readContract({
+    address: info.assetIn,
+    abi: balanceOfAbi,
+    functionName: "balanceOf",
+    args: [escrow],
+    ...(blockNumber !== undefined ? { blockNumber } : {}),
+  });
   return held >= refundAmount;
 }
 
