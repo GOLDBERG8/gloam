@@ -721,10 +721,12 @@ await test("welcome: tags, mention links, escaping, the others count", () => {
   assert.ok(html.startsWith('Welcome to Gloam, @ada_lovelace, <a href="tg://user?id=12">'));
   assert.ok(html.includes("Bo &amp; Co</a> and "));
   assert.ok(!html.includes("<b>"));
-  assert.ok(html.includes("Gloam is live on mainnet: private payments on Robinhood Chain and Tempo. Start at gloam.trade/app."));
-  assert.ok(html.includes("keep an eye on Announcements.\n\n"), "no testing line while the tester program is closed");
+  assert.ok(html.includes("Gloam is live on mainnet, so you can send and receive money privately on Robinhood Chain and Tempo."));
+  assert.ok(html.includes("news lands in Announcements.\n\n"), "no testing line while the tester program is closed");
   assert.ok(!/testing directions|soon/i.test(html), "nothing promised for later");
-  assert.ok(html.endsWith("The admins are @dukedotsol and @quinkardeeah, and Glim is the assistant. Admins never DM first."));
+  assert.ok(html.endsWith("One thing to know: admins never DM first."));
+  assert.ok(html.includes("gloam.trade/app"), "the welcome says where to start");
+  assert.ok(!/@dukedotsol|@quinkardeeah|Kardeeah|assistant/.test(html), "the welcome never tags or names the admins");
   assert.ok(!/[\u2014\p{Extended_Pictographic}]/u.test(html));
 
   const thirty = welcomeHtml(
@@ -1086,7 +1088,7 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, "only the team can ban");
 
   // an admin's /ban, /kick or /mute (with or without Rose's @name): Rose acts and answers, Glim does nothing
-  for (const command of ["/ban", "/ban@MissRose_bot", "/kick", "/mute", "/warn", "/tban 1d"]) {
+  for (const command of ["/ban", "/ban@MissRose_bot", "/kick", "/mute", "/warn", "/tban 1d", "/del", "/del@MissRose_bot", "/purge"]) {
     reset();
     const scammer = inTopic(TOPIC.general, "hello", user(912, "Evelyn"));
     await handleUpdate(upd(scammer));

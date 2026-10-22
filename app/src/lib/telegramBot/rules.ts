@@ -607,13 +607,18 @@ export type ModAction = { remove: boolean };
  * Rose acts and Glim stays out of it, so one command never gets two bots
  * acting (and racing) on it.
  */
-export const ROSE_COMMANDS = new Set(["ban", "unban", "kick", "mute", "unmute", "warn", "warns", "dban", "sban", "tban", "tmute"]);
+export const ROSE_COMMANDS = new Set([
+  "ban", "unban", "kick", "mute", "unmute", "warn", "warns", "dban", "sban", "tban", "tmute",
+  // Rose deletes the replied message (and purges) too.
+  "del", "purge", "spurge",
+]);
 
 /**
- * An admin telling the helper to act on the message they replied to: /del
+ * An admin telling the helper to act on the message they replied to: /delete
  * (delete it), /spam (delete it and remove the person), or tagging the helper
- * with "delete", "remove", "kick" or "ban". Rose's own commands (/ban, /kick
- * and the rest) are Rose's. Null when it is not that.
+ * with "delete", "remove", "kick" or "ban". Rose's own commands (/ban, /kick,
+ * /del and the rest) are Rose's: the bot ignores them before getting here.
+ * Null when it is not that.
  */
 export function moderationAsk(text: string, command: string | null, tagged: boolean): ModAction | null {
   if (command) {
@@ -1101,7 +1106,7 @@ const WELCOME_TAG_CHARS = 3_500;
  * username are tagged as @username; the rest get a mention link to their
  * account, so the tag works without a username.
  */
-export function welcomeHtml(joiners: Joiner[], testingOpen: boolean, persona = "Glim"): string {
+export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
   const tags: string[] = [];
   let used = 0;
   for (const j of joiners.slice(0, WELCOME_TAGS)) {
@@ -1117,11 +1122,12 @@ export function welcomeHtml(joiners: Joiner[], testingOpen: boolean, persona = "
   if (others > 0) tags.push(`${others} ${others === 1 ? "other" : "others"}`);
   const list = tags.length > 1 ? `${tags.slice(0, -1).join(", ")} and ${tags[tags.length - 1]}` : (tags[0] ?? "friends");
   const testing = testingOpen ? " Testers, your guide is pinned in the Testers topic." : "";
+  // A warm hello and where to start. No admin handles: they would ping the admins on every welcome, and the group shows who they are.
   return (
     `Welcome to Gloam, ${list}. Glad you're here.\n\n` +
-    `Gloam is live on mainnet: private payments on Robinhood Chain and Tempo. Start at gloam.trade/app.\n\n` +
-    `Ask anything in Help, share ideas in Feedback, and keep an eye on Announcements.${testing}\n\n` +
-    `The admins are @dukedotsol and @quinkardeeah, and ${escapeHtml(cleanName(persona, "Glim"))} is the assistant. Admins never DM first.`
+    `Gloam is live on mainnet, so you can send and receive money privately on Robinhood Chain and Tempo. The easiest way in is gloam.trade/app: add a little, then send it to someone.\n\n` +
+    `Questions go in Help, ideas in Feedback, and news lands in Announcements.${testing}\n\n` +
+    `One thing to know: admins never DM first.`
   );
 }
 

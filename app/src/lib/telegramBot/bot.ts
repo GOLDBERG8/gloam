@@ -544,7 +544,7 @@ function joinerOf(u: TgUser): Joiner {
 async function flushWelcome(c: BotConfig): Promise<void> {
   const batch = await takeWelcomeBatch().catch(() => null);
   if (!batch?.length) return;
-  if (await sendMessage(c.groupId, welcomeHtml(batch, c.testingOpen, c.persona), { parseMode: "HTML" })) await count("welcomes");
+  if (await sendMessage(c.groupId, welcomeHtml(batch, c.testingOpen), { parseMode: "HTML" })) await count("welcomes");
 }
 
 async function welcome(users: TgUser[], c: BotConfig): Promise<void> {
