@@ -108,6 +108,8 @@ import {
 } from "./rules";
 import {
   bump,
+  cacheChatAdmins,
+  cachedChatAdmins,
   codeTipDue,
   countMembers,
   countMessage,
@@ -128,6 +130,7 @@ import {
   markHandOff,
   markSeen,
   queueJoiners,
+  recentThenKeep,
   remember,
   rememberDm,
   rememberOwnerChat,
@@ -144,6 +147,7 @@ import {
   banMember,
   deleteMessage,
   downloadFile,
+  getChatAdministrators,
   getFile,
   getMe,
   refreshWebhook,
@@ -179,8 +183,10 @@ export type BotConfig = {
   testingOpen: boolean;
   /** Admin handles, lower case, without "@". */
   admins: string[];
-  /** TELEGRAM_ADMIN_IDS: admins by numeric id, which survives a handle change. */
+  /** TELEGRAM_ADMIN_IDS, and ids given with a handle ("yomi_ops:600"): admins by numeric id, which survives a handle change. */
   adminIds: number[];
+  /** Handles given with an id: those admins are matched by the id only, so whoever takes the handle later is not one. */
+  pinnedAdmins: string[];
   /** Who gets /report in a DM. Ids win over handles when any are set. */
   owners: { ids: number[]; handles: string[] };
   /** TELEGRAM_DAILY_REPORT: the cron sends the report at 21:00 WAT. */
@@ -195,6 +201,23 @@ function handles(raw: string): string[] {
     .filter((h) => /^[a-z0-9_]{3,32}$/.test(h));
 }
 
+/** TELEGRAM_ADMIN_HANDLES: "@a, b:12345". A handle with its id after it is matched by the id. */
+function adminEntries(raw: string): { handles: string[]; ids: number[]; pinned: string[] } {
+  const out = { handles: [] as string[], ids: [] as number[], pinned: [] as string[] };
+  for (const entry of raw.split(",")) {
+    const [h, id] = entry.split(/[:=]/).map((v) => v.trim());
+    const handle = handles(h ?? "")[0];
+    if (!handle) continue;
+    out.handles.push(handle);
+    const n = Number(id);
+    if (id && Number.isSafeInteger(n) && n > 0) {
+      out.ids.push(n);
+      out.pinned.push(handle);
+    }
+  }
+  return out;
+}
+
 /** Numeric Telegram ids from a comma-separated env value (ids never change, handles can). */
 function ids(raw: string | undefined): number[] {
   return (raw ?? "")
@@ -205,12 +228,14 @@ function ids(raw: string | undefined): number[] {
 
 export function botConfig(): BotConfig {
   const group = Number(process.env.TELEGRAM_GROUP_ID?.trim());
+  const admins = adminEntries(process.env.TELEGRAM_ADMIN_HANDLES ?? "");
   return {
     groupId: Number.isSafeInteger(group) && group !== 0 ? group : GLOAM_GROUP_ID,
     persona: personaName(),
     testingOpen: /^(1|true|yes|on)$/i.test(process.env.GLOAM_TESTING_OPEN?.trim() ?? ""),
-    admins: handles(process.env.TELEGRAM_ADMIN_HANDLES ?? ""),
-    adminIds: ids(process.env.TELEGRAM_ADMIN_IDS),
+    admins: admins.handles,
+    adminIds: [...ids(process.env.TELEGRAM_ADMIN_IDS), ...admins.ids],
+    pinnedAdmins: admins.pinned,
     owners: {
       ids: ids(process.env.TELEGRAM_OWNER_IDS),
       handles: handles(process.env.TELEGRAM_OWNER_HANDLES ?? "dukedotsol"),
@@ -225,9 +250,29 @@ export function isOwner(u: { id: number; username?: string }, c: BotConfig): boo
   return Boolean(u.username && c.owners.handles.includes(u.username.toLowerCase()));
 }
 
-/** An admin, by TELEGRAM_ADMIN_IDS or TELEGRAM_ADMIN_HANDLES. */
+/**
+ * An admin: by id first (TELEGRAM_ADMIN_IDS, or an id given with the handle),
+ * then by handle, but only for an admin with no id on file, since a handle
+ * someone drops can be taken by anyone.
+ */
 export function isAdmin(u: { id: number; username?: string }, c: BotConfig): boolean {
-  return c.adminIds.includes(u.id) || Boolean(u.username && c.admins.includes(u.username.toLowerCase()));
+  if (c.adminIds.includes(u.id)) return true;
+  const handle = u.username?.toLowerCase();
+  return Boolean(handle && c.admins.includes(handle) && !c.pinnedAdmins.includes(handle));
+}
+
+/**
+ * Someone Telegram lists as an admin of the group (Rose and the owner's
+ * helpers included): never removed or warned by the helper. The list is asked
+ * for only when the helper is about to act, and kept five minutes.
+ */
+async function isChatAdmin(chatId: number, userId: number): Promise<boolean> {
+  let list = await cachedChatAdmins(chatId).catch(() => null);
+  if (!list) {
+    list = await getChatAdministrators(chatId);
+    if (list) await cacheChatAdmins(chatId, list).catch(() => {});
+  }
+  return Boolean(list?.includes(userId));
 }
 
 /** The owner or an admin: their warnings are not scams, they never get code heads-ups or hand-offs, and they can chat in a DM. */
@@ -541,7 +586,8 @@ async function compose(x: Compose): Promise<{ reply: string | null; sentinel: Se
   if (!text) return { reply: null, sentinel: null };
   // the admins are never tagged in the group; people are pointed to the email or X instead
   const handles = [x.from.username, x.me.username].filter((h): h is string => Boolean(h));
-  const reply = cleanReply(trimReply(text), { handles });
+  const askerText = [x.input.text, x.input.taggedBy?.text ?? ""].join("\n");
+  const reply = cleanReply(trimReply(text), { handles, askerText });
   return { reply: reply ? spaceOut(reply) : null, sentinel: null };
 }
 
@@ -561,7 +607,8 @@ async function flushWelcome(c: BotConfig): Promise<void> {
 async function welcome(users: TgUser[], c: BotConfig): Promise<void> {
   // an account named like Gloam or the team is out before it can post
   for (const u of users) {
-    if (!u.is_bot && !isTrusted(u, c) && impersonates(u) && (await banMember(c.groupId, u.id))) await noteBan(c, u, "impostor", "", null);
+    if (u.is_bot || isTrusted(u, c) || !impersonates(u) || (await isChatAdmin(c.groupId, u.id))) continue;
+    if (await banMember(c.groupId, u.id)) await noteBan(c, u, "impostor", "", null);
   }
   const people = users.filter((u) => !u.is_bot && (isTrusted(u, c) || !impersonates(u)));
   if (people.length === 0) return;
@@ -663,6 +710,28 @@ async function moderate(msg: TgMessage, target: TgMessage, remove: boolean, c: B
 }
 
 /** What a member types, as a reply, to report a message. */
+/**
+ * A member repeating a scam to show it, not running it: a forward of someone
+ * else's message, a quote of someone else's words, or a warning that reports
+ * what the scam says ("it says all holders DM me"). Only when the scam sits
+ * in the forwarded, quoted or reported words; a scam in the sender's own
+ * words is theirs, whatever warning comes with it.
+ */
+function reportsScam(msg: TgMessage, from: TgUser, text: string): boolean {
+  const origin = msg.forward_origin;
+  if (origin?.type === "hidden_user" || (origin?.type === "user" && origin.sender_user?.id !== from.id)) return true;
+  const scam = (s: string) => memberScam(from, s);
+  const quoted = [msg.quote?.text, msg.external_reply?.text, msg.external_reply?.caption]
+    .filter((q): q is string => Boolean(q?.trim()))
+    .map((q) => scanCodes(q).masked);
+  const fromOther = Boolean(msg.external_reply) || msg.reply_to_message?.from?.id !== from.id;
+  if (fromOther && quoted.length && scam(quoted.join("\n"))) {
+    const own = quoted.reduce((t, q) => t.split(q).join(" "), text);
+    if (!scam(own)) return true;
+  }
+  return pointsAtScam(text, scam);
+}
+
 const REPORT_COMMANDS = new Set(["spam", "scam", "report"]);
 const REPORTS_PER_MIN = 3;
 
@@ -683,16 +752,14 @@ async function onReport(msg: TgMessage, from: TgUser, target: TgMessage | null, 
     return;
   }
   const who = target.from;
-  if (!who || who.id === me.id || isTrusted(who, c)) {
+  if (!who || who.id === me.id || isTrusted(who, c) || (await isChatAdmin(chatId, who.id))) {
     await say("That one's from the team, so it stays.");
     return;
   }
   const targetText = scanCodes(messageText(target)).masked;
   const why = impersonates(who) ? "impostor" : memberScam(who, targetText);
   // the reported message was itself someone calling a scam out: never a removal on that
-  const pointing =
-    why !== "impostor" &&
-    (target.forward_origin?.type === "user" || target.forward_origin?.type === "hidden_user" || Boolean(target.quote) || pointsAtScam(targetText));
+  const pointing = why !== "impostor" && reportsScam(target, who, targetText);
   if (why && !pointing) {
     const deleted = await deleteMessage(chatId, target.message_id);
     // words members say too ("everyone DM me") come down, the account stays
@@ -736,7 +803,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   // an edit is the same message again: counted once, when it was posted
   if (!edited) await countMessage(topic, from.id).catch(() => {});
   // someone posting as "Gloam", "Glim", "Gloam Support" or a team tag: out, whatever they posted (a bare GIF too)
-  if (!isTrusted(from, c) && impersonates(from)) {
+  if (!isTrusted(from, c) && impersonates(from) && !(await isChatAdmin(chatId, from.id))) {
     const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
     const removed = await deleteMessage(chatId, msg.message_id);
     const banned = await banMember(chatId, from.id);
@@ -766,14 +833,26 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   // a call-channel post forwarded or quoted in from elsewhere ("80x move from our call")
   const outside = msg.forward_origin || msg.external_reply ? [text, msg.external_reply?.text, msg.external_reply?.caption, msg.quote?.text].filter(Boolean).join(" ") : "";
   const promo = Boolean(outside) && forwardedCall(outside);
-  const reason = trusted ? null : memberScam(from, text);
-  if (!trusted && (promo || reason)) {
+  // a scam split over a few messages is read whole: this one with the person's last two minutes
+  const earlier = trusted ? [] : await recentThenKeep(chatId, from.id, { id: msg.message_id, t: text.slice(0, 600), at: Date.now() }).catch(() => []);
+  let scored = text;
+  let reason = trusted ? null : memberScam(from, text);
+  if (!trusted && earlier.length && (!reason || WARN_ONLY.has(reason))) {
+    const joined = [...earlier.map((e) => e.t), text].join("\n");
+    const whole = memberScam(from, joined);
+    if (whole && (!reason || !WARN_ONLY.has(whole))) {
+      reason = whole;
+      scored = joined;
+    }
+  }
+  if (!trusted && (promo || reason) && !(await isChatAdmin(chatId, from.id))) {
     // Repeating a scam to call it out (forwarding a person's message, quoting it,
-    // warning about it) is reporting it: the words come down, the member stays.
-    const fromPerson = msg.forward_origin?.type === "user" || msg.forward_origin?.type === "hidden_user";
-    const pointing = !promo && (fromPerson || Boolean(msg.quote) || pointsAtScam(text));
+    // reporting what it says) is reporting it: the words come down, the member stays.
+    const pointing = !promo && reportsScam(msg, from, scored);
     const warnOnly = !promo && Boolean(reason && WARN_ONLY.has(reason));
     const removed = await deleteMessage(chatId, msg.message_id);
+    // the earlier parts of a split scam come down with it
+    if (scored !== text) for (const e of earlier) await deleteMessage(chatId, e.id);
     // a scam post of their own costs the account its place in the group
     const banned = removed && !pointing && !warnOnly ? await banMember(chatId, from.id) : false;
     await count(removed ? "scams" : "scamsMissed");
@@ -784,7 +863,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
         replyTo: removed ? undefined : msg.message_id,
       });
     }
-    if (banned) await noteBan(c, from, reason ?? "promo_spam", text, topic);
+    if (banned) await noteBan(c, from, reason ?? "promo_spam", scored, topic);
     return;
   }
   if (topic === TOPIC.announcements) return;

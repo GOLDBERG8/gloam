@@ -270,9 +270,13 @@ async function readLedger(key: NetworkKey, prev: Ledger | null, progress: Progre
   const id = n.chainId;
   const head = await gated(id, () => c.getBlockNumber());
   const lag = HEAD_LAG[id] ?? 2n;
-  const latest = head > lag ? head - lag : head;
   const fromBlock = n.deployBlock;
   const resume = prev && BigInt(prev.scannedTo) >= fromBlock ? BigInt(prev.scannedTo) + 1n : fromBlock;
+  // A lagging node behind the balancer can answer an older head. The scan never
+  // ends below where the last pass stopped, or those blocks would be read (and
+  // counted) twice.
+  const tip = head > lag ? head - lag : head;
+  const latest = tip > resume - 1n ? tip : resume - 1n;
   const memo = n.payMemo;
   const memoFrom = memo ? (memo.deployBlock > fromBlock ? memo.deployBlock : fromBlock) : 0n;
   const memoResume = resume > memoFrom ? resume : memoFrom;

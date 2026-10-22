@@ -60,11 +60,14 @@ export async function POST(req: Request) {
   if (update && typeof update.update_id === "number") {
     const u = update;
     after(async () => {
-      await handleUpdate(u).catch((e) => {
-        console.error("telegram: update failed", e instanceof Error ? e.message : "unknown");
-      });
-      // any update is a chance to post new $GLOAM buys in the Buys topic (at most every 20 seconds)
-      await pollBuys(botConfig().groupId);
+      // any update is also a chance to post new $GLOAM buys in the Buys topic (at most every 30 seconds).
+      // Side by side, not one after the other: a slow answer never leaves a buy check cut off at 60 seconds.
+      await Promise.all([
+        handleUpdate(u).catch((e) => {
+          console.error("telegram: update failed", e instanceof Error ? e.message : "unknown");
+        }),
+        pollBuys(botConfig().groupId),
+      ]);
     });
   }
   return NextResponse.json({ ok: true });

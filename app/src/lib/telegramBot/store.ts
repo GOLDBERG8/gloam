@@ -19,6 +19,10 @@
  *    already looked at, who got today's code heads-up, a locked code waiting
  *    to see if its phrase follows, who was handed to an admin lately, and
  *    whether the $GLOAM card just went up in a topic
+ *  - each member's last two minutes of messages, so a scam split over a few
+ *    messages is read whole, and the group's admin list for five minutes
+ *  - the buy alerts' place in the chain, the transactions already posted
+ *    (three days), and any wait Telegram asked for
  */
 import { randomUUID } from "crypto";
 import { hashNumbers, jsonOf, kv } from "@/lib/partnersKv";
@@ -495,10 +499,43 @@ export async function markTokenCard(chatId: number, topic: number): Promise<void
 
 const BUYS = `${PREFIX}buys:`;
 
-/** One buy check at a time, at most every so many seconds. */
-export async function takeBuysSlot(everySec: number): Promise<boolean> {
-  const [r] = await kv([["SET", `${BUYS}lock`, "1", "EX", everySec, "NX"]]);
+/**
+ * One buy check at a time. The slot is held for `holdSec`, longer than a check
+ * can run, so a slow check never overlaps the next; spaceBuysSlot then sets
+ * when the next may start.
+ */
+export async function takeBuysSlot(holdSec: number): Promise<boolean> {
+  const [r] = await kv([["SET", `${BUYS}lock`, "1", "EX", holdSec, "NX"]]);
   return r !== null;
+}
+
+/** A check is done: the next one may start `everySec` from now. */
+export async function spaceBuysSlot(everySec: number): Promise<void> {
+  await kv([["SET", `${BUYS}lock`, "1", "EX", everySec]]);
+}
+
+/** Telegram asked to slow down (a 429): no buy check until its wait is over. */
+export async function pauseBuys(sec: number): Promise<void> {
+  await kv([["SET", `${BUYS}pause`, "1", "EX", Math.max(1, Math.ceil(sec))]]);
+}
+
+export async function buysPaused(): Promise<boolean> {
+  const [n] = await kv([["EXISTS", `${BUYS}pause`]]);
+  return Number(n) > 0;
+}
+
+/** How long a posted buy's transaction stays claimed. */
+const BUY_CLAIM_TTL_SEC = 3 * 24 * 60 * 60;
+
+/** Claims a buy before it is posted, so no two checks ever post the same transaction. False when it was already claimed. */
+export async function claimBuy(tx: string): Promise<boolean> {
+  const [r] = await kv([["SET", `${BUYS}tx:${tx.toLowerCase()}`, "1", "EX", BUY_CLAIM_TTL_SEC, "NX"]]);
+  return r !== null;
+}
+
+/** A claimed buy that did not go out: the next check may post it. */
+export async function releaseBuy(tx: string): Promise<void> {
+  await kv([["DEL", `${BUYS}tx:${tx.toLowerCase()}`]]);
 }
 
 /** The last block checked, or null the first time. */
@@ -510,4 +547,41 @@ export async function buysLastBlock(): Promise<number | null> {
 
 export async function setBuysLastBlock(block: number): Promise<void> {
   await kv([["SET", `${BUYS}last`, String(block)]]);
+}
+
+// ---------------------------------------------------------------- a person's last words, and the group's admins
+
+/** How far back one person's messages are read together, so a scam split over a few messages is still caught. */
+export const RECENT_WORDS_SEC = 2 * 60;
+const RECENT_WORDS_KEEP = 6;
+const recentKey = (chatId: number, userId: number) => `${PREFIX}recent:${chatId}:${userId}`;
+
+export type RecentWords = { id: number; t: string; at: number };
+
+/** Adds a message to the person's last two minutes and returns the ones before it, oldest first. */
+export async function recentThenKeep(chatId: number, userId: number, entry: RecentWords): Promise<RecentWords[]> {
+  const key = recentKey(chatId, userId);
+  const [raw] = await kv([
+    ["LRANGE", key, 0, RECENT_WORDS_KEEP - 1],
+    ["LPUSH", key, JSON.stringify(entry)],
+    ["LTRIM", key, 0, RECENT_WORDS_KEEP - 1],
+    ["EXPIRE", key, RECENT_WORDS_SEC],
+  ]);
+  return (Array.isArray(raw) ? raw : [])
+    .map((r) => jsonOf<RecentWords>(r))
+    .filter((w): w is RecentWords => Boolean(w?.t) && typeof w?.id === "number" && w.id !== entry.id && entry.at - w.at <= RECENT_WORDS_SEC * 1000)
+    .reverse();
+}
+
+/** How long the group's admin list is kept before Telegram is asked again. */
+const CHAT_ADMINS_TTL_SEC = 5 * 60;
+
+export async function cachedChatAdmins(chatId: number): Promise<number[] | null> {
+  const [raw] = await kv([["GET", `${PREFIX}admins:${chatId}`]]);
+  const ids = jsonOf<number[]>(raw);
+  return Array.isArray(ids) ? ids.filter((n) => Number.isSafeInteger(n)) : null;
+}
+
+export async function cacheChatAdmins(chatId: number, ids: number[]): Promise<void> {
+  await kv([["SET", `${PREFIX}admins:${chatId}`, JSON.stringify(ids), "EX", CHAT_ADMINS_TTL_SEC]]);
 }

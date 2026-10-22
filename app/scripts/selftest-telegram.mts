@@ -96,7 +96,7 @@ const {
   webhookSecretOk,
   welcomeHtml,
 } = await import("../src/lib/telegramBot/rules");
-const { botConfig, handleUpdate } = await import("../src/lib/telegramBot/bot");
+const { botConfig, handleUpdate, isAdmin } = await import("../src/lib/telegramBot/bot");
 const { DEFAULT_DAILY_DMS, systemPrompt, teamSystemPrompt, userPrompt } = await import("../src/lib/telegramBot/answer");
 const { knowledgeBlock } = await import("../src/lib/telegramBot/knowledge");
 const { isMainnetLive } = await import("../src/lib/mainnet");
@@ -157,6 +157,15 @@ let modelReply = "Sure, Add privately is on Portfolio. Proofs take about 10 to 3
 let modelFailures = 0;
 /** sendPhoto answers with an error while this is set. */
 let photoFails = false;
+/** Buy posts: Telegram says 429 to every post, or a photo never answers (a timeout). */
+let buyMode: "ok" | "429" | "photoTimeout" = "ok";
+/** A buy post (photo or text) naming this transaction is refused. */
+let refuseTx = "";
+/** Who Telegram lists as the group's admins; null when it can't say. */
+let chatAdmins: number[] | null = null;
+/** The stubbed Robinhood Chain: its head and the $GLOAM transfers out of the PoolManager. */
+let chainHead = 0;
+const buyLogs: { transactionHash: string; blockNumber: string; data: string; topics: string[] }[] = [];
 /** What the "should I answer this?" check says. */
 let classifierReply = "NO";
 /** Files Telegram would serve, by file_id. */
@@ -184,6 +193,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     calls.push({ host: url.host, method, body, headers });
     if (method === "sendMessage") everySend.push({ host: url.host, method, body, headers });
     if (method === "getMe") return reply({ ok: true, result: BOT });
+    if (method === "getChatAdministrators") {
+      return reply(chatAdmins ? { ok: true, result: chatAdmins.map((id) => ({ status: "administrator", user: { id, is_bot: false, first_name: "Admin" } })) } : { ok: false });
+    }
+    if (method === "sendMessage" || method === "sendPhoto") {
+      const said = String(body.text ?? body.caption ?? "");
+      if (buyMode === "429") {
+        return new Response(JSON.stringify({ ok: false, error_code: 429, description: "Too Many Requests: retry after 30", parameters: { retry_after: 30 } }), { status: 429 });
+      }
+      if (refuseTx && said.includes(refuseTx)) return new Response(JSON.stringify({ ok: false, error_code: 400, description: "Bad Request" }), { status: 400 });
+      if (buyMode === "photoTimeout" && method === "sendPhoto") throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }
     if (method === "sendMessage") return reply({ ok: true, result: { message_id: nextId++ } });
     if (method === "deleteMessage") return reply({ ok: true, result: true });
     if (method === "banChatMember") return reply({ ok: true, result: true });
@@ -200,6 +220,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (method === "setWebhook") return reply({ ok: true, result: true });
     return reply({ ok: false });
   }
+  if (url.host === "rpc.mainnet.chain.robinhood.com") {
+    const q = body as { method: string; params: { fromBlock: string; toBlock: string; topics: (string | null)[] }[] };
+    calls.push({ host: url.host, method: `rpc:${q.method}`, body, headers });
+    if (q.method === "eth_blockNumber") return reply({ result: `0x${chainHead.toString(16)}` });
+    if (q.method === "eth_getLogs") {
+      const { fromBlock, toBlock, topics } = q.params[0]!;
+      const inRange = buyLogs.filter((l) => parseInt(l.blockNumber, 16) >= parseInt(fromBlock, 16) && parseInt(l.blockNumber, 16) <= parseInt(toBlock, 16));
+      return reply({ result: topics[1] ? inRange : [] });
+    }
+    if (q.method === "eth_getTransactionByHash") return reply({ result: { from: `0x${"12".repeat(20)}` } });
+  }
+  if (url.host === "api.dexscreener.com") return reply({ pairs: [{ priceUsd: "0.5", marketCap: 100000, liquidity: { usd: 1 } }] });
   if (url.host === "redis.test") {
     // an Upstash that has spent its quota: every command comes back with an error
     const cmds = JSON.parse(String(init?.body ?? "[]")) as unknown[];
@@ -232,6 +264,8 @@ function reset() {
   classifierReply = "NO";
   modelFailures = 0;
   photoFails = false;
+  buyMode = "ok";
+  refuseTx = "";
   // each test starts with fresh answer limits (they live in process memory here)
   (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
 }
@@ -551,7 +585,8 @@ await test("replies: RobinScan links to a transaction or an address may go out",
   const policy = { handles: [], mainnetLive: true };
   const tx = "It's on RobinScan: https://robin.etherscan.io/tx/0x30b76ac0aa16f0f5a5a5f6b7e0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7c300";
   assert.equal(cleanReply(tx, policy), tx);
-  assert.ok((cleanReply("Check robin.etherscan.io/address/0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8 for your wallet.", policy) ?? "").includes("robin.etherscan.io"));
+  const asked = { ...policy, askerText: "my wallet 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8 shows nothing" };
+  assert.ok((cleanReply("Check robin.etherscan.io/address/0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8 for your wallet.", asked) ?? "").includes("robin.etherscan.io"));
   assert.equal((cleanReply("See robin.etherscan.io/login to connect.", policy) ?? "").includes("robin.etherscan.io"), false, "only tx and address pages");
   assert.ok(knowledgeBlock(false, true).includes("https://robin.etherscan.io"), "the facts name RobinScan");
   assert.ok(!knowledgeBlock(false, true).includes("blockscout"));
@@ -563,7 +598,8 @@ await test("replies: the real $GLOAM contract and its pages go out; a fake one n
   assert.equal(cleanReply(card, { ...policy, team: true }), card, "a team chat takes it too");
   assert.equal(cleanReply("The CA is 0xDcD885F5c60b3aD49F6D58718696417314e8724e.", policy), null, "one character off is fake");
   assert.equal(cleanReply("Buy it at orynth.dev/projects/someone_else", policy), null);
-  assert.ok(cleanReply("Send test ETH to 0x1234567890abcdef1234567890abcdef12345678 from the faucet.", policy), "a wallet address in the group is fine");
+  assert.equal(cleanReply("Send test ETH to 0x1234567890abcdef1234567890abcdef12345678 from the faucet.", policy), null, "never 'send ... to 0x...'");
+  assert.ok(cleanReply("Your wallet 0x1234567890abcdef1234567890abcdef12345678 is fine.", { ...policy, askerText: "is 0x1234567890abcdef1234567890abcdef12345678 ok?" }), "the asker's own address may come back");
   assert.equal(cleanReply("$GLOAM is at $0.05 now.", policy), null, "no prices in the group either");
   assert.ok(cleanReply("$GLOAM is live on mainnet, on Robinhood Chain.", policy), "the token really is on mainnet");
 });
@@ -1165,7 +1201,7 @@ await test("buy alerts: each buy goes out as the token image with its text, and 
   const { BUY_IMAGE, buyText, postBuy } = await import("../src/lib/telegramBot/buys");
   const text = buyText({ amount: 500, usd: 110, buyer: "0x18f93000000000000000000000000000000a3c2c", tx: "0xdef", price: 0.22, marketCap: 215260 });
   reset();
-  assert.equal(await postBuy(GROUP, TOPIC.buys, text), true);
+  assert.deepEqual(await postBuy(GROUP, TOPIC.buys, text), { ok: true });
   const photo = calls.filter((x) => x.method === "sendPhoto");
   assert.equal(photo.length, 1);
   assert.equal(photo[0]!.body.photo, BUY_IMAGE, "the $GLOAM image, by its public URL");
@@ -1174,20 +1210,104 @@ await test("buy alerts: each buy goes out as the token image with its text, and 
   assert.equal(photo[0]!.body.message_thread_id, TOPIC.buys);
   assert.equal(sends().length, 0, "no second, text-only post");
   // the next buy reuses the picture Telegram already holds
-  assert.equal(await postBuy(GROUP, TOPIC.buys, text), true);
+  assert.deepEqual(await postBuy(GROUP, TOPIC.buys, text), { ok: true });
   assert.equal(calls.filter((x) => x.method === "sendPhoto").pop()!.body.photo, "buy-big");
   // the photo fails: the same text goes out on its own, so the buy is never lost
   reset();
   photoFails = true;
-  assert.equal(await postBuy(GROUP, TOPIC.buys, text), true);
+  assert.deepEqual(await postBuy(GROUP, TOPIC.buys, text), { ok: true });
   assert.equal(sends().length, 1);
   assert.equal(sends()[0]!.body.text, text);
   assert.equal(sends()[0]!.body.message_thread_id, TOPIC.buys);
   // too long for a caption: straight to text
   reset();
-  assert.equal(await postBuy(GROUP, TOPIC.buys, "x".repeat(1100)), true);
+  assert.deepEqual(await postBuy(GROUP, TOPIC.buys, "x".repeat(1100)), { ok: true });
   assert.equal(calls.filter((x) => x.method === "sendPhoto").length, 0);
   assert.equal(sends().length, 1);
+});
+
+await test("buy alerts: six a check, a failed post stops the check there, Telegram's wait is kept, no buy twice", async () => {
+  const { pollBuys } = await import("../src/lib/telegramBot/buys");
+  const { buysLastBlock, setBuysLastBlock } = await import("../src/lib/telegramBot/store");
+  const tx = (n: number) => `0x${n.toString(16).padStart(64, "0")}`;
+  const buy = (n: number, block: number) =>
+    buyLogs.push({ transactionHash: tx(n), blockNumber: `0x${block.toString(16)}`, data: `0x${(10n ** 21n).toString(16)}`, topics: [] });
+  const posts = () => calls.filter((x) => x.method === "sendPhoto" || x.method === "sendMessage");
+  const postedTx = () => posts().map((x) => String(x.body.caption ?? x.body.text).match(/tx\/(0x[0-9a-f]+)/)?.[1]);
+
+  // eight buys in eight blocks: six go out, the next check takes the rest
+  reset();
+  buyLogs.length = 0;
+  chainHead = 2000;
+  await setBuysLastBlock(1000);
+  for (let i = 1; i <= 8; i++) buy(i, 1000 + i);
+  assert.equal(await pollBuys(GROUP, true), 6);
+  assert.equal(await buysLastBlock(), 1006);
+  assert.equal(await pollBuys(GROUP, true), 2);
+  assert.equal(await buysLastBlock(), 2000);
+  assert.deepEqual(postedTx(), [1, 2, 3, 4, 5, 6, 7, 8].map(tx), "each buy once, in order");
+
+  // a check that starts from an older place (a slow run, a retry) posts nothing twice
+  reset();
+  await setBuysLastBlock(1000);
+  assert.equal(await pollBuys(GROUP, true), 0);
+  assert.equal(posts().length, 0, "every one of them is claimed");
+
+  // Telegram says 429: nothing is lost, the cursor waits at the first buy, and checks pause for its wait
+  reset();
+  buyLogs.length = 0;
+  chainHead = 3000;
+  await setBuysLastBlock(2000);
+  buy(21, 2101);
+  buy(22, 2102);
+  buyMode = "429";
+  assert.equal(await pollBuys(GROUP, true), 0);
+  assert.equal(await buysLastBlock(), 2100, "the next check starts at the buy that failed");
+  assert.equal(posts().length, 1, "it stops at the first refusal, and never retries the photo as text");
+  buyMode = "ok";
+  calls.length = 0;
+  assert.equal(await pollBuys(GROUP, true), 0, "still inside Telegram's 30 second wait");
+  assert.equal(posts().length, 0);
+  await kv([["DEL", "gloam:tg:v1:buys:pause"]]);
+  assert.equal(await pollBuys(GROUP, true), 2, "after the wait both go out");
+  assert.deepEqual(postedTx(), [tx(21), tx(22)]);
+
+  // one post refused for good: the ones before it stay posted, it and the rest wait
+  reset();
+  buyLogs.length = 0;
+  chainHead = 4000;
+  await setBuysLastBlock(3000);
+  buy(31, 3001);
+  buy(32, 3002);
+  buy(33, 3003);
+  refuseTx = tx(32);
+  assert.equal(await pollBuys(GROUP, true), 1);
+  assert.equal(await buysLastBlock(), 3001);
+  refuseTx = "";
+  calls.length = 0;
+  assert.equal(await pollBuys(GROUP, true), 2);
+  assert.deepEqual(postedTx(), [tx(32), tx(33)], "the first one is not posted again");
+
+  // a photo that times out may be up already: no text copy, and it counts as posted
+  reset();
+  buyLogs.length = 0;
+  chainHead = 5000;
+  await setBuysLastBlock(4000);
+  buy(41, 4001);
+  buyMode = "photoTimeout";
+  assert.equal(await pollBuys(GROUP, true), 1);
+  assert.equal(calls.filter((x) => x.method === "sendMessage").length, 0, "no second post after a timeout");
+  assert.equal(await buysLastBlock(), 5000);
+
+  // out of time: the check leaves the rest to the next one
+  reset();
+  buyLogs.length = 0;
+  chainHead = 6000;
+  await setBuysLastBlock(5000);
+  buy(51, 5001);
+  assert.equal(await pollBuys(GROUP, true, -1), 0);
+  assert.equal(await buysLastBlock(), 5000);
+  buyLogs.length = 0;
 });
 
 await test("moderation: the fake migration airdrop and role names; reporters are never removed; /unban", async () => {
@@ -1359,6 +1479,147 @@ await test("moderation: the owner's removal note quotes the message, defanged", 
   assert.ok(note.includes('"Gloam airdrop is live, claim at gloam-airdrop[.]xyz before it ends"'), note);
   assert.ok(!note.includes("gloam-airdrop.xyz"), "nothing in the note can be tapped");
   assert.ok(note.includes("/unban 1300"));
+});
+
+await test("moderation: a warning stuck on a scam is still the scam; quotes and forwards of someone else's are reports", async () => {
+  // the scam in the sender's own words, with a warning word added: removed
+  for (const text of [
+    "DM me for support. Beware of scammers, admins never DM first",
+    "Kindly message me for help with your wallet. Report any issue to me",
+    "Validate your wallet here: gloam-claim.xyz . careful with fake links",
+    "Claim your airdrop at gloamdrop.xyz before it ends. Watch out for spam",
+  ]) {
+    assert.ok(!pointsAtScam(text), text);
+    reset();
+    await handleUpdate(upd(inTopic(TOPIC.general, text, user(1400, "Mike"))));
+    assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 1400, text);
+  }
+  // a reply quoting something harmless does not shield the sender's own scam
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "Kindly DM me for quick assistance with your wallet", user(1401, "Mike"), { quote: { text: "hi" } })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 1401);
+  // "never", "fake" or "careful" no longer switch the migration check off
+  assert.equal(scamReason("Redeploying the CA. Airdrop to holders. DM me. Don't miss out, careful only real holders get it"), "migration_airdrop");
+  assert.equal(scamReason("Redeploying the CA. Airdrop to holders. DM me. This is not fake"), "migration_airdrop");
+  // reporting what a scam says, in the member's own warning: down, the member stays
+  for (const text of ["is this a scam? he said dm me for support", "beware, someone posted that we are redeploying the CA, airdrop to holders, DM me to register"]) {
+    assert.ok(pointsAtScam(text), text);
+    reset();
+    await handleUpdate(upd(inTopic(TOPIC.general, text, user(1402, "Ife"))));
+    assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, text);
+  }
+  // a forward of the member's own scam message is their scam
+  reset();
+  const self = user(1403, "Mike");
+  await handleUpdate(upd(inTopic(TOPIC.general, "DM me for support, I can fix your wallet", self, { forward_origin: { type: "user", sender_user: self } })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 1403);
+});
+
+await test("moderation: dodges are read the way people read them", async () => {
+  // "?" only counts in the sentence it ends
+  assert.equal(scamReason("We are redeploying the CA. Airdrop for all holders. Ready? Send me your tx hash to register"), "migration_airdrop");
+  assert.equal(roleScam({ first_name: "Dev Mike" }, "We are redeploying the CA. Airdrop for all holders. Ready? Send me your tx hash to register"), "role_impostor");
+  assert.equal(scamReason("will there be an airdrop after the redeploy? do we register somewhere?"), null, "a real question still is one");
+  assert.equal(roleScam({ first_name: "Dev" }, "is there an airdrop? send me the link pls"), null);
+  // spacing, digits, full-width and look-alike letters
+  for (const text of [
+    "We are re deploying the CA. Airdrop to all holders. Send me your tx hash to register.",
+    "We are r3deploying the CA. Airdr0p to all holders. S3nd me your tx hash.",
+    "\uff32\uff45\uff44\uff45\uff50\uff4c\uff4f\uff59\uff49\uff4e\uff47 the CA. \uff21\uff49\uff52\uff44\uff52\uff4f\uff50 to holders. \uff24\uff2d \uff4d\uff45",
+    "Redepl\u043eying the CA. Airdr\u043ep to holders. DM me",
+    "We're redeploying the CA, snapshot taken, hit me up to get your tokens",
+  ]) {
+    assert.equal(scamReason(text), "migration_airdrop", text);
+  }
+  assert.equal(scamReason("d m me for support"), "dm_support");
+  assert.equal(scamReason("D.M me for support with your wallet"), "dm_support");
+  assert.equal(scamReason("cla1m your a1rdrop at gloam-drop.xyz"), "phishing_link");
+  // amounts, hashes and addresses are left as they are
+  assert.equal(scamReason("sent 0.1eth to 0x1234567890abcdef1234567890abcdef12345678, tx 0xabababababababababababababababababababababababababababababababab"), null);
+
+  // names posing as the team, however they are written
+  for (const u of [
+    { first_name: "Adm1n" },
+    { first_name: "\u1d0f\u1d21\u0274\u1d07\u0280" },
+    { first_name: "A d m i n" },
+    { first_name: "Customer Support" },
+    { first_name: "Gloam HQ" },
+    { first_name: "Gloam Bot" },
+    { first_name: "Glim Bot" },
+    { first_name: "gloamtrade" },
+    { first_name: "Gloam.trade" },
+    { first_name: "Gloam Official" },
+    { first_name: "G l o a m" },
+    { first_name: "Ada", username: "gloam_bot" },
+  ]) {
+    assert.ok(impersonates(u), JSON.stringify(u));
+  }
+  for (const u of [{ first_name: "Glimmer" }, { first_name: "Gloamer" }, { first_name: "Admin Mike" }, { first_name: "Dev" }, { first_name: "Team Rocket" }, { first_name: "Ada", username: "gloamfan" }, { first_name: "Gloam fan" }]) {
+    assert.ok(!impersonates(u), JSON.stringify(u));
+  }
+
+  // a scam split over two messages, from one person: both come down, the account goes
+  reset();
+  const mike = user(1500, "Mike");
+  const first = inTopic(TOPIC.general, "We are redeploying the CA due to an exploit. Airdrop to all holders 1:1 at snapshot.", mike);
+  await handleUpdate(upd(first));
+  assert.equal(deletes().length, 0, "the first half alone is not a scam");
+  const second = inTopic(TOPIC.general, "Send me your tx hash to register.", mike);
+  await handleUpdate(upd(second));
+  assert.deepEqual(deletes().map((x) => x.body.message_id).sort(), [first.message_id, second.message_id].sort());
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 1500);
+  // two people's halves are never joined
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "We are redeploying the CA due to an exploit. Airdrop to all holders 1:1 at snapshot.", user(1501, "Tunde"))));
+  await handleUpdate(upd(inTopic(TOPIC.general, "Send me your tx hash to register.", user(1502, "Ada"))));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0);
+});
+
+await test("moderation: the group's real admins are never removed; admins match by id first", async () => {
+  // Telegram lists 1600 as an admin of the group: a role name and DM talk are theirs to use
+  reset();
+  chatAdmins = [1600];
+  await handleUpdate(upd(inTopic(TOPIC.general, "All holders DM me for the airdrop list", user(1600, "Gloam Support"))));
+  assert.equal(deletes().length, 0);
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0);
+  // asked once, then kept for a few minutes
+  await handleUpdate(upd(inTopic(TOPIC.general, "Owner here, DM me", user(1600, "Owner"))));
+  assert.equal(calls.filter((x) => x.method === "getChatAdministrators").length, 1);
+  // anyone else posing still goes
+  await handleUpdate(upd(inTopic(TOPIC.general, "hi all", user(1601, "Gloam Support"))));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 1601);
+  // /spam on a real admin's message removes nobody
+  reset();
+  const said = inTopic(TOPIC.general, "everyone DM me now", user(1600, "Ops"));
+  await handleUpdate(upd(said));
+  await handleUpdate(upd(inTopic(TOPIC.general, "/spam", user(1602, "Troll"), { reply_to_message: said })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0);
+  assert.equal(deletes().length, 0);
+  chatAdmins = null;
+  await kv([["DEL", `gloam:tg:v1:admins:${GROUP}`]]);
+
+  // a handle given with an id matches only that id
+  const saved = process.env.TELEGRAM_ADMIN_HANDLES;
+  process.env.TELEGRAM_ADMIN_HANDLES = "@duke_admin, yomi_ops:600";
+  const c = botConfig();
+  assert.deepEqual(c.admins, ["duke_admin", "yomi_ops"]);
+  assert.ok(c.adminIds.includes(600));
+  assert.ok(isAdmin({ id: 600, username: "someone_else" }, c), "by id, whatever the handle");
+  assert.ok(!isAdmin({ id: 9999, username: "Yomi_Ops" }, c), "the handle alone, on another account, is not the admin");
+  assert.ok(isAdmin({ id: 4242, username: "duke_admin" }, c), "a handle with no id still matches");
+  process.env.TELEGRAM_ADMIN_HANDLES = saved;
+});
+
+await test("replies: the copycat CA, other people's addresses and 'send to 0x' never go out", () => {
+  const COPY = "0x661041EE2bD13D1d9E5DFAB5d2D0CA7d1E9f8629";
+  assert.equal(cleanReply(`That one, ${COPY}, is the honeypot. Use gloam.trade/token instead.`, policy), "Use gloam.trade/token instead.");
+  assert.equal(cleanReply(`Check robin.etherscan.io/address/${COPY.toLowerCase()} for details.`, policy), null, "in any letter case, a RobinScan link too");
+  assert.equal(cleanReply(`That one, ${COPY}, is the fake.`, { ...policy, askerText: `is ${COPY} legit?` }), null, "even when the asker posted it");
+  assert.equal(cleanReply(`The fake is ${COPY}.`, { ...policy, team: true }), null, "and in team chats");
+  assert.equal(cleanReply("Send your USDG to 0x1111111111111111111111111111111111111111 and it will be refunded.", policy), null);
+  assert.equal(cleanReply(`Send it to ${CA} to buy.`, policy), null, "not even to the real CA");
+  assert.equal(cleanReply("Your funds are at 0x2222222222222222222222222222222222222222 now.", policy), null, "an address nobody here posted");
+  assert.equal(cleanReply(`The CA is ${CA}.`, policy), `The CA is ${CA}.`);
 });
 
 await test("buy alerts: a burst carries over to the next check, never split inside a block", async () => {

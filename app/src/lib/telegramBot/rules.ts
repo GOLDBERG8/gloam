@@ -438,6 +438,31 @@ export const WARN_ONLY: ReadonlySet<ScamReason> = new Set<ScamReason>(["dm_lure"
 /** "No presale and no team allocation": a drop word said to deny one. */
 const NO_DROP = /\bno\s+(?:presales?|(?:team\s+|insider\s+)?allocations?|airdrops?|whitelists?|giveaways?)\b/gi;
 
+/** Letters that only look Latin: Cyrillic and Greek ones, and small capitals ("\u1d0f\u1d21\u0274\u1d07\u0280"), which have no plain form in Unicode. */
+const LOOKALIKE: Record<string, string> = {
+  "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0445": "x", "\u0456": "i", "\u04cf": "l",
+  "\u03bf": "o", "\u03b1": "a", "\u0131": "i", "\u217c": "l",
+};
+const SMALL_CAPS = "\u1d00\u0299\u1d04\u1d05\u1d07\ua730\u0262\u029c\u026a\u1d0a\u1d0b\u029f\u1d0d\u0274\u1d0f\u1d18\ua7af\u0280\ua731\u1d1b\u1d1c\u1d20\u1d21\u028f\u1d22";
+[..."abcdefghijklmnopqrstuvwyz"].forEach((l, i) => (LOOKALIKE[SMALL_CAPS[i]!] = l));
+
+/** Words split to dodge a filter: "re deploying", "air drop", "pre sale". */
+const SPLIT_WORD = /\b(re|air|white|give|pre|snap)[\s-]+(deploy\w*|launch\w*|drop\w*|list\w*|away\w*|sale\w*|shot\w*|fund\w*|imburs\w*)/gi;
+
+/**
+ * Text as a reader sees it: full-width and fancy letters made plain, hidden
+ * characters out, look-alike letters swapped, and letters spaced out
+ * ("D M me", "A d m i n") or split ("re deploying") joined up again.
+ */
+function plain(raw: string): string {
+  return norm(raw)
+    .normalize("NFKC")
+    .replace(/[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/g, "")
+    .replace(/./gu, (ch) => LOOKALIKE[ch] ?? LOOKALIKE[ch.toLowerCase()] ?? ch)
+    .replace(/\b[a-z](?:[ .][a-z]){1,}\b(?![.]?[a-z])/gi, (m) => m.replace(/[ .]/g, ""))
+    .replace(SPLIT_WORD, "$1$2");
+}
+
 /**
  * The words that get scored: Glim's own token card and facts taken out (they
  * name presales and allocations next to Orynth and DEX Screener links, and a
@@ -445,21 +470,35 @@ const NO_DROP = /\bno\s+(?:presales?|(?:team\s+|insider\s+)?allocations?|airdrop
  * place of codes ("[claim link]" is a payment, not a claim pitch).
  */
 function scorable(raw: string): string {
-  let text = norm(raw);
+  let text = plain(raw);
   for (const line of tokenCard().split("\n")) if (line.trim()) text = text.split(line.trim()).join(" ");
   return text.replace(new RegExp(SHARED_LABEL.source, "gi"), " ").replace(NO_DROP, " ");
 }
 
-/** "We are redeploying the CA", "migrating to a new contract", "v2 token". */
+const DIGIT_LETTER: Record<string, string> = { "0": "o", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b" };
+
+/**
+ * The text, and the text with digits inside words read as letters
+ * ("r3deploying airdr0p", "cla1m"), once with 1 as i and once as l. Numbers,
+ * amounts ("0.1eth") and hex (addresses, hashes) are left alone.
+ */
+function spellings(text: string): string[] {
+  const as = (one: string) =>
+    text.replace(/[a-z0-9@]+/gi, (w) => {
+      if (/^0x/i.test(w) || /^[0-9a-f]{16,}$/i.test(w) || /^\d+[a-z]*$/i.test(w) || (w.match(/[a-z]/gi)?.length ?? 0) < 2) return w;
+      return w.replace(/(?<=[a-z])[0-9@]|[0-9@](?=[a-z])/gi, (d) => (d === "1" ? one : d === "@" ? "a" : (DIGIT_LETTER[d] ?? d)));
+    });
+  return [...new Set([text, as("i"), as("l")])];
+}
+
+/** "We are redeploying the CA", "migrating to a new contract", "v2 token", "V2 coming". */
 const MIGRATION =
-  /\b(?:re-?deploy\w*|migrat\w*|relaunch\w*|new\s+(?:ca|contract|token)\b|v2\s+(?:token|contract|ca)\b|token\s+swap|contract\s+(?:swap|upgrade))/i;
+  /\b(?:re-?deploy\w*|migrat\w*|relaunch\w*|new\s+(?:ca|contract|token)\b|v2\s+(?:token|contract|ca|is\s+(?:coming|live)|coming|launch\w*)\b|token\s+swap|contract\s+(?:swap|upgrade))/i;
 /** What the fake migration promises: an airdrop, a snapshot, compensation. */
 const DROP = /\b(?:airdrop\w*|snapshot\w*|compensat\w*|reimburs\w*|refund\w*|claim\w*)/i;
 /** ...and the catch: talk to me privately, send me your transaction, register. */
 const PRIVATE_ASK =
-  /\b(?:send|dm|pm|inbox|message|text|contact)\s+(?:me|us)\b|\b(?:send|share|drop)\s+(?:your\s+|any\s+)?(?:tx|txn|transaction)\b|\bto\s+register\b|\bregister\s+(?:for|your)\b/i;
-/** Safety advice about that same scam ("the team will never migrate the CA and ask you to DM them"). */
-const SAFETY_WORDS = /\b(?:never|scam\w*|fake|beware|careful)\b/i;
+  /\b(?:send|dm|pm|inbox|message|text|contact)\s+(?:me|us)\b|\bhit\s+(?:me|us)\s+up\b|\b(?:send|share|drop)\s+(?:your\s+|ur\s+|any\s+)?(?:tx|txn|transaction)\b|\bto\s+register\b|\bregister\s+(?:for|your)\b/i;
 /** "Send me 0.1 ETH", "transfer your funds to this wallet": a pull for money. An address is not money: "send me your address" is how people test payments. */
 const FUNDS_PULL =
   /\b(?:send|transfer|pay)\s+(?:me|us)\s+(?:your\s+|ur\s+|some\s+|the\s+|any\s+|a\s+(?:little|bit|few)\s+(?:of\s+)?|[\d.,]+\s*)?(?:funds|money|cash|eth|usdc|usdt|usdg|crypto|tokens?|\$gloam|gas)\b(?!\s*(?:address|addr|code|link|hash))|\b(?:send|transfer|move)\s+(?:your\s+|ur\s+|the\s+|all\s+(?:your\s+)?|[\d.,]+\s*)?(?:funds|money|eth|usdc|usdt|usdg|crypto|tokens?|\$gloam)\s+to\s+(?:me|us|my|our|this|the\s+(?:new|safe|secure|below)|0x)/i;
@@ -473,15 +512,48 @@ const DROP_PROMISE = /\b(?:airdrop\w*|snapshot\w*|compensat\w*|reimburs\w*|refun
 /** A drop pitch: "airdrop", "presale", "allocation". Claims, rewards and snapshots are everyday talk here. */
 const DROP_WORDS = /\b(?:airdrop|giveaway|whitelist|presale|allocation)\w*/i;
 
+/** The sentence a match sits in, from the stop before it to the stop after it. */
+function sentenceAt(text: string, index: number, length: number): string {
+  const start = Math.max(...[".", "!", "?", "\n"].map((c) => text.lastIndexOf(c, index - 1))) + 1;
+  const after = text.slice(index + length).search(/[.!?\n]/);
+  return text.slice(start, after < 0 ? text.length : index + length + after + 1);
+}
+
+/** A match in a question ("is there an airdrop?", "can someone DM me?"): asked, not said. */
+function asked(text: string, index: number, length: number): boolean {
+  const s = sentenceAt(text, index, length);
+  return /\?\s*$/.test(s) || ASKING.test(s);
+}
+
+/** Said outright somewhere in the text: a match that is neither negated in its clause nor in a question. */
+function says(re: RegExp, text: string): boolean {
+  for (const m of text.matchAll(new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`))) {
+    if (!negated(text, m.index, m[0]) && !asked(text, m.index, m[0].length)) return true;
+  }
+  return false;
+}
+
 /**
  * Obvious scam patterns, conservative on purpose: asking for a seed phrase or
  * private key, offering support in DMs, "validate/sync/rectify your wallet",
  * or a link to a strange site next to wallet, claim or airdrop wording. Safety
  * advice ("never share your seed phrase") and people asking for help are not
- * flagged.
+ * flagged. Look-alike letters, digits for letters ("airdr0p") and spaced-out
+ * words are read the way a person reads them.
  */
 export function scamReason(raw: string): ScamReason | null {
   const text = scorable(raw);
+  let warned: ScamReason | null = null;
+  for (const t of spellings(text)) {
+    const why = wordsReason(t, text);
+    if (why && !WARN_ONLY.has(why)) return why;
+    warned ??= why;
+  }
+  return warned;
+}
+
+/** scamReason for one spelling of the text; links are read from the text as written. */
+function wordsReason(text: string, written: string): ScamReason | null {
   for (const re of [SECRET_REQUEST, SECRET_QUESTION]) {
     const m = re.exec(text);
     if (m && !negated(text, m.index, m[0])) return "secret_request";
@@ -498,15 +570,14 @@ export function scamReason(raw: string): ScamReason | null {
   if (shill && !negated(text, shill.index, shill[0])) return "promo_spam";
   // a shilling service that wants a private chat
   const pitches = text.match(new RegExp(PROMO.source, "gi"))?.length ?? 0;
-  if (pitches && DM_ASK.test(text) && (pitches >= 2 || !text.includes("?"))) return "promo_spam";
+  if (pitches && DM_ASK.test(text) && (pitches >= 2 || says(DM_ASK, text))) return "promo_spam";
   const fix = WALLET_FIX.exec(text);
   if (fix && !negated(text, fix.index, fix[0])) return "wallet_fix";
-  // "we are redeploying the CA ... airdrop to holders ... send me your tx hash to register"
-  if (MIGRATION.test(text) && DROP.test(text) && PRIVATE_ASK.test(text) && !SAFETY_WORDS.test(text) && !text.includes("?")) {
-    return "migration_airdrop";
-  }
+  // "we are redeploying the CA ... airdrop to holders ... send me your tx hash to register";
+  // safety words around it ("careful", "not fake") change nothing, a negation or a question in its own sentence does
+  if (says(MIGRATION, text) && says(DROP, text) && says(PRIVATE_ASK, text)) return "migration_airdrop";
   if (LURE.test(text)) {
-    for (const link of text.match(LINK_RE) ?? []) {
+    for (const link of written.match(LINK_RE) ?? []) {
       const { host } = hostOf(link);
       if (!linkAllowed(link) && (host === "t.me" || !SAFE_HOSTS.some((s) => onHost(host, s)))) return "phishing_link";
     }
@@ -516,12 +587,6 @@ export function scamReason(raw: string): ScamReason | null {
     return "dm_lure";
   }
   return null;
-}
-
-/** A match that is not negated in its own clause. */
-function says(re: RegExp, text: string): boolean {
-  const m = re.exec(text);
-  return Boolean(m && !negated(text, m.index, m[0]));
 }
 
 /**
@@ -574,50 +639,61 @@ export function secretLeak(text: string): Leak | null {
 
 // ---------------------------------------------------------------- impersonation and moderation
 
-/** Look-alike letters scammers swap in: digits, Cyrillic and Greek letters that read as Latin ones. */
-const CONFUSABLE: Record<string, string> = {
-  "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "l",
-  "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0445": "x", "\u0456": "i", "\u04cf": "l",
-  "\u03bf": "o", "\u03b1": "a", "\u0131": "i", "\u217c": "l",
-};
+/** Digits and signs scammers swap in for letters. A 1 reads as an l ("GIoam") or an i ("Adm1n"), so names are read both ways. */
+const CONFUSABLE: Record<string, string> = { "0": "o", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "l" };
 
-/** Lower case, accents off, look-alikes swapped, separators other than "|" turned into spaces. */
-function skeleton(raw: string): string {
+/**
+ * Lower case, accents off, look-alikes swapped (small capitals and Cyrillic
+ * letters too), separators other than "|" turned into spaces, and letters
+ * spaced out ("A d m i n") joined up. `one` is what a 1 reads as.
+ */
+function skeleton(raw: string, one: "l" | "i" = "l"): string {
   return raw
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/./gu, (ch) => CONFUSABLE[ch] ?? ch)
+    .replace(/./gu, (ch) => LOOKALIKE[ch] ?? ch)
+    .replace(/./gu, (ch) => (ch === "1" ? one : (CONFUSABLE[ch] ?? ch)))
     .replace(/[^a-z|]+/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/\b[a-z](?: [a-z]\b)+/g, (m) => m.replace(/ /g, ""))
     .trim();
 }
 
-const STAFF = /\b(?:support|admin|admins|team|official|mod|mods|moderator|help|helpdesk|desk|care|service|services|announcements?|airdrop|claims?|rewards?|verify|verification|owner|owners|dev|devs|developer|developers|founder|cofounder|ceo|cto)\b/;
+/** A name read with a 1 as an l, and as an i. */
+function skeletons(raw: string): string[] {
+  return [...new Set([skeleton(raw, "l"), skeleton(raw, "i")])];
+}
+
+const STAFF = /\b(?:support|admin|admins|team|official|mod|mods|moderator|help|helpdesk|desk|care|service|services|announcements?|airdrop|claims?|rewards?|verify|verification|owner|owners|dev|devs|developer|developers|founder|cofounder|ceo|cto|bot|bots|hq|trade)\b/;
+/** "gloamtrade", "glimbot", "gloamsupport": the brand and a staff word run together. */
+const BRAND_STAFF_WORD = /\b(?:gloam|glim)(?:support|admins?|team|official|mods?|help|helpdesk|desk|care|service|bots?|hq|trade|devs?|owner)\b/;
 
 /** Words that name a role in a project rather than a person. */
 const ROLE = new Set([
   "owner", "owners", "dev", "devs", "developer", "developers", "founder", "founders", "cofounder", "ceo", "cto", "coo",
   "team", "admin", "admins", "mod", "mods", "moderator", "moderators", "support", "official", "officials", "helpdesk", "staff",
 ]);
-/** Little words a role-only name can carry: "The Owner", "Co Founder", "Real Admin". */
-const ROLE_FILLER = new Set(["the", "co", "real", "project", "main", "head", "lead"]);
+/** Little words a role-only name can carry: "The Owner", "Co Founder", "Real Admin", "Customer Support". */
+const ROLE_FILLER = new Set(["the", "co", "real", "project", "main", "head", "lead", "customer", "help", "desk", "care", "service", "services", "tech", "technical"]);
 /** "Dev" alone is also a common first name, so on its own it is never a role-only name. */
 const PERSONAL = new Set(["dev", "devs"]);
 
-function nameWords(u: { first_name?: string; last_name?: string }): string[] {
-  return skeleton(`${u.first_name ?? ""} ${u.last_name ?? ""}`).replace(/\|/g, " ").split(" ").filter(Boolean);
+/** The name's words, once for each way it reads ("Adm1n" as "admln" and "admin"). */
+function nameWords(u: { first_name?: string; last_name?: string }): string[][] {
+  return skeletons(`${u.first_name ?? ""} ${u.last_name ?? ""}`).map((n) => n.replace(/\|/g, " ").split(" ").filter(Boolean));
 }
 
 /**
  * A display name that is only a role: "Owner", "Owner DEV", "Admin", "Support
- * Team", "The Founder". Nobody in the group is called that but someone posing
- * as the team. "Dev" alone stays a name.
+ * Team", "The Founder", "Customer Support". Nobody in the group is called that
+ * but someone posing as the team. "Dev" alone stays a name.
  */
 function roleOnlyName(u: { first_name?: string; last_name?: string }): boolean {
-  const words = nameWords(u);
-  const roles = words.filter((w) => ROLE.has(w));
-  return roles.length > 0 && words.every((w) => ROLE.has(w) || ROLE_FILLER.has(w)) && roles.some((w) => !PERSONAL.has(w));
+  return nameWords(u).some((words) => {
+    const roles = words.filter((w) => ROLE.has(w));
+    return roles.length > 0 && words.every((w) => ROLE.has(w) || ROLE_FILLER.has(w)) && roles.some((w) => !PERSONAL.has(w));
+  });
 }
 
 /**
@@ -630,14 +706,14 @@ function roleOnlyName(u: { first_name?: string; last_name?: string }): boolean {
  * an admin.
  */
 export function roleScam(u: { first_name?: string; last_name?: string }, raw: string): ScamReason | null {
-  const words = nameWords(u);
+  const words = nameWords(u).flat();
   if (!words.some((w) => ROLE.has(w))) return null;
-  const text = scorable(raw);
-  if (text.includes("?") || ASKING.test(text)) return null;
-  if (realPull(text)) return "role_impostor";
+  const texts = spellings(scorable(raw));
+  if (texts.some(realPull)) return "role_impostor";
   const strongRole = words.some((w) => ROLE.has(w) && !PERSONAL.has(w));
-  const migration = MIGRATION.test(text) && DROP_PROMISE.test(text);
-  return migration || (strongRole && (DM_ASK.test(text) || DROP_WORDS.test(text))) ? "role_pitch" : null;
+  const pitch = (t: string) =>
+    (says(MIGRATION, t) && says(DROP_PROMISE, t)) || (strongRole && (says(DM_ASK, t) || says(DROP_WORDS, t)));
+  return texts.some(pitch) ? "role_pitch" : null;
 }
 
 /** What a member's message comes down for, a removal before a warning: the words' own reason, or the name's. */
@@ -657,7 +733,7 @@ export function defanged(raw: string, max = 160): string | null {
   const text = scanCodes(raw).masked;
   if (secretLeak(text)) return "[a seed phrase or key, not repeated]";
   const t = text
-    .replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, " ")
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, " ")
     .replace(/:\/\//g, "[:]//")
     .replace(/(?<=[\p{L}\p{N}_-])\.(?=\p{L}{2,})/gu, "[.]")
     .replace(/@(?=\w)/g, "[@]")
@@ -668,17 +744,30 @@ export function defanged(raw: string, max = 160): string | null {
   return t.length > max ? `${t.slice(0, max - 3).trimEnd()}...` : t;
 }
 
-/**
- * Someone pointing at a scam rather than running one: warning about it,
- * calling it out, reporting it. Their message can repeat the scam's words, so
- * it may be taken down, but it never costs them their place in the group.
- */
 const POINTING =
   /\b(?:scam(?:mer|mers|s|ming)?|fake|impostor|imposter|impersonat\w*|report(?:ed|ing)?|beware|watch\s+out|careful|phishing|spam(?:mer|mers|ming)?|bot\s+account|red\s+flag|don'?t\s+(?:trust|click|dm|reply|send|fall))\b/i;
-export function pointsAtScam(text: string): boolean {
-  return POINTING.test(norm(text));
+/** "it says ...", "he said ...", "someone posted ...", and anything in quote marks: someone else's words, reported. */
+const REPORTED =
+  /\b(?:says|said|saying|tells|told\s+(?:me|us|people|everyone)|wrote|writes|posted|posting|messaged|dm'?d|dmed|is\s+like)\b[^.!?\n]*|"[^"\n]*"/gi;
+
+/** What the sender says themselves: the message without the words it reports. */
+export function ownWords(text: string): string {
+  return norm(text).replace(REPORTED, " ");
 }
-const STAFF_IN_HANDLE = /(?:support|admin|team|official|mod|help|desk|care|service|airdrop|claim|reward|verify|trade|hq)/;
+
+/**
+ * Someone pointing at a scam rather than running one: a warning word in the
+ * message ("scam", "beware", "fake"), and the scam's words only where they
+ * report it ("it says all holders DM me"). Their message may be taken down,
+ * but it never costs them their place in the group. A scam with a warning
+ * stuck on ("DM me for support. Beware of scammers") is still the scam:
+ * those words are the sender's own. `scam` scores the own words (scamReason
+ * unless the caller weighs the name too).
+ */
+export function pointsAtScam(text: string, scam: (s: string) => unknown = scamReason): boolean {
+  return POINTING.test(norm(text)) && !scam(ownWords(text));
+}
+const STAFF_IN_HANDLE = /(?:support|admin|team|official|mod|help|desk|care|service|airdrop|claim|reward|verify|trade|hq|bot)/;
 
 /**
  * A member passing themselves off as Gloam, Glim or the team: named "Gloam" or
@@ -688,16 +777,20 @@ const STAFF_IN_HANDLE = /(?:support|admin|team|official|mod|help|desk|care|servi
  * Team"). Only ever checked for people who are not the owner or an admin.
  */
 export function impersonates(u: { first_name?: string; last_name?: string; username?: string }): boolean {
-  const name = skeleton(`${u.first_name ?? ""} ${u.last_name ?? ""}`);
-  const words = name.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
-  // a capital I looks like an l: "GIoam" reads as Gloam
-  const asL = words.replace(/i/g, "l");
-  const brandOnly = /^(?:gloam|glim)(?: (?:gloam|glim))*$/.test(words) || /^gloam$/.test(asL);
-  const brandStaff = (/\b(?:gloam|glim)\b/.test(words) || /\bgloam\b/.test(asL)) && STAFF.test(words);
-  const teamTag = name.includes("|") && /\bgloam\b/.test(asL);
-  const handle = skeleton(u.username ?? "").replace(/\s+/g, "");
-  const badHandle = /(?:gloam|glim)/.test(handle) && STAFF_IN_HANDLE.test(handle.replace(/gloam|glim/g, " "));
-  return brandOnly || brandStaff || teamTag || badHandle || roleOnlyName(u);
+  const posing = skeletons(`${u.first_name ?? ""} ${u.last_name ?? ""}`).some((name) => {
+    const words = name.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+    // a capital I looks like an l: "GIoam" reads as Gloam
+    const asL = words.replace(/i/g, "l");
+    const brandOnly = /^(?:gloam|glim)(?: (?:gloam|glim))*$/.test(words) || /^gloam$/.test(asL);
+    const brandStaff = ((/\b(?:gloam|glim)\b/.test(words) || /\bgloam\b/.test(asL)) && STAFF.test(words)) || BRAND_STAFF_WORD.test(words);
+    const teamTag = name.includes("|") && /\bgloam\b/.test(asL);
+    return brandOnly || brandStaff || teamTag;
+  });
+  const badHandle = skeletons(u.username ?? "").some((h) => {
+    const handle = h.replace(/\s+/g, "");
+    return /(?:gloam|glim)/.test(handle) && STAFF_IN_HANDLE.test(handle.replace(/gloam|glim/g, " "));
+  });
+  return posing || badHandle || roleOnlyName(u);
 }
 
 export type ModAction = { remove: boolean };
@@ -983,6 +1076,8 @@ export type ReplyPolicy = {
   secrets?: string[];
   /** Mainnet is live, so "mainnet is live" is true and may go out. Left out: worked out from the clock and the pools. */
   mainnetLive?: boolean;
+  /** What the asker wrote: a 0x address they posted may come back in a group reply. */
+  askerText?: string;
 };
 
 /** A link the helper may share: the website, the group, the X account, $GLOAM's pages on Orynth, DEX Screener and CoinGecko. */
@@ -999,16 +1094,28 @@ function linkAllowed(link: string): boolean {
 }
 
 const ANY_EVM_ADDRESS = /\b0x[0-9a-fA-F]{40}\b/g;
-const TOKEN_TALK = /\b(?:tokens?|ca|contract|coin|buy|sell|chart|ticker|listing|launch(?:ed)?)\b|\$[A-Za-z]{2,10}\b/i;
 const ABOUT_TOKEN = /\$gloam\b|\btoken\b/i;
+/** "Send your USDG to 0x...": the helper never tells anyone to send money to an address. */
+const SEND_TO_ADDRESS = /\b(?:send|transfer|deposit|move|pay)\b[^.!?\n]*?\bto\s+(?:(?:this|that|the|my|our)\s+(?:address|wallet)\s*:?\s*)?0x[0-9a-fA-F]{40}\b/i;
+
+/** $GLOAM's contract and Gloam's mainnet pools: the addresses the helper may name on its own. */
+function ownAddress(a: string): boolean {
+  const l = a.toLowerCase();
+  if (l === GLOAM_TOKEN.address.toLowerCase()) return true;
+  return ([4663, 4217] as const).some((id) => mainnetPool(id)?.pool.toLowerCase() === l);
+}
 
 /**
- * A 0x address other than $GLOAM's. In a team chat that is any of them; in the
- * group, one next to token words, so a mistyped or fake contract never goes out.
+ * A 0x address that must not go out: the known copycat token in any letter
+ * case (a RobinScan link to it too), "send ... to 0x...", and any address
+ * other than $GLOAM's (team chats) or other than $GLOAM's, a pool's or one the
+ * asker posted (the group), so a mistyped or fake contract never goes out.
  */
-function wrongAddress(s: string, team: boolean): boolean {
-  const others = (s.match(ANY_EVM_ADDRESS) ?? []).filter((a) => a.toLowerCase() !== GLOAM_TOKEN.address.toLowerCase());
-  return others.length > 0 && (team || TOKEN_TALK.test(s));
+function wrongAddress(s: string, team: boolean, posted: Set<string>): boolean {
+  const found = (s.match(ANY_EVM_ADDRESS) ?? []).map((a) => a.toLowerCase());
+  if (found.some((a) => COPYCAT.has(a)) || SEND_TO_ADDRESS.test(s)) return true;
+  if (team) return found.some((a) => a !== GLOAM_TOKEN.address.toLowerCase());
+  return found.some((a) => !ownAddress(a) && !posted.has(a));
 }
 
 /**
@@ -1020,11 +1127,11 @@ const AUDITED_CLAIM =
   /\b(?:is|are|was|were|been|got|fully|already|externally|independently|professionally)\s+(?:fully\s+|externally\s+|independently\s+|professionally\s+)?audited\b/gi;
 
 /** One sentence breaks a rule that dropping it fixes: an off-list link, email or handle, a wrong address, a price, a mainnet claim or date, an "audited" claim, posing as a person. */
-function brokenSentence(s: string, team: boolean, okHandles: Set<string>, mainnetLive = false): boolean {
+function brokenSentence(s: string, team: boolean, okHandles: Set<string>, mainnetLive = false, posted = new Set<string>()): boolean {
   if ((s.match(LINK_RE) ?? []).some((l) => !linkAllowed(l))) return true;
   if ((s.match(EMAIL_RE) ?? []).some((e) => e.toLowerCase() !== "hello@gloam.trade")) return true;
   for (const m of s.matchAll(HANDLE_RE)) if (!okHandles.has(m[1]!.toLowerCase())) return true;
-  if (wrongAddress(s, team)) return true;
+  if (wrongAddress(s, team, posted)) return true;
   if (TOKEN_PRICE.test(s)) return true;
   for (const m of s.matchAll(AUDITED_CLAIM)) if (!negated(s, m.index ?? 0, m[0])) return true;
   // $GLOAM really is on Robinhood Chain mainnet; the app is the part that is not, until mainnet is live
@@ -1107,7 +1214,8 @@ export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
   if ([...scanCodes(text).kinds].some((k) => k !== "address" && k !== "request_link")) return null;
   const okHandles = new Set(["gloamtrade", "gloamhq", ...policy.handles.map((h) => h.toLowerCase())]);
   const live = policy.mainnetLive ?? isMainnetLive();
-  const r = dropBroken(text, (s) => brokenSentence(s, Boolean(policy.team), okHandles, live));
+  const posted = new Set((policy.askerText?.match(ANY_EVM_ADDRESS) ?? []).map((a) => a.toLowerCase()));
+  const r = dropBroken(text, (s) => brokenSentence(s, Boolean(policy.team), okHandles, live, posted));
   if (!r.kept) return null;
   if (!policy.team && r.dropped * 2 > r.kept + r.dropped) return null;
   return r.text;

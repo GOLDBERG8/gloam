@@ -67,7 +67,7 @@ export type TgMessage = {
   left_chat_member?: TgUser;
   via_bot?: TgUser;
   /** Set on a forwarded message: who it first came from (a user, a group or a channel). */
-  forward_origin?: { type: "user" | "hidden_user" | "chat" | "channel"; chat?: TgChat; sender_chat?: TgChat };
+  forward_origin?: { type: "user" | "hidden_user" | "chat" | "channel"; chat?: TgChat; sender_chat?: TgChat; sender_user?: TgUser };
   /** A reply quoting a message from another chat (a channel post, usually). */
   external_reply?: { origin?: { type: string }; chat?: TgChat; text?: string; caption?: string };
   quote?: { text?: string };
@@ -112,9 +112,16 @@ function token(): string | null {
   return process.env.TELEGRAM_BOT_TOKEN?.trim() || null;
 }
 
-async function call<T>(method: string, body: Record<string, unknown>): Promise<{ ok: boolean; result?: T }> {
+/**
+ * A call's outcome. `refused`: Telegram answered with an error, so nothing
+ * went out; `retryAfter`: it asked to wait that many seconds (a 429). A
+ * timeout or a network error is neither: the call may still have gone through.
+ */
+type CallResult<T> = { ok: boolean; result?: T; refused?: boolean; retryAfter?: number };
+
+async function call<T>(method: string, body: Record<string, unknown>): Promise<CallResult<T>> {
   const t = token();
-  if (!t) return { ok: false };
+  if (!t) return { ok: false, refused: true };
   try {
     const res = await fetch(`${API}/bot${t}/${method}`, {
       method: "POST",
@@ -123,15 +130,26 @@ async function call<T>(method: string, body: Record<string, unknown>): Promise<{
       cache: "no-store",
       signal: AbortSignal.timeout(8_000),
     });
-    const json = (await res.json().catch(() => null)) as { ok?: boolean; result?: T } | null;
-    return { ok: Boolean(res.ok && json?.ok), result: json?.result };
+    const json = (await res.json().catch(() => null)) as
+      | { ok?: boolean; result?: T; description?: string; parameters?: { retry_after?: number } }
+      | null;
+    if (res.ok && json?.ok) return { ok: true, result: json.result };
+    const wait = Number(json?.parameters?.retry_after ?? /retry after (\d+)/i.exec(json?.description ?? "")?.[1]);
+    return { ok: false, refused: true, ...(Number.isFinite(wait) && wait > 0 ? { retryAfter: wait } : {}) };
   } catch {
     return { ok: false };
   }
 }
 
-/** Sends a message with link previews off. Returns the new message id, or null. */
-export async function sendMessage(chatId: number, text: string, opts: SendOptions = {}): Promise<number | null> {
+/** A post that went out, or why not: refused (with Telegram's wait on a 429), or unknown after a timeout. */
+export type Sent<T> = ({ ok: true } & T) | { ok: false; refused: boolean; retryAfter?: number };
+
+function failed(r: CallResult<unknown>): Sent<never> {
+  return { ok: false, refused: Boolean(r.refused), ...(r.retryAfter ? { retryAfter: r.retryAfter } : {}) };
+}
+
+/** Sends a message with link previews off, and says what became of it. */
+export async function trySendMessage(chatId: number, text: string, opts: SendOptions = {}): Promise<Sent<{ messageId: number }>> {
   const body: Record<string, unknown> = {
     chat_id: chatId,
     text,
@@ -141,7 +159,13 @@ export async function sendMessage(chatId: number, text: string, opts: SendOption
   if (opts.replyTo) body.reply_parameters = { message_id: opts.replyTo, allow_sending_without_reply: true };
   if (opts.parseMode) body.parse_mode = opts.parseMode;
   const r = await call<{ message_id: number }>("sendMessage", body);
-  return r.ok && r.result ? r.result.message_id : null;
+  return r.ok && r.result ? { ok: true, messageId: r.result.message_id } : failed(r);
+}
+
+/** Sends a message with link previews off. Returns the new message id, or null. */
+export async function sendMessage(chatId: number, text: string, opts: SendOptions = {}): Promise<number | null> {
+  const r = await trySendMessage(chatId, text, opts);
+  return r.ok ? r.messageId : null;
 }
 
 /** Telegram's limit on a photo caption. */
@@ -151,23 +175,29 @@ export const CAPTION_MAX = 1024;
  * Sends a photo (a public https URL or a file_id Telegram already holds) with
  * a plain-text caption. Returns the new message id and the photo's file_id,
  * so the next post can send the same picture without Telegram fetching it
- * again; null on any failure.
+ * again, or why it failed.
  */
 export async function sendPhoto(
   chatId: number,
   photo: string,
   caption: string,
   opts: SendOptions = {},
-): Promise<{ messageId: number; fileId: string | null } | null> {
-  if (caption.length > CAPTION_MAX) return null;
+): Promise<Sent<{ messageId: number; fileId: string | null }>> {
+  if (caption.length > CAPTION_MAX) return { ok: false, refused: true };
   const body: Record<string, unknown> = { chat_id: chatId, photo, caption };
   if (opts.threadId) body.message_thread_id = opts.threadId;
   if (opts.replyTo) body.reply_parameters = { message_id: opts.replyTo, allow_sending_without_reply: true };
   if (opts.parseMode) body.parse_mode = opts.parseMode;
   const r = await call<{ message_id: number; photo?: TgPhotoSize[] }>("sendPhoto", body);
-  if (!r.ok || !r.result) return null;
+  if (!r.ok || !r.result) return failed(r);
   const sizes = r.result.photo ?? [];
-  return { messageId: r.result.message_id, fileId: sizes.length ? sizes[sizes.length - 1]!.file_id : null };
+  return { ok: true, messageId: r.result.message_id, fileId: sizes.length ? sizes[sizes.length - 1]!.file_id : null };
+}
+
+/** The group's admins' ids (bots included), or null when Telegram can't say. */
+export async function getChatAdministrators(chatId: number): Promise<number[] | null> {
+  const r = await call<TgChatMember[]>("getChatAdministrators", { chat_id: chatId });
+  return r.ok && Array.isArray(r.result) ? r.result.map((m) => m.user.id) : null;
 }
 
 /** Deletes a message. Works only while the bot is an admin with Delete messages. */
