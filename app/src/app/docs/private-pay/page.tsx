@@ -102,8 +102,9 @@ export default function DocsPrivatePayPage() {
           before anything is sent.
         </li>
         <li>
-          <strong>If the sender spends it first</strong>, the move cannot land and
-          the claim is dropped. Ask them to send it again.
+          <strong>If it was claimed somewhere else first</strong> (on another
+          device, or by the sender taking it back), the move cannot land and the
+          claim is dropped. Check with the person who sent it.
         </li>
         <li>
           Agents get the same guarantee from the SDK&apos;s sweep: a payee calls{" "}

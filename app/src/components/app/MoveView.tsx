@@ -1231,7 +1231,7 @@ export function MoveView() {
         });
       } else if (r.status === "already_spent") {
         setImportOk({
-          text: `The person who sent ${label} moved it before it was secured, so it is not in your balance. Ask them to send it again.`,
+          text: `${label} was claimed somewhere else before it was secured here, so it is not in this balance. If that was not you on another device, check with the person who sent it.`,
           note: claim?.note,
           tone: "danger",
         });
@@ -1331,8 +1331,10 @@ export function MoveView() {
     );
     const label = formatAssetLabel(pack.amountWei, asset);
     const demo = readDemo();
+    // Spent before this browser saw it: most often claimed already (on another
+    // device, or by whoever had the link), sometimes taken back by the sender.
     const moved =
-      "This payment was already moved, most likely by the person who sent it, so there is nothing left to claim. Ask them to send it again.";
+      "This payment has already been claimed, so there is nothing left here. If you claimed it on another device, it is in your balance there. If not, check with the person who sent it.";
 
     const known = loadLocalNotes(address).find(
       (n) => n.commitment.toLowerCase() === commitment.toLowerCase()
