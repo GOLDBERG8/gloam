@@ -15,6 +15,7 @@
 import type { Address, Hex } from "viem";
 import { NATIVE_ASSET } from "./shield";
 import { cleanPaymentNote } from "./paymentNote";
+import { codeFromLinkText } from "./claimLink";
 
 export type NotePackage = {
   v: 1;
@@ -261,7 +262,7 @@ async function decodeCode(
   passphrase?: string,
   opts?: { tryTagDecrypt?: boolean }
 ): Promise<NotePackage> {
-  const s = code.replace(LINK_DASH, "$1.");
+  const s = codeFromLinkText(code);
 
   // Pay-to-tag sealed package, only recipient’s receive key opens it
   if (s.startsWith("gloam2t.")) {
@@ -410,9 +411,9 @@ function repairLetterCase(body: string): string {
 }
 
 /** A code inside a longer paste: up to the first character a code never has. */
-// A code, with the dot after its prefix ("gloam1.") or the hyphen links use instead ("gloam1-").
-const CODE_IN_TEXT = /gloam(?:2t|1e|1)[.-][A-Za-z0-9_\-.]+/;
-const LINK_DASH = /^(gloam1e|gloam2t|gloam1)-/;
+// A code, with the dot after its prefix ("gloam1.") or what links write
+// instead ("gloam1=", older "gloam1-"); lib/claimLink codeFromLinkText reads those back.
+const CODE_IN_TEXT = /gloam(?:2t|1e|1)[.=-][A-Za-z0-9_\-.=]+/;
 
 /**
  * The payment code in whatever was pasted. People paste the whole claim link
@@ -450,7 +451,7 @@ export function wrappedCodeCandidates(input: string): string[] {
   let joined = pieces[0]!.match(CODE_IN_TEXT)?.[0] ?? "";
   if (joined.length !== pieces[0]!.length) return [];
   for (let i = 1; i < pieces.length && i <= 8; i++) {
-    const piece = pieces[i]!.match(/^[A-Za-z0-9_\-.]+/)?.[0];
+    const piece = pieces[i]!.match(/^[A-Za-z0-9_\-.=]+/)?.[0];
     if (!piece) break;
     joined += piece;
     out.push(joined.replace(/\.+$/, ""));
@@ -463,11 +464,11 @@ export function paymentCodeIn(input: string): string {
   if (input.trim().startsWith("{")) return input.trim(); // an old JSON package
   const s = pastedText(input);
   const found = s.match(CODE_IN_TEXT) ?? s.replace(/\s+/g, "").match(CODE_IN_TEXT);
-  if (found) return found[0].replace(/\.+$/, "").replace(LINK_DASH, "$1.");
+  if (found) return codeFromLinkText(found[0].replace(/[.=]+$/, ""));
   // "gloam1." lost on the way: a plain code's body is base64 JSON, which starts
   // "eyJ". WhatsApp cut links at "gloam1" and left the rest as text starting
-  // "%2EeyJ", so a leading dot is dropped too.
-  const body = s.replace(/\s+/g, "").replace(/^\.+/, "");
+  // "%2EeyJ", so a leading dot (or "=" or "-") is dropped too.
+  const body = s.replace(/\s+/g, "").replace(/^[.=-]+/, "");
   if (/^eyJ[A-Za-z0-9_-]{20,}$/.test(body)) return PREFIX_PLAIN + body;
   return s;
 }

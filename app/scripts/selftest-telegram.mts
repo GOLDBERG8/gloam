@@ -27,6 +27,7 @@
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-telegram.mts
  */
 import assert from "node:assert/strict";
+import { claimLinkFor } from "../src/lib/claimLink";
 
 process.env.GLOAM_PARTNERS_STORE = "memory";
 delete process.env.UPSTASH_REDIS_REST_URL;
@@ -668,6 +669,11 @@ await test("codes: each format is told apart", () => {
   assert.deepEqual(kinds(CLAIM), ["claim_link"]);
   assert.deepEqual(kinds(CLAIM_LOCKED), ["locked"]);
   assert.deepEqual(kinds(`${CLAIM.replace("#claim=", "%23claim%3D")}`), ["claim_link"]);
+  // links as the app writes them now: "=" for the dot, escapes in the body
+  assert.deepEqual(kinds(claimLinkFor(PLAIN, "robinhood-mainnet")), ["claim_link"]);
+  assert.deepEqual(kinds(claimLinkFor(LOCKED, "robinhood-mainnet")), ["locked"]);
+  assert.equal(scanCodes(`here ${claimLinkFor(PLAIN, "robinhood-mainnet")} enjoy`).masked, "here [claim link] enjoy");
+  assert.deepEqual(kinds(`claim ${PLAIN.replace(".", "=")}`), ["plain"]);
   assert.deepEqual(kinds(REQUEST), ["request_link"]);
   assert.deepEqual(kinds(`pay ${ADDR} or claim ${PLAIN}`), ["address", "plain"]);
   assert.equal(scanCodes(`send to ${ADDR} pls`).masked, "send to [Gloam address] pls");

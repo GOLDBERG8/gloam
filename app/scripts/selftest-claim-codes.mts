@@ -40,16 +40,37 @@ for (const [label, text] of reads) {
 await assert.rejects(decodeNotePackage(`${code.slice(0, 40)}\nHello there`), "a cut-off code is refused");
 n++;
 
-// Links carry only characters chat apps keep inside a URL: no "." and no "%2E" after the prefix.
+// Links carry only letters, digits and "=" after "#claim=": WhatsApp ended
+// links at a ".", a "%2E" and a "-" there.
 const link = claimLinkFor(code, "robinhood-mainnet");
 const frag = link.slice(link.indexOf("#"));
-assert.match(frag, /^#claim=gloam1-[A-Za-z0-9_-]+$/, "the link's code is all URL-safe characters");
+assert.match(frag, /^#claim=gloam1=[A-Za-z0-9=]+$/, "the link's code is letters, digits and =");
 assert.equal(codeFromHash(frag), code, "the link reads back as the code");
 assert.ok(isClaimLink(codeFromHash(frag)!) && isClaimLink(frag.slice(7)), "both spellings count as claim links");
 assert.equal((await decodeNotePackage(link)).secret, pack.secret, "the whole new link claims");
-assert.equal((await decodeNotePackage(frag.slice(7))).secret, pack.secret, "the hyphen code alone claims");
-assert.ok(appClaimPath(code, "robinhood-mainnet").includes("#claim=gloam1-"));
+assert.equal((await decodeNotePackage(frag.slice(7))).secret, pack.secret, "the link's code alone claims");
+assert.ok(appClaimPath(code, "robinhood-mainnet").includes("#claim=gloam1="));
 n += 6;
+
+// A body with "-", "_" and "." (locked and sealed codes have them) comes back exactly.
+for (const odd of ["gloam1e.ab-cd_efQ", "gloam2t.x_y-z.w9", "gloam1.-_.-_"]) {
+  const f = claimLinkFor(odd, "tempo-mainnet");
+  const h = f.slice(f.indexOf("#"));
+  assert.match(h, /^#claim=gloam(1e|2t|1)=[A-Za-z0-9=]+$/, `${odd} links with letters, digits and = only`);
+  assert.equal(codeFromHash(h), odd, `${odd} reads back`);
+  assert.equal(paymentCodeIn(f), odd, `${odd} reads back from the pasted link`);
+  n += 3;
+}
+
+// Links sent with a hyphen after the prefix (for a few hours on 22 Oct) still read,
+// and so does the text WhatsApp left when it cut one at the hyphen.
+const dashLink = `https://www.gloam.trade/claim?net=robinhood-mainnet#claim=${code.replace(".", "-")}`;
+assert.equal(codeFromHash(dashLink.slice(dashLink.indexOf("#"))), code);
+assert.equal((await decodeNotePackage(dashLink)).secret, pack.secret);
+const dashLeft = code.replace(/^gloam1\./, "-");
+assert.equal(paymentCodeIn(dashLeft), code, "the text WhatsApp left after a hyphen reads as the code");
+assert.equal((await decodeNotePackage(`https://www.gloam.trade/claim?net=robinhood-mainnet#claim=gloam1\n${dashLeft}`)).secret, pack.secret);
+n += 4;
 
 // Links sent before this keep working: the dot, and the dot written %2E.
 const oldPct = `https://www.gloam.trade/claim?net=robinhood-mainnet#claim=${code.replace(".", "%2E")}`;

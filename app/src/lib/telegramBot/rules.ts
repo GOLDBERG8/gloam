@@ -855,11 +855,12 @@ const CODE_LABEL: Record<CodeKind, string> = {
 
 const NOT_URL = String.raw`[^\s<>"'()\[\]]`;
 /** A link with #claim=<code> (or the encoded %23claim%3D), all of it. */
-const CLAIM_LINK_RE = new RegExp(`${NOT_URL}*?(?:#|%23)claim(?:=|%3D)([A-Za-z0-9_.%-]{20,})${NOT_URL}*`, "gi");
+const CLAIM_LINK_RE = new RegExp(`${NOT_URL}*?(?:#|%23)claim(?:=|%3D)([A-Za-z0-9_.%=-]{20,})${NOT_URL}*`, "gi");
 /** A payment request link: to=gloamr1... in the fragment or the query. */
 const REQUEST_LINK_RE = new RegExp(`${NOT_URL}*?[#?&]to(?:=|%3D)gloamr1\\.[A-Za-z0-9_-]{20,}${NOT_URL}*`, "gi");
 /** A bare code. Real ones run to dozens or hundreds of characters; "gloamr1." in a sentence is not one. */
-const RAW_CODE_RE = /(?<![A-Za-z0-9])gloam(r1|2t|1e|1)\.[A-Za-z0-9_-]{20,}/g;
+// Links write the dot after the prefix as "=" (older ones "-"), so a code cut from one is still caught.
+const RAW_CODE_RE = /(?<![A-Za-z0-9])gloam(r1|2t|1e|1)[.=-][A-Za-z0-9_=-]{20,}/g;
 const RAW_KIND: Record<string, CodeKind> = { r1: "address", "2t": "sealed", "1e": "locked", "1": "plain" };
 
 /** What a claim link carries: a locked or sealed code keeps its own rules. */
@@ -870,8 +871,8 @@ function claimLinkKind(inner: string): { kind: CodeKind; label: string } {
   } catch {
     // keep it as written
   }
-  if (code.startsWith("gloam1e.")) return { kind: "locked", label: "[claim link with a locked code]" };
-  if (code.startsWith("gloam2t.")) return { kind: "sealed", label: "[claim link to a sealed payment]" };
+  if (/^gloam1e[.=-]/.test(code)) return { kind: "locked", label: "[claim link with a locked code]" };
+  if (/^gloam2t[.=-]/.test(code)) return { kind: "sealed", label: "[claim link to a sealed payment]" };
   return { kind: "claim_link", label: CODE_LABEL.claim_link };
 }
 
