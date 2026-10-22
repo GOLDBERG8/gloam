@@ -1,0 +1,108 @@
+<!doctype html>
+<!-- The one-page merch spec. Rendered to public/merch/gloam-merch-spec-sheet.png by render-pngs.mjs (A4 at 300 dpi). -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Gloam merch spec</title>
+<style>
+@font-face { font-family: "Aeonik"; src: url("../../public/fonts/Aeonik-Light.woff2") format("woff2"); font-weight: 300; }
+@font-face { font-family: "Aeonik"; src: url("../../public/fonts/Aeonik-Regular.woff2") format("woff2"); font-weight: 400; }
+@font-face { font-family: "Aeonik"; src: url("../../public/fonts/Aeonik-Medium.woff2") format("woff2"); font-weight: 500; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1240px; height: 1754px; background: #fff; color: #0b0c0e; font-family: Aeonik, system-ui, sans-serif; }
+.page { padding: 72px 76px 60px; height: 100%; display: flex; flex-direction: column; }
+header { display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 28px; border-bottom: 1px solid #e4e6e9; }
+header img { height: 30px; }
+header .meta { text-align: right; font-size: 15px; color: #5f636a; line-height: 1.5; }
+h1 { font-weight: 300; font-size: 54px; letter-spacing: -0.025em; margin-top: 34px; }
+.lede { margin-top: 10px; font-size: 18px; color: #5f636a; max-width: 760px; line-height: 1.5; }
+.diagrams { margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.diagrams figure { background: #f3f4f5; border-radius: 14px; padding: 14px 14px 12px; }
+.diagrams svg { width: 100%; height: 330px; display: block; }
+.diagrams figcaption { font-size: 14px; color: #34373c; margin-top: 8px; line-height: 1.4; }
+table { margin-top: 36px; width: 100%; border-collapse: collapse; font-size: 15.5px; line-height: 1.45; }
+th { text-align: left; font-weight: 500; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #5f636a; padding: 0 12px 10px 0; border-bottom: 1px solid #cfd2d6; }
+td { vertical-align: top; padding: 15px 12px 15px 0; border-bottom: 1px solid #e4e6e9; color: #34373c; }
+td:first-child { color: #0b0c0e; font-weight: 500; width: 128px; }
+td.qty { white-space: nowrap; color: #0b0c0e; }
+.colours { margin-top: 26px; display: flex; gap: 22px; font-size: 13.5px; color: #34373c; }
+.colours span { display: inline-flex; align-items: center; gap: 8px; }
+.colours i { width: 18px; height: 18px; border-radius: 50%; display: inline-block; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12); }
+footer { margin-top: auto; padding-top: 22px; border-top: 1px solid #e4e6e9; display: flex; justify-content: space-between; font-size: 14px; color: #5f636a; }
+.dim { stroke: #2e7d53; stroke-width: 1; fill: none; }
+.dimt { fill: #2e7d53; font-size: 11px; font-family: Aeonik, system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <img src="../../public/merch/gloam-lockup-ink.svg" alt="Gloam" />
+    <div class="meta">Merch spec, first run<br />October 2026 · gloam.trade/merch</div>
+  </header>
+
+  <h1>The Gloam box</h1>
+  <p class="lede">Printed, not embroidered, except the cap. One mark, one line, one black box. Sizes are finished sizes in centimetres, placements on a size L.</p>
+
+  <div class="diagrams">
+    <figure>
+      <svg viewBox="0 0 600 680"><path d="M228 46 Q160 58 88 76 C66 120 40 168 18 214 L90 250 C96 246 102 240 106 234 C104 360 100 500 100 626 Q300 640 500 626 C500 500 496 360 494 234 C498 240 504 246 510 250 L582 214 C560 168 534 120 512 76 Q440 58 372 46 C352 104 248 104 228 46Z" fill="#fff" stroke="#979ba2" stroke-width="2"/>
+        <g transform="translate(352 160) scale(1.5)"><path fill="#0b0c0e" fill-rule="evenodd" d="M9 0H23A9 9 0 0 1 32 9V23A9 9 0 0 1 23 32H9A9 9 0 0 1 0 23V9A9 9 0 0 1 9 0ZM18.5 4H23.5A3.5 3.5 0 0 1 27 7.5V12.5A3.5 3.5 0 0 1 23.5 16H18.5A3.5 3.5 0 0 1 15 12.5V7.5A3.5 3.5 0 0 1 18.5 4Z"/></g>
+        <path class="dim" d="M352 228H400M352 222v12M400 222v12"/><text class="dimt" x="356" y="250" style="font-size:22px">6 cm</text>
+        <path class="dim" d="M300 184H352" stroke-dasharray="4 4"/><text class="dimt" x="296" y="176" style="font-size:22px">9 cm</text>
+      </svg>
+      <figcaption>Tee and hoodie, front. The mark, 6 cm, wearer's left chest, 9 cm from centre, 18 cm below the shoulder.</figcaption>
+    </figure>
+    <figure>
+      <svg viewBox="0 0 600 680"><path d="M228 46 Q160 58 88 76 C66 120 40 168 18 214 L90 250 C96 246 102 240 106 234 C104 360 100 500 100 626 Q300 640 500 626 C500 500 496 360 494 234 C498 240 504 246 510 250 L582 214 C560 168 534 120 512 76 Q440 58 372 46 C330 64 270 64 228 46Z" fill="#fff" stroke="#979ba2" stroke-width="2"/>
+        <rect x="228" y="114" width="144" height="12" rx="2" fill="#0b0c0e"/>
+        <path class="dim" d="M228 146H372M228 140v12M372 140v12"/><text class="dimt" x="270" y="172" style="font-size:22px">18 cm</text>
+        <path class="dim" d="M400 58V114" stroke-dasharray="4 4"/><text class="dimt" x="410" y="94" style="font-size:22px">8 cm</text>
+      </svg>
+      <figcaption>Tee, back. The line, 18 cm wide, 8 cm below the collar.</figcaption>
+    </figure>
+    <figure>
+      <svg viewBox="0 0 520 680"><path d="M170 220 C170 50 350 50 350 220" stroke="#979ba2" stroke-width="2" fill="none"/><rect x="70" y="210" width="380" height="420" rx="5" fill="#fff" stroke="#979ba2" stroke-width="2"/>
+        <g transform="translate(215 350) scale(2.8125)"><path fill="#0b0c0e" fill-rule="evenodd" d="M9 0H23A9 9 0 0 1 32 9V23A9 9 0 0 1 23 32H9A9 9 0 0 1 0 23V9A9 9 0 0 1 9 0ZM18.5 4H23.5A3.5 3.5 0 0 1 27 7.5V12.5A3.5 3.5 0 0 1 23.5 16H18.5A3.5 3.5 0 0 1 15 12.5V7.5A3.5 3.5 0 0 1 18.5 4Z"/></g>
+        <rect x="150" y="556" width="220" height="14" rx="2" fill="#0b0c0e"/>
+        <path class="dim" d="M150 590H370"/><text class="dimt" x="234" y="614" style="font-size:22px">22 cm</text>
+        <path class="dim" d="M215 452H305"/><text class="dimt" x="236" y="476" style="font-size:22px">9 cm</text>
+      </svg>
+      <figcaption>Tote, 38 × 42 cm. The mark, 9 cm, centred. The line, 22 cm wide, 6 cm above the base.</figcaption>
+    </figure>
+    <figure>
+      <svg viewBox="0 0 416 356"><rect x="48" y="48" width="320" height="260" fill="#fff" stroke="#979ba2" stroke-width="1.5"/>
+        <path d="M48 3H368V48M3 48V308H48M368 48H413V308H368M48 308V353H368V308" fill="none" stroke="#979ba2" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <g transform="translate(178 148) scale(1.875)"><path fill="#0b0c0e" fill-rule="evenodd" d="M9 0H23A9 9 0 0 1 32 9V23A9 9 0 0 1 23 32H9A9 9 0 0 1 0 23V9A9 9 0 0 1 9 0ZM18.5 4H23.5A3.5 3.5 0 0 1 27 7.5V12.5A3.5 3.5 0 0 1 23.5 16H18.5A3.5 3.5 0 0 1 15 12.5V7.5A3.5 3.5 0 0 1 18.5 4Z"/></g>
+        <path class="dim" d="M178 222H238"/><text class="dimt" x="186" y="242" style="font-size:16px">60 mm</text>
+        <text class="dimt" x="58" y="72" style="font-size:16px">Lid top 320 × 260</text>
+      </svg>
+      <figcaption>Box lid. Blind deboss, the mark, 60 mm, centred. Walls 30 mm, turn-ins 15 mm, 3 mm bleed.</figcaption>
+    </figure>
+  </div>
+
+  <table>
+    <thead><tr><th>Piece</th><th>Blank</th><th>Artwork and method</th><th>Colours</th><th>First run</th></tr></thead>
+    <tbody>
+      <tr><td>Tee</td><td>300 gsm heavyweight cotton, garment dyed, boxy fit. Woven neck label.</td><td>Front: the mark, 6 cm, left chest. Back: the line, 18 cm. Screen print or DTF.</td><td>Ink, tonal graphite print (or white). Bone, ink print.</td><td class="qty">20<br />10 Ink, 10 Bone</td></tr>
+      <tr><td>Hoodie</td><td>400 gsm brushed-back cotton fleece, rib cuffs and hem, flat tonal drawcords.</td><td>Front: the mark, 6 cm, left chest. Screen print or DTF. Back plain.</td><td>Ink, tonal graphite print (or white).</td><td class="qty">10<br />Ink</td></tr>
+      <tr><td>Cap</td><td>6 panel washed cotton twill, low profile, strap back with a metal clasp.</td><td>The mark, 4.5 cm, centre front, flat embroidery. Cheaper option: a woven patch, 5 × 4 cm.</td><td>Ink, tonal thread. Bone, ink thread.</td><td class="qty">15</td></tr>
+      <tr><td>Tote</td><td>12 oz cotton canvas, 38 × 42 cm, 65 cm handles.</td><td>The mark, 9 cm, centred. The line, 22 cm. Screen print or DTF.</td><td>Natural, ink print.</td><td class="qty">10</td></tr>
+      <tr><td>Box</td><td>Rigid lift-off lid, 32 × 26 × 9 cm. 1200 gsm board wrapped in matte black paper.</td><td>Lid: blind deboss of the mark, 60 mm. Optional: the lockup, 50 mm, matte black foil on the front wall.</td><td>Matte black.</td><td class="qty">15</td></tr>
+      <tr><td>Inside</td><td>Black tissue. Insert card, A6, 148 × 105 mm, 600 gsm uncoated board.</td><td>Tissue seal: the mark on bone, 40 mm round, die cut. Card printed one colour, both sides.</td><td>Bone card and seal, ink print.</td><td class="qty">15 sets</td></tr>
+    </tbody>
+  </table>
+
+  <div class="colours">
+    <span><i style="background:#0b0c0e"></i>Ink #0B0C0E</span>
+    <span><i style="background:#ece7dd"></i>Bone #ECE7DD</span>
+    <span><i style="background:#3a3d43"></i>Graphite #3A3D43</span>
+    <span><i style="background:#5e646b"></i>Slate #5E646B</span>
+  </div>
+
+  <footer>
+    <span>Box: send the printer these files and ask for their dieline at this size; we drop the art on it.</span>
+    <span>All files: gloam.trade/merch</span>
+  </footer>
+</div>
+</body>
+</html>
