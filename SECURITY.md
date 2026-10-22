@@ -43,4 +43,10 @@ Thank you for looking. Please report privately; don't open a public issue or pos
 - **What to expect:** we aim to reply within 3 days, keep you updated, and credit you once it's fixed if you'd like that.
 - **Rewards:** Gloam does not run a paid bug bounty yet. We'll say so here when that changes.
 
+## Acknowledgments
+
+With thanks to the researchers who have reported issues responsibly.
+
+- **[@mylifechangefa1](https://x.com/mylifechangefa1)** (GitHub [EFCCWEB3](https://github.com/EFCCWEB3)) — SSRF in the MCP server's `gloam_fetch_paid`. The private-address guard classified an IPv4-in-IPv6 address by its text, so an IPv4-mapped address written in hex (e.g. `::ffff:7f00:1`), long form, NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) slipped past it and could reach loopback or cloud-metadata services on a self-hosted server. Affected `@gloamtrade/mcp <= 0.3.0`; fixed in **0.3.1** (classify by the address bytes), with the resolved IP pinned in the connector against DNS rebinding in **0.3.2**, and credential and payment headers dropped on cross-origin redirects in **0.3.3**.
+
 Past reviews and every finding with its status: [`contracts/audit/REMEDIATION.md`](./contracts/audit/REMEDIATION.md).
