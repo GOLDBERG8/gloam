@@ -256,6 +256,7 @@ export async function POST(req: Request) {
       calls[0]!.includes(approveHex) &&
       calls[1]!.includes(shieldHex) &&
       Array.isArray(output?.payments) &&
+      output.payments.length > 0 &&
       output.payments.every((p: Record<string, unknown>) => String(p?.currency).toLowerCase() === asset.toLowerCase() && BigInt(String(p?.minimumAmount ?? -1)) === amount);
     if (!callsOk) return fail(502, ROUTE_BUSY);
   }

@@ -67,6 +67,9 @@ export function lazyWalletConnect(): CreateConnectorFn | null {
   const create = walletConnect({
     projectId: WC_PROJECT_ID,
     showQrModal: false,
+    // The bridge's origin chains are optional: a session from before they were
+    // added stays signed in, and a chain its wallet hasn't approved fails the switch.
+    isNewChainsStale: false,
     metadata: {
       name: "Gloam",
       description: "Private stablecoin payments",

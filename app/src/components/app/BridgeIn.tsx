@@ -28,6 +28,7 @@ import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
 import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { track } from "@/lib/track";
+import { failedBeforeSend, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
 import { useNetwork } from "./NetworkProvider";
 
 const noopSubscribe = () => () => {};
@@ -65,7 +66,17 @@ type PrivateStage =
       progress: string | null;
       error: string | null;
     }
-  | { kind: "sent"; quote: PrivateBridgeQuote; note: LocalNote; payer: string; hash: Hex | null; unsure: boolean }
+  | {
+      kind: "sent";
+      quote: PrivateBridgeQuote;
+      note: LocalNote;
+      payer: string;
+      hash: Hex | null;
+      unsure: boolean;
+      at: number;
+      /** A Solana send we couldn't confirm, past its transaction's life: it can no longer land. */
+      expired?: boolean;
+    }
   | { kind: "landed"; quote: PrivateBridgeQuote }
   | { kind: "late"; quote: PrivateBridgeQuote }
   | { kind: "failed"; quote: PrivateBridgeQuote };
@@ -178,6 +189,7 @@ export function SwapToStableButton({ recipient, onArrived }: { recipient?: strin
           setOpen(false);
           onArrived?.(amount);
         }}
+        onPrivate={() => setOpen(false)}
       />
     </>
   );
@@ -237,12 +249,29 @@ function BridgeSheet({
     Boolean(network.pool) &&
     privateBridgeable(chain) &&
     (chain.kind === "svm" ? Boolean(solWallet) : chain.swap ? true : switchable && Boolean(originChain(chain.id)));
-  const [privateOn, setPrivateOn] = useState(true);
+  // On by default, except the Holdings "Swap to USDG", which asks for a plain swap.
+  const [privateOn, setPrivateOn] = useState(!startOnSwap);
   const privately = canPrivate && privateOn;
   const payerName = solWallet?.name ?? "your wallet";
   const [priv, setPriv] = useState<PrivateStage>({ kind: "idle" });
   // The note and proof for the amount typed, kept until it is sent so a fresh price reuses them.
   const prepared = useRef<{ key: string; note: LocalNote; proof: Hex } | null>(null);
+
+  // Paying from another chain moves the wallet there. Put it back on this
+  // network once that is over (Done, Start over, or the sheet closing any
+  // way), so the rest of the app doesn't ask the person to switch.
+  const switchedAway = useRef(false);
+  const backToNetwork = useCallback(() => {
+    if (!switchedAway.current) return;
+    switchedAway.current = false;
+    if (getAccount(config).chainId === network.chainId) return;
+    void switchChain(config, { chainId: network.chainId as GloamChainId }).catch(() => {
+      /* the wallet can switch later; the app asks when it needs to */
+    });
+  }, [config, network.chainId]);
+  useEffect(() => {
+    if (!open) backToNetwork();
+  }, [open, backToNetwork]);
 
   const matches = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -328,16 +357,22 @@ function BridgeSheet({
   const requestId =
     stage.kind === "address" && !stage.quote.tx
       ? stage.quote.requestId
-      : priv.kind === "sent" && !priv.quote.sameChain
+      : priv.kind === "sent" && (!priv.quote.sameChain || !priv.hash)
         ? priv.quote.requestId
         : null;
+  // An open deposit address can be filled under a newer request (another amount,
+  // an exchange's fee taken off), so the status check also looks the address up.
+  const depositAddress = stage.kind === "address" && !stage.quote.tx ? stage.quote.depositAddress : "";
   const finished = status?.stage === "done" || status?.stage === "failed" || status?.stage === "refunded";
   useEffect(() => {
     if (!open || !requestId || finished) return;
     let live = true;
     const check = async () => {
       try {
-        const res = await fetch(`/api/bridge/status?requestId=${requestId}`, { cache: "no-store" });
+        const res = await fetch(
+          `/api/bridge/status?requestId=${requestId}${depositAddress ? `&depositAddress=${encodeURIComponent(depositAddress)}` : ""}`,
+          { cache: "no-store" }
+        );
         const json = (await res.json()) as { ok: boolean; data?: BridgeStatus };
         if (live && json.ok && json.data) setStatus(json.data);
       } catch {
@@ -350,7 +385,7 @@ function BridgeSheet({
       live = false;
       window.clearInterval(t);
     };
-  }, [open, requestId, finished]);
+  }, [open, requestId, depositAddress, finished]);
 
   // Funnel events for /admin: chain and token names only, never amounts, addresses or hashes.
   const counted = useRef(new Set<string>());
@@ -374,11 +409,11 @@ function BridgeSheet({
   // seconds; after that the note stays pending and reconcileClaims settles it.
   const sentPriv = priv.kind === "sent" ? priv : null;
   useEffect(() => {
-    if (!sentPriv || sentPriv.quote.sameChain || !status) return;
-    if (status.stage === "refunded" || status.stage === "failed") {
-      updateLocalNote(sentPriv.note.id, { status: "recovered", sweepPending: false });
-      return;
-    }
+    if (!sentPriv || (sentPriv.quote.sameChain && sentPriv.hash) || !status) return;
+    // A refund or failure from Relay is shown, but the note is left pending:
+    // it is already out of the balance, and if the deposit lands after all,
+    // reconcileClaims still counts it.
+    if (status.stage === "refunded" || status.stage === "failed") return;
     if (status.stage !== "done") return;
     let live = true;
     void (async () => {
@@ -427,6 +462,16 @@ function BridgeSheet({
       live = false;
     };
   }, [sentPriv, config, network.chainId, once]);
+
+  // A Solana transaction is good for about a minute. One we couldn't confirm
+  // that Relay still hasn't seen after two and a half can never land, so the
+  // person may start over (and its note can go).
+  useEffect(() => {
+    if (!sentPriv?.unsure || !sentPriv.quote.solanaTx || sentPriv.expired) return;
+    const left = Math.max(0, sentPriv.at + 150_000 - Date.now());
+    const t = window.setTimeout(() => setPriv((p) => (p === sentPriv ? { ...sentPriv, expired: true } : p)), left);
+    return () => window.clearTimeout(t);
+  }, [sentPriv]);
   useEffect(() => {
     if (shown?.tx && send.data && receipt.isSuccess) once(`swapped:${send.data}`, "swap_success", { token: shown.send.symbol });
   }, [shown, send.data, receipt.isSuccess, once]);
@@ -567,7 +612,7 @@ function BridgeSheet({
       }
       prepared.current = null;
       setStatus(null);
-      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure });
+      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure, at: Date.now() });
       once(`private-sent:${quote.requestId}`, "bridge_private_sent", { source: quote.send.chain, token: quote.send.symbol });
       return;
     }
@@ -578,6 +623,8 @@ function BridgeSheet({
     const txs = quote.evmTxs ?? [];
     let hash: Hex | null = null;
     let approved = false;
+    // Set once the last transaction (the one that pays) is handed to the wallet.
+    let paying = false;
     try {
       for (let i = 0; i < txs.length; i++) {
         const tx = txs[i]!;
@@ -591,7 +638,11 @@ function BridgeSheet({
           error: null,
           progress: txs.length > 1 ? (last ? "Now confirm the payment in your wallet…" : "Approve in your wallet first (1 of 2)…") : null,
         });
-        if (getAccount(config).chainId !== tx.chainId) await switchChain(config, { chainId });
+        if (getAccount(config).chainId !== tx.chainId) {
+          if (tx.chainId !== network.chainId) switchedAway.current = true;
+          await switchChain(config, { chainId });
+        }
+        paying = last;
         const sent = await sendTransaction(config, { to: tx.to as Address, data: tx.data as Hex, value: BigInt(tx.value), chainId });
         if (last) {
           hash = sent;
@@ -602,8 +653,11 @@ function BridgeSheet({
         }
       }
     } catch (err) {
-      if (!hash) {
-        const msg = err instanceof Error ? err.message : "";
+      // Before the paying transaction, or a clear no from the wallet: nothing
+      // went out, so the note goes. A timeout or lost reply on the paying
+      // transaction may come after the wallet sent it: keep the note and
+      // follow the order.
+      if (!paying || surelyNotSent(err)) {
         dropUnsentNote(r.note.id);
         setPriv({
           ...r,
@@ -611,30 +665,23 @@ function BridgeSheet({
           at,
           signing: false,
           progress: null,
-          error: DECLINED.test(msg)
+          error: walletDeclined(err)
             ? approved
               ? "You cancelled the payment. Nothing moved; the approval can be used next time."
               : "You cancelled it in your wallet. Nothing moved."
-            : /chain|network/i.test(msg)
+            : failedBeforeSend(err) && /chain/i.test(walletErrorText(err))
               ? `Switch your wallet to ${quote.send.chain} to pay from there.`
-              : (msg.split("\n")[0] ?? "It didn't send. Try again."),
+              : walletErrorText(err) || "It didn't send. Try again.",
         });
         return;
       }
     }
     prepared.current = null;
     setStatus(null);
-    setPriv({ kind: "sent", quote, note: r.note, payer: "your wallet", hash, unsure: false });
+    setPriv({ kind: "sent", quote, note: r.note, payer: "your wallet", hash, unsure: !hash, at: Date.now() });
     once(`private-sent:${quote.requestId}`, "bridge_private_sent", { source: quote.send.chain, token: quote.send.symbol });
   }
 
-  /** After paying from another chain, put the wallet back on this network. */
-  function backToNetwork() {
-    if (getAccount(config).chainId === network.chainId) return;
-    void switchChain(config, { chainId: network.chainId as GloamChainId }).catch(() => {
-      /* the wallet can switch later; the app asks when it needs to */
-    });
-  }
 
   async function getAddress(e: React.FormEvent) {
     e.preventDefault();
@@ -1047,7 +1094,10 @@ function BridgeSheet({
           <PrivateReview
             review={priv}
             onConfirm={() => void confirmPrivate()}
-            onReset={reset}
+            onReset={() => {
+              reset();
+              backToNetwork();
+            }}
           />
         )}
 
@@ -1064,6 +1114,12 @@ function BridgeSheet({
             onReset={() => {
               reset();
               backToNetwork();
+            }}
+            onGiveUp={() => {
+              if (priv.kind === "sent" && priv.expired && status?.stage !== "moving" && status?.stage !== "done") {
+                dropUnsentNote(priv.note.id);
+              }
+              reset();
             }}
           />
         )}
@@ -1340,11 +1396,13 @@ function PrivateProgress({
   status,
   onDone,
   onReset,
+  onGiveUp,
 }: {
   stage: Extract<PrivateStage, { kind: "sent" | "landed" | "late" | "failed" }>;
   status: BridgeStatus | null;
   onDone: () => void;
   onReset: () => void;
+  onGiveUp: () => void;
 }) {
   const q = stage.quote;
   const amount = `${fmtMoney(Number(q.receive.amount))} ${q.receive.symbol}`;
@@ -1364,7 +1422,9 @@ function PrivateProgress({
               ? `Swapping and adding ${amount} to your private balance…`
               : relay === "waiting"
                 ? stage.unsure
-                  ? `Checking whether ${stage.payer} sent it…`
+                  ? stage.expired
+                    ? `${stage.payer} didn't send it, so nothing moved. Start over to try again.`
+                    : `Checking whether ${stage.payer} sent it…`
                   : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
                 : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
   const done = stage.kind === "landed";
@@ -1389,6 +1449,10 @@ function PrivateProgress({
         </button>
       ) : failed ? (
         <button type="button" onClick={onReset} className="btn btn-ghost btn-sm mt-4">
+          Start over
+        </button>
+      ) : stage.kind === "sent" && stage.expired && relay === "waiting" ? (
+        <button type="button" onClick={onGiveUp} className="btn btn-ink btn-lg btn-block mt-4">
           Start over
         </button>
       ) : (
