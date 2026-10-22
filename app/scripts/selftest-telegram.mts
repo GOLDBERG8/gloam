@@ -82,6 +82,8 @@ const {
   namesPersona,
   parseCommand,
   scamReason,
+  roleScam,
+  pointsAtScam,
   secretLeak,
   tidyReply,
   tokenCard,
@@ -150,6 +152,8 @@ const everySend: Call[] = [];
 let modelReply = "Sure, Add privately is on Portfolio. Proofs take about 10 to 30 seconds.";
 /** How many of the next answer calls fail with a server error. */
 let modelFailures = 0;
+/** sendPhoto answers with an error while this is set. */
+let photoFails = false;
 /** What the "should I answer this?" check says. */
 let classifierReply = "NO";
 /** Files Telegram would serve, by file_id. */
@@ -180,6 +184,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (method === "sendMessage") return reply({ ok: true, result: { message_id: nextId++ } });
     if (method === "deleteMessage") return reply({ ok: true, result: true });
     if (method === "banChatMember") return reply({ ok: true, result: true });
+    if (method === "unbanChatMember") return reply({ ok: true, result: true });
+    if (method === "sendPhoto") {
+      if (photoFails) return reply({ ok: false, description: "Bad Request: wrong file identifier/HTTP URL specified" });
+      return reply({
+        ok: true,
+        result: { message_id: nextId++, photo: [{ file_id: "buy-small", file_unique_id: "s", width: 90, height: 90 }, { file_id: "buy-big", file_unique_id: "b", width: 800, height: 800 }] },
+      });
+    }
     if (method === "getChatMemberCount") return reply({ ok: true, result: 123 });
     if (method === "getWebhookInfo") return reply({ ok: true, result: { url: "https://www.gloam.trade/api/telegram" } });
     if (method === "setWebhook") return reply({ ok: true, result: true });
@@ -216,6 +228,7 @@ function reset() {
   modelReply = "Sure, Add privately is on Portfolio. Proofs take about 10 to 30 seconds.";
   classifierReply = "NO";
   modelFailures = 0;
+  photoFails = false;
   // each test starts with fresh answer limits (they live in process memory here)
   (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
 }
@@ -531,6 +544,16 @@ await test("mainnet live: Glim says so, still never another date, and its facts 
 
 const CA = "0xDcD885F5c60b3aD49F6D58718696417314e8724d";
 
+await test("replies: RobinScan links to a transaction or an address may go out", () => {
+  const policy = { handles: [], mainnetLive: true };
+  const tx = "It's on RobinScan: https://robin.etherscan.io/tx/0x30b76ac0aa16f0f5a5a5f6b7e0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7c300";
+  assert.equal(cleanReply(tx, policy), tx);
+  assert.ok((cleanReply("Check robin.etherscan.io/address/0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8 for your wallet.", policy) ?? "").includes("robin.etherscan.io"));
+  assert.equal((cleanReply("See robin.etherscan.io/login to connect.", policy) ?? "").includes("robin.etherscan.io"), false, "only tx and address pages");
+  assert.ok(knowledgeBlock(false, true).includes("https://robin.etherscan.io"), "the facts name RobinScan");
+  assert.ok(!knowledgeBlock(false, true).includes("blockscout"));
+});
+
 await test("replies: the real $GLOAM contract and its pages go out; a fake one never does", () => {
   const card = `$GLOAM is on Robinhood Chain mainnet. The CA is ${CA}. Details at gloam.trade/token, and it trades at orynth.dev/projects/gloam.`;
   assert.equal(cleanReply(card, policy), card);
@@ -698,8 +721,10 @@ await test("welcome: tags, mention links, escaping, the others count", () => {
   assert.ok(html.startsWith('Welcome to Gloam, @ada_lovelace, <a href="tg://user?id=12">'));
   assert.ok(html.includes("Bo &amp; Co</a> and "));
   assert.ok(!html.includes("<b>"));
-  assert.ok(html.includes("Testing directions land in the Testers topic soon."));
-  assert.ok(html.endsWith("Everything else lives at gloam.trade, or write to hello@gloam.trade. Admins never DM first."));
+  assert.ok(html.includes("Gloam is live on mainnet: private payments on Robinhood Chain and Tempo. Start at gloam.trade/app."));
+  assert.ok(html.includes("keep an eye on Announcements.\n\n"), "no testing line while the tester program is closed");
+  assert.ok(!/testing directions|soon/i.test(html), "nothing promised for later");
+  assert.ok(html.endsWith("The admins are @dukedotsol and @quinkardeeah, and Glim is the assistant. Admins never DM first."));
   assert.ok(!/[\u2014\p{Extended_Pictographic}]/u.test(html));
 
   const thirty = welcomeHtml(
@@ -1016,7 +1041,10 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   assert.equal(scamReason("dm me if you want to test a payment"), null);
   assert.deepEqual(moderationAsk("can you delete and kick him out?", null, true), { remove: true });
   assert.deepEqual(moderationAsk("delete this", null, true), { remove: false });
-  assert.deepEqual(moderationAsk("", "ban", false), { remove: true });
+  assert.equal(moderationAsk("", "ban", false), null, "/ban is Rose's");
+  assert.equal(moderationAsk("", "kick", false), null, "/kick is Rose's");
+  assert.deepEqual(moderationAsk("", "spam", false), { remove: true });
+  assert.deepEqual(moderationAsk("", "del", false), { remove: false });
   assert.equal(moderationAsk("delete and kick him", null, false), null, "untagged words do nothing");
 
   // a look-alike posts a bare GIF: deleted, banned, one notice
@@ -1057,6 +1085,19 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   await handleUpdate(upd(inTopic(TOPIC.general, "/ban", user(905, "Troll"), { reply_to_message: victim })));
   assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, "only the team can ban");
 
+  // an admin's /ban, /kick or /mute (with or without Rose's @name): Rose acts and answers, Glim does nothing
+  for (const command of ["/ban", "/ban@MissRose_bot", "/kick", "/mute", "/warn", "/tban 1d"]) {
+    reset();
+    const scammer = inTopic(TOPIC.general, "hello", user(912, "Evelyn"));
+    await handleUpdate(upd(scammer));
+    reset();
+    await handleUpdate(upd(inTopic(TOPIC.general, command, OWNER, { reply_to_message: scammer })));
+    assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, `${command}: no ban from Glim`);
+    assert.equal(deletes().length, 0, `${command}: no delete from Glim`);
+    assert.equal(sends().length, 0, `${command}: no message from Glim`);
+    assert.equal(modelCalls().length, 0, `${command}: no model call`);
+  }
+
   // a member's /spam: a clear scam goes, anything else goes to the owner, never a ban on their word alone
   reset();
   await handleUpdate(upd(dm(OWNER, "hi")));
@@ -1066,7 +1107,8 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   const report1 = inTopic(TOPIC.general, "/spam", user(908, "Kemi"), { reply_to_message: lure });
   await handleUpdate(upd(report1));
   assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 907);
-  assert.ok(String(sends().pop()!.body.text).startsWith("Thanks Kemi. That was a scam"));
+  assert.ok(String(sends().filter((x) => x.body.chat_id === GROUP).pop()!.body.text).startsWith("Thanks Kemi. That was a scam"));
+  assert.ok(String(sends().filter((x) => x.body.chat_id === OWNER.id).pop()!.body.text).includes("/unban 907"), "the owner can undo it");
   reset();
   await handleUpdate(upd(dm(OWNER, "hi")));
   const odd = inTopic(TOPIC.general, "", user(909, "Dee"), { document: { file_id: "gif3", file_unique_id: "g3", mime_type: "video/mp4" } });
@@ -1087,7 +1129,8 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
   reset();
   await handleUpdate({ update_id: nextId++, message: { message_id: nextId++, chat, date: 0, new_chat_members: [user(906, "Gloam Support")] } as TgMessage });
   assert.equal(calls.filter((x) => x.method === "banChatMember").length, 1);
-  assert.equal(sends().length, 0, "no welcome for it");
+  assert.equal(sends().filter((x) => x.body.chat_id === GROUP).length, 0, "no welcome for it");
+  assert.ok(sends().some((x) => x.body.chat_id === OWNER.id && String(x.body.text).includes("/unban 906")), "the owner is told, with the way back");
 });
 
 await test("a suggestion aimed at the team by tag gets no reply from Glim", async () => {
@@ -1111,6 +1154,109 @@ await test("buy alerts: every buy, spaced, with value, price, market cap and lin
   );
   const small = buyText({ amount: 2, usd: 0.44, buyer: "0x0000000000000000000000000000000000000001", tx: "0x1" });
   assert.ok(small.includes("about $0.44") && !small.includes("Market cap"), "small buys post too, stats only when known");
+});
+
+await test("buy alerts: each buy goes out as the token image with its text, and as text when the photo fails", async () => {
+  const { BUY_IMAGE, buyText, postBuy } = await import("../src/lib/telegramBot/buys");
+  const text = buyText({ amount: 500, usd: 110, buyer: "0x18f93000000000000000000000000000000a3c2c", tx: "0xdef", price: 0.22, marketCap: 215260 });
+  reset();
+  assert.equal(await postBuy(GROUP, TOPIC.buys, text), true);
+  const photo = calls.filter((x) => x.method === "sendPhoto");
+  assert.equal(photo.length, 1);
+  assert.equal(photo[0]!.body.photo, BUY_IMAGE, "the $GLOAM image, by its public URL");
+  assert.equal(BUY_IMAGE, "https://www.gloam.trade/brand/kit/gloam-avatar-paper.png");
+  assert.equal(photo[0]!.body.caption, text, "the buy text, unchanged, as the caption");
+  assert.equal(photo[0]!.body.message_thread_id, TOPIC.buys);
+  assert.equal(sends().length, 0, "no second, text-only post");
+  // the next buy reuses the picture Telegram already holds
+  assert.equal(await postBuy(GROUP, TOPIC.buys, text), true);
+  assert.equal(calls.filter((x) => x.method === "sendPhoto").pop()!.body.photo, "buy-big");
+  // the photo fails: the same text goes out on its own, so the buy is never lost
+  reset();
+  photoFails = true;
+  assert.equal(await postBuy(GROUP, TOPIC.buys, text), true);
+  assert.equal(sends().length, 1);
+  assert.equal(sends()[0]!.body.text, text);
+  assert.equal(sends()[0]!.body.message_thread_id, TOPIC.buys);
+  // too long for a caption: straight to text
+  reset();
+  assert.equal(await postBuy(GROUP, TOPIC.buys, "x".repeat(1100)), true);
+  assert.equal(calls.filter((x) => x.method === "sendPhoto").length, 0);
+  assert.equal(sends().length, 1);
+});
+
+await test("moderation: the fake migration airdrop and role names; reporters are never removed; /unban", async () => {
+  const MIGRATION_SCAM =
+    "Hello everyone, We will be redeploying CA so we can carry out audit process. We will be airdropping our holders and note we won't be sending out from snapshots as we are looking to kill dead wallets and reduce supply where by tokens get more value.\n\n-We will be airdropping holders tokens once we redeploy our CA in 28 hours. This will definitely do holders good and a huge boost to make some $$ in next push after CA is redeployed.\n\nTo register for the airdrops kindly send me pm with any transaction hash of your purchase.";
+  assert.equal(scamReason(MIGRATION_SCAM), "migration_airdrop", "the scam that stayed up an hour");
+  assert.ok(scamReason("We are migrating to a new contract. Airdrop for holders, DM me your wallet to register"), "caught (as a DM lure first)");
+  assert.equal(scamReason("V2 token launch next week, airdrop for every holder. Send your tx hash to register."), "migration_airdrop");
+  for (const text of [
+    "when dev update?",
+    "the dev said mainnet is live",
+    "will there be an airdrop after the redeploy? do we register somewhere?",
+    "the team will never migrate the CA and ask you to DM them for an airdrop",
+    "redeploying the frontend fixed the claim page",
+  ]) {
+    assert.equal(scamReason(text), null, text);
+  }
+  for (const u of [{ first_name: "Owner" }, { first_name: "Owner \u23f3", last_name: "DEV" }, { first_name: "Admin" }, { first_name: "Support Team" }, { first_name: "The Founder" }, { first_name: "0wner" }]) {
+    assert.ok(impersonates(u), JSON.stringify(u));
+  }
+  for (const u of [{ first_name: "Dev" }, { first_name: "Dev", last_name: "Patel" }, { first_name: "Team Rocket" }, { first_name: "Modupe" }, { first_name: "Devon" }]) {
+    assert.ok(!impersonates(u), JSON.stringify(u));
+  }
+  assert.equal(roleScam({ first_name: "Dev Mike" }, "all holders dm me now"), "role_impostor");
+  assert.equal(roleScam({ first_name: "Support Desk" }, "claim your airdrop allocation here"), "role_impostor");
+  assert.equal(roleScam({ first_name: "Dev" }, "is there an airdrop?"), null, "a Dev asking is fine");
+  assert.equal(roleScam({ first_name: "Dev" }, "the dev said mainnet is live"), null);
+  assert.equal(roleScam({ first_name: "Ada" }, "all holders dm me now"), null, "no role in the name: scamReason's job");
+  assert.ok(pointsAtScam("@dukedotsol this is a scam bot, it says all holders DM me immediately"));
+  assert.ok(!pointsAtScam("All holders DM me immediately for the airdrop"));
+
+  // the scam itself, from an account named "Owner": deleted, removed, and the owner told how to undo it
+  reset();
+  await handleUpdate(upd(dm(OWNER, "hi")));
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, MIGRATION_SCAM, { ...user(960, "Owner \u23f3"), last_name: "DEV" })));
+  assert.equal(deletes().length, 1);
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 960);
+  const note = sends().find((x) => x.body.chat_id === OWNER.id);
+  assert.ok(note && String(note.body.text).includes("/unban 960"), "the owner gets the way back");
+  // the same text from an ordinary name is caught by its words alone
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, MIGRATION_SCAM, user(961, "Tunde"))));
+  assert.equal(deletes().length, 1);
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 961);
+
+  // a member calling a scam out, repeating its words: the words come down, the member stays
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "@dukedotsol this is a scam bot, it says all holders DM me immediately", user(962, "Sofia"))));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, "the reporter is never removed");
+  assert.ok(String(sends().pop()!.body.text).startsWith("Thanks for flagging it, Sofia."));
+  // forwarding the scammer's message in to show it: same
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "All holders DM me immediately for the airdrop", user(963, "Kofi"), { forward_origin: { type: "user" } })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, "a forward of someone else's scam is not the forwarder's scam");
+  // quoting it in a reply: same
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "investors inbox me now", user(964, "Ama"), { quote: { text: "investors inbox me now" } })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0);
+  // /spam on a member's warning that quotes a scam: nobody is removed
+  reset();
+  const warning = inTopic(TOPIC.general, "beware, someone here says all holders DM me immediately", user(965, "Ife"));
+  await handleUpdate(upd(warning));
+  await handleUpdate(upd(inTopic(TOPIC.general, "/spam", user(966, "Troll"), { reply_to_message: warning })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, "a report on a warning removes nobody");
+
+  // a removal can always be undone from the owner's chat
+  reset();
+  await handleUpdate(upd(dm(OWNER, "/unban 960")));
+  assert.equal(calls.filter((x) => x.method === "unbanChatMember").pop()?.body.user_id, 960);
+  assert.ok(String(sends().pop()!.body.text).startsWith("Done, 960 can join the group again."));
+  reset();
+  await handleUpdate(upd(dm(OWNER, "/unban someone")));
+  assert.equal(calls.filter((x) => x.method === "unbanChatMember").length, 0);
 });
 
 await test("buy alerts: a burst carries over to the next check, never split inside a block", async () => {

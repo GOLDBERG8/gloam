@@ -400,7 +400,29 @@ function askingForHelp(text: string, m: RegExpExecArray): boolean {
   return ASKING.test(around) || (end >= 0 && text[m.index + end] === "?");
 }
 
-export type ScamReason = "secret_request" | "dm_support" | "wallet_fix" | "phishing_link" | "promo_spam";
+export type ScamReason =
+  | "secret_request"
+  | "dm_support"
+  | "wallet_fix"
+  | "phishing_link"
+  | "promo_spam"
+  | "migration_airdrop"
+  | "role_impostor";
+
+/** "We are redeploying the CA", "migrating to a new contract", "v2 token". */
+const MIGRATION =
+  /\b(?:re-?deploy\w*|migrat\w*|relaunch\w*|new\s+(?:ca|contract|token)\b|v2\s+(?:token|contract|ca)\b|token\s+swap|contract\s+(?:swap|upgrade))/i;
+/** What the fake migration promises: an airdrop, a snapshot, compensation. */
+const DROP = /\b(?:airdrop\w*|snapshot\w*|compensat\w*|reimburs\w*|refund\w*|claim\w*)/i;
+/** ...and the catch: talk to me privately, send me your transaction, register. */
+const PRIVATE_ASK =
+  /\b(?:send|dm|pm|inbox|message|text|contact)\s+(?:me|us)\b|\b(?:send|share|drop)\s+(?:your\s+|any\s+)?(?:tx|txn|transaction)\b|\bto\s+register\b|\bregister\s+(?:for|your)\b/i;
+/** Safety advice about that same scam ("the team will never migrate the CA and ask you to DM them"). */
+const SAFETY_WORDS = /\b(?:never|scam\w*|fake|beware|careful)\b/i;
+/** "Send me your tx hash / wallet address / funds": pulling something private out of people. */
+const SEND_ME =
+  /\bsend\s+(?:me|us)\b[^.!?\n]{0,60}\b(?:tx|txn|transaction|hash|wallet|address|seed|phrase|key|funds|eth|usdc|usdt|usdg)\b/i;
+const DROP_WORDS = /\b(?:airdrop|giveaway|reward|claim|whitelist|presale|allocation|snapshot)\w*/i;
 
 /**
  * Obvious scam patterns, conservative on purpose: asking for a seed phrase or
@@ -430,6 +452,10 @@ export function scamReason(raw: string): ScamReason | null {
   if (pitches && DM_ASK.test(text) && (pitches >= 2 || !text.includes("?"))) return "promo_spam";
   const fix = WALLET_FIX.exec(text);
   if (fix && !negated(text, fix.index, fix[0])) return "wallet_fix";
+  // "we are redeploying the CA ... airdrop to holders ... send me your tx hash to register"
+  if (MIGRATION.test(text) && DROP.test(text) && PRIVATE_ASK.test(text) && !SAFETY_WORDS.test(text) && !text.includes("?")) {
+    return "migration_airdrop";
+  }
   if (LURE.test(text)) {
     for (const link of text.match(LINK_RE) ?? []) {
       const { host, path } = hostOf(link);
@@ -497,14 +523,69 @@ function skeleton(raw: string): string {
     .trim();
 }
 
-const STAFF = /\b(?:support|admin|admins|team|official|mod|mods|moderator|help|helpdesk|desk|care|service|services|announcements?|airdrop|claims?|rewards?|verify|verification)\b/;
+const STAFF = /\b(?:support|admin|admins|team|official|mod|mods|moderator|help|helpdesk|desk|care|service|services|announcements?|airdrop|claims?|rewards?|verify|verification|owner|owners|dev|devs|developer|developers|founder|cofounder|ceo|cto)\b/;
+
+/** Words that name a role in a project rather than a person. */
+const ROLE = new Set([
+  "owner", "owners", "dev", "devs", "developer", "developers", "founder", "founders", "cofounder", "ceo", "cto", "coo",
+  "team", "admin", "admins", "mod", "mods", "moderator", "moderators", "support", "official", "officials", "helpdesk", "staff",
+]);
+/** Little words a role-only name can carry: "The Owner", "Co Founder", "Real Admin". */
+const ROLE_FILLER = new Set(["the", "co", "real", "project", "main", "head", "lead"]);
+/** "Dev" alone is also a common first name, so on its own it is never a role-only name. */
+const PERSONAL = new Set(["dev", "devs"]);
+
+function nameWords(u: { first_name?: string; last_name?: string }): string[] {
+  return skeleton(`${u.first_name ?? ""} ${u.last_name ?? ""}`).replace(/\|/g, " ").split(" ").filter(Boolean);
+}
+
+/**
+ * A display name that is only a role: "Owner", "Owner DEV", "Admin", "Support
+ * Team", "The Founder". Nobody in the group is called that but someone posing
+ * as the team. "Dev" alone stays a name.
+ */
+function roleOnlyName(u: { first_name?: string; last_name?: string }): boolean {
+  const words = nameWords(u);
+  const roles = words.filter((w) => ROLE.has(w));
+  return roles.length > 0 && words.every((w) => ROLE.has(w) || ROLE_FILLER.has(w)) && roles.some((w) => !PERSONAL.has(w));
+}
+
+/**
+ * Someone whose name carries a role ("Owner", "Dev Mike", "Support") pulling
+ * people somewhere private, or posting a migration or airdrop pitch. A role in
+ * a name alone is not enough, and neither is a question: "Dev" asking "is
+ * there an airdrop?" is fine. Only ever checked for people who are not the
+ * owner or an admin.
+ */
+export function roleScam(u: { first_name?: string; last_name?: string }, raw: string): ScamReason | null {
+  const words = nameWords(u);
+  if (!words.some((w) => ROLE.has(w))) return null;
+  const text = norm(raw);
+  if (text.includes("?") || ASKING.test(text)) return null;
+  const pull = DM_LURE.test(text) || SEND_ME.test(text) || (MIGRATION.test(text) && DROP.test(text));
+  const strongRole = words.some((w) => ROLE.has(w) && !PERSONAL.has(w));
+  const pitch = DM_ASK.test(text) || DROP_WORDS.test(text);
+  return pull || (strongRole && pitch) ? "role_impostor" : null;
+}
+
+/**
+ * Someone pointing at a scam rather than running one: warning about it,
+ * calling it out, reporting it. Their message can repeat the scam's words, so
+ * it may be taken down, but it never costs them their place in the group.
+ */
+const POINTING =
+  /\b(?:scam(?:mer|mers|s|ming)?|fake|impostor|imposter|impersonat\w*|report(?:ed|ing)?|beware|watch\s+out|careful|phishing|spam(?:mer|mers|ming)?|bot\s+account|red\s+flag|don'?t\s+(?:trust|click|dm|reply|send|fall))\b/i;
+export function pointsAtScam(text: string): boolean {
+  return POINTING.test(norm(text));
+}
 const STAFF_IN_HANDLE = /(?:support|admin|team|official|mod|help|desk|care|service|airdrop|claim|reward|verify|trade|hq)/;
 
 /**
  * A member passing themselves off as Gloam, Glim or the team: named "Gloam" or
  * "Glim" (look-alike letters included, "GIoam" with a capital i too), "Gloam
  * Support" and the like, a team tag such as "Duke | Gloam", or a handle like
- * gloam_support. Only ever checked for people who are not the owner or an admin.
+ * gloam_support, or a name that is only a role ("Owner", "Admin", "Support
+ * Team"). Only ever checked for people who are not the owner or an admin.
  */
 export function impersonates(u: { first_name?: string; last_name?: string; username?: string }): boolean {
   const name = skeleton(`${u.first_name ?? ""} ${u.last_name ?? ""}`);
@@ -516,20 +597,28 @@ export function impersonates(u: { first_name?: string; last_name?: string; usern
   const teamTag = name.includes("|") && /\bgloam\b/.test(asL);
   const handle = skeleton(u.username ?? "").replace(/\s+/g, "");
   const badHandle = /(?:gloam|glim)/.test(handle) && STAFF_IN_HANDLE.test(handle.replace(/gloam|glim/g, " "));
-  return brandOnly || brandStaff || teamTag || badHandle;
+  return brandOnly || brandStaff || teamTag || badHandle || roleOnlyName(u);
 }
 
 export type ModAction = { remove: boolean };
 
 /**
- * An admin telling the helper to act on the message they replied to:
- * /del (delete it), /ban, /kick or /spam (delete it and remove the person), or
- * tagging it with "delete", "remove", "kick" or "ban". Null when it is not that.
+ * Rose's manual moderation commands. Rose owns them: when an admin types one,
+ * Rose acts and Glim stays out of it, so one command never gets two bots
+ * acting (and racing) on it.
+ */
+export const ROSE_COMMANDS = new Set(["ban", "unban", "kick", "mute", "unmute", "warn", "warns", "dban", "sban", "tban", "tmute"]);
+
+/**
+ * An admin telling the helper to act on the message they replied to: /del
+ * (delete it), /spam (delete it and remove the person), or tagging the helper
+ * with "delete", "remove", "kick" or "ban". Rose's own commands (/ban, /kick
+ * and the rest) are Rose's. Null when it is not that.
  */
 export function moderationAsk(text: string, command: string | null, tagged: boolean): ModAction | null {
   if (command) {
     if (command === "del" || command === "delete") return { remove: false };
-    if (command === "ban" || command === "kick" || command === "spam" || command === "remove") return { remove: true };
+    if (command === "spam" || command === "remove") return { remove: true };
     return null;
   }
   if (!tagged) return null;
@@ -799,6 +888,8 @@ function linkAllowed(link: string): boolean {
   if (host === "orynth.dev") return /^\/projects\/gloam(?:[/?#]|$)/i.test(path);
   if (host === "dexscreener.com") return path.toLowerCase().startsWith(`/robinhood/${GLOAM_TOKEN.address.toLowerCase()}`);
   if (host === "coingecko.com") return /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?coins\/gloam(?:[/?#]|$)/i.test(path);
+  // RobinScan, Robinhood Chain mainnet's explorer: a transaction or an address
+  if (host === "robin.etherscan.io") return path === "" || /^\/(?:tx|address|token)\/0x[0-9a-fA-F]+(?:[/?#]|$)/.test(path);
   return isGroupLink(host, path);
 }
 
@@ -1010,7 +1101,7 @@ const WELCOME_TAG_CHARS = 3_500;
  * username are tagged as @username; the rest get a mention link to their
  * account, so the tag works without a username.
  */
-export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
+export function welcomeHtml(joiners: Joiner[], testingOpen: boolean, persona = "Glim"): string {
   const tags: string[] = [];
   let used = 0;
   for (const j of joiners.slice(0, WELCOME_TAGS)) {
@@ -1025,13 +1116,12 @@ export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
   const others = joiners.length - tags.length;
   if (others > 0) tags.push(`${others} ${others === 1 ? "other" : "others"}`);
   const list = tags.length > 1 ? `${tags.slice(0, -1).join(", ")} and ${tags[tags.length - 1]}` : (tags[0] ?? "friends");
-  const testing = testingOpen
-    ? "Testers, your guide is pinned in the Testers topic."
-    : "Testing directions land in the Testers topic soon.";
+  const testing = testingOpen ? " Testers, your guide is pinned in the Testers topic." : "";
   return (
     `Welcome to Gloam, ${list}. Glad you're here.\n\n` +
-    `Ask anything in Help, share ideas in Feedback, and keep an eye on Announcements. ${testing}\n\n` +
-    `Everything else lives at gloam.trade, or write to hello@gloam.trade. Admins never DM first.`
+    `Gloam is live on mainnet: private payments on Robinhood Chain and Tempo. Start at gloam.trade/app.\n\n` +
+    `Ask anything in Help, share ideas in Feedback, and keep an eye on Announcements.${testing}\n\n` +
+    `The admins are @dukedotsol and @quinkardeeah, and ${escapeHtml(cleanName(persona, "Glim"))} is the assistant. Admins never DM first.`
   );
 }
 

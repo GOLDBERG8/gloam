@@ -11,11 +11,15 @@
  * current block, so it never posts old buys. Every buy is posted, whatever its
  * size (TELEGRAM_BUY_MIN_USD sets a floor). TELEGRAM_BUY_ALERTS=0 turns it
  * off; TELEGRAM_BUYS_TOPIC overrides the Buys topic.
+ *
+ * Each buy goes out as the $GLOAM token image (the one on CoinGecko) with the
+ * text as its caption. If the photo can't be sent, the same text goes out as
+ * a plain post, so a buy is never lost.
  */
 import { GLOAM_TOKEN } from "./knowledge";
 import { TOPIC } from "./rules";
 import { buysLastBlock, setBuysLastBlock, takeBuysSlot } from "./store";
-import { sendMessage } from "./telegram";
+import { CAPTION_MAX, sendMessage, sendPhoto } from "./telegram";
 
 const RPC = "https://rpc.mainnet.chain.robinhood.com";
 const POOL_MANAGER = "0x8366a39cc670b4001a1121b8f6a443a643e40951";
@@ -90,6 +94,32 @@ export function buyText(b: Buy): string {
     .join("\n\n");
 }
 
+/** The $GLOAM token image, as CoinGecko shows it: the mark in ink on paper. */
+export const BUY_IMAGE = "https://www.gloam.trade/brand/kit/gloam-avatar-paper.png";
+
+/** The image once Telegram holds it, so later buys don't make it fetch the URL again. Per server instance. */
+let buyImageId: string | null = null;
+
+/**
+ * Posts one buy: the token image with the text as its caption, or the text on
+ * its own if the photo fails. Returns true when either went out.
+ */
+export async function postBuy(groupId: number, topic: number, text: string): Promise<boolean> {
+  if (text.length <= CAPTION_MAX) {
+    let sent = await sendPhoto(groupId, buyImageId ?? BUY_IMAGE, text, { threadId: topic });
+    // a stale file_id (another bot token, a cleared file): try the URL once
+    if (!sent && buyImageId) {
+      buyImageId = null;
+      sent = await sendPhoto(groupId, BUY_IMAGE, text, { threadId: topic });
+    }
+    if (sent) {
+      if (sent.fileId) buyImageId = sent.fileId;
+      return true;
+    }
+  }
+  return (await sendMessage(groupId, text, { threadId: topic })) !== null;
+}
+
 /** The group's Buys topic, unless the env names another. */
 function buysTopic(): number {
   const fromEnv = Number(process.env.TELEGRAM_BUYS_TOPIC ?? "");
@@ -153,7 +183,7 @@ export async function pollBuys(groupId: number, force = false): Promise<number> 
         if (usd !== null && usd < floor) continue;
         const t = await rpc<{ from: string }>("eth_getTransactionByHash", [tx]);
         const b: Buy = { amount, usd, buyer: t?.from ?? "0x0000000000000000000000000000000000000000", tx, price, marketCap: m?.marketCap ?? null };
-        if (await sendMessage(groupId, buyText(b), { threadId: topic })) posted++;
+        if (await postBuy(groupId, topic, buyText(b))) posted++;
       }
     }
     // with buys left over, the next check starts right after the last block posted

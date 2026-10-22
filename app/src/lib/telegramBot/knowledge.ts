@@ -256,7 +256,7 @@ function mainnetLiveFacts(): string {
     "MAINNET IS LIVE (this overrides any line below that says the app is testnet only or that mainnet is coming)",
     `- Gloam went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on ${liveMainnetNames()}. Mainnet is real money. Say so plainly when asked, and point to gloam.trade/app.`,
     ...(rh
-      ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG and $GLOAM. Native ETH pays gas but cannot be added privately there. Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer https://robinhoodchain.blockscout.com."]
+      ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG and $GLOAM. Native ETH pays gas but cannot be added privately there. Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer RobinScan https://robin.etherscan.io (a transaction is at robin.etherscan.io/tx/ and its hash, an address at robin.etherscan.io/address/ and the address)."]
       : []),
     ...(tempo
       ? ["- Tempo mainnet (chain ID 4217): the vault takes USDC.e, pathUSD, USDT0 and OUSD, and fees are paid in stablecoins. Details, if someone adds the chain by hand: RPC https://rpc.tempo.xyz, chain ID 4217, currency USD, explorer https://explore.tempo.xyz."]

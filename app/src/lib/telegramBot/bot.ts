@@ -78,7 +78,10 @@ import {
   moderationAsk,
   namesPersona,
   parseCommand,
+  pointsAtScam,
   readSentinel,
+  ROSE_COMMANDS,
+  roleScam,
   scamReason,
   scanCodes,
   secretLeak,
@@ -144,6 +147,7 @@ import {
   getMe,
   refreshWebhook,
   sendMessage,
+  unbanMember,
   type TgChatMemberUpdated,
   type TgMessage,
   type TgUpdate,
@@ -256,6 +260,7 @@ function ownerHelp(c: BotConfig): string {
     `/ca - the $GLOAM contract and token page (same in the group)\n` +
     `/answer <message link> - I answer that group message in the group, as a reply (or say "go answer this" with the link)\n` +
     `/webhook - turn on edited messages, so a question added in an edit gets an answer\n` +
+    `/unban <number> - let back in someone I removed (the number is in my removal note)\n` +
     `You can also just say "report" or "how was today".\n\n${CHAT_HELP}${daily}`
   );
 }
@@ -265,7 +270,8 @@ function adminHelp(name: string): string {
     `Hi ${name}. Just talk to me here, no command needed. Ask what people asked today, whether there are bugs, ` +
     `how to answer a member, or for a draft announcement. Screenshots work too. I remember the last few messages for a few hours.\n\n` +
     `To have me answer a member in the group, send the link to their message with "answer this" (or /answer and the link). ` +
-    `I post the answer there as a reply and tell you here what I said. Anything else I only draft for you to post.\n/help - this note`
+    `I post the answer there as a reply and tell you here what I said. Anything else I only draft for you to post.\n` +
+    `/unban <number> - let back in someone I removed (the number is in my removal note)\n/help - this note`
   );
 }
 
@@ -357,6 +363,49 @@ function scamWarning(removed: boolean, banned = false): string {
       : "Heads up, I removed a message that looked like a scam."
     : "Heads up, that message looks like a scam.";
   return `${first}\n\nGloam admins never DM first and will never ask for your seed phrase, private key or funds. If someone messages you offering help, it's not us.`;
+}
+
+/** A member repeated a scam's words to call it out: the words go, they stay. */
+function pointedWarning(name: string, removed: boolean): string {
+  const first = removed
+    ? `Thanks for flagging it, ${name}. I took that message down because it repeats the scam's words, so nobody acts on them. You're not in trouble.`
+    : `Thanks for flagging it, ${name}.`;
+  return `${first}\n\nGloam admins never DM first and will never ask for your seed phrase, private key or funds. Reply /spam to a scam message and I'll deal with it.`;
+}
+
+/** What the owner is told an account was removed for. */
+const BAN_WHY: Record<string, string> = {
+  secret_request: "asking for a seed phrase or key",
+  dm_support: "offering help or a deal in DMs",
+  wallet_fix: "a fake wallet fix",
+  phishing_link: "a scam link",
+  promo_spam: "paid promotion spam",
+  migration_airdrop: "a fake CA migration and airdrop",
+  role_impostor: "posing as the team",
+  impostor: "a name posing as Gloam or the team",
+};
+
+/** Owner notes about removals, per minute: a spam wave doesn't flood the owner's chat. */
+const BAN_NOTES_PER_MIN = 6;
+
+/**
+ * Every account the helper removes on its own goes to the owner's private chat
+ * with the number to undo it (/unban), so a removal is never silent and never
+ * final without a person able to lift it. Telegram also lists them under the
+ * group's Removed users. Counted as a scam in the report, not an escalation.
+ */
+async function noteBan(c: BotConfig, who: TgUser, why: string, text: string, topic: number | null): Promise<void> {
+  if (!(await hitRateLimit("tg:ban-notes", "tg-ban-notes", BAN_NOTES_PER_MIN)).allowed) return;
+  const name = cleanName(who.first_name, "an account");
+  const what = memoryText(text);
+  const where = topic === null ? "as they joined" : `in ${topicName(topic)}`;
+  for (const o of await ownerChats().catch(() => [])) {
+    await sendMessage(
+      o.chatId,
+      `I removed ${name}${who.username ? ` (@${who.username})` : ""} from the group ${where}, for ${BAN_WHY[why] ?? why}.` +
+        `${what ? `\n"${what.slice(0, 160)}"` : ""}\n\nIf that was a mistake, send /unban ${who.id} here and they can join again.`,
+    );
+  }
 }
 
 function impostorWarning(banned: boolean): string {
@@ -495,12 +544,14 @@ function joinerOf(u: TgUser): Joiner {
 async function flushWelcome(c: BotConfig): Promise<void> {
   const batch = await takeWelcomeBatch().catch(() => null);
   if (!batch?.length) return;
-  if (await sendMessage(c.groupId, welcomeHtml(batch, c.testingOpen), { parseMode: "HTML" })) await count("welcomes");
+  if (await sendMessage(c.groupId, welcomeHtml(batch, c.testingOpen, c.persona), { parseMode: "HTML" })) await count("welcomes");
 }
 
 async function welcome(users: TgUser[], c: BotConfig): Promise<void> {
   // an account named like Gloam or the team is out before it can post
-  for (const u of users) if (!u.is_bot && !isTrusted(u, c) && impersonates(u)) await banMember(c.groupId, u.id);
+  for (const u of users) {
+    if (!u.is_bot && !isTrusted(u, c) && impersonates(u) && (await banMember(c.groupId, u.id))) await noteBan(c, u, "impostor", "", null);
+  }
   const people = users.filter((u) => !u.is_bot && (isTrusted(u, c) || !impersonates(u)));
   if (people.length === 0) return;
   await countMembers("joins", people.map((u) => u.id)).catch(() => {});
@@ -626,12 +677,23 @@ async function onReport(msg: TgMessage, from: TgUser, target: TgMessage | null, 
     return;
   }
   const targetText = scanCodes(messageText(target)).masked;
-  if (impersonates(who) || scamReason(targetText) || secretLeak(targetText)) {
+  const why = impersonates(who) ? "impostor" : (scamReason(targetText) ?? roleScam(who, targetText));
+  // the reported message was itself someone calling a scam out: never a removal on that
+  const pointing =
+    why !== "impostor" &&
+    (target.forward_origin?.type === "user" || target.forward_origin?.type === "hidden_user" || Boolean(target.quote) || pointsAtScam(targetText));
+  if (why && !pointing) {
     const deleted = await deleteMessage(chatId, target.message_id);
     const banned = await banMember(chatId, who.id);
     if (deleted) await count("scams");
     await say(deleted || banned ? `Thanks ${name}. That was a scam, so it's gone, and so is the account.` : `Thanks ${name}. That's a scam, but Telegram didn't let me remove it, so I've sent it to the admins.`);
+    if (banned) await noteBan(c, who, why, targetText, topic);
     if (deleted || banned) return;
+  } else if (secretLeak(targetText)) {
+    // someone pasted their own seed phrase or key: the message goes, the person stays
+    const deleted = await deleteMessage(chatId, target.message_id);
+    await say(deleted ? `Thanks ${name}. That looked like a seed phrase or key, so I took it down.` : `Thanks ${name}, sent to the admins.`);
+    if (deleted) return;
   } else {
     await say(`Thanks ${name}, sent to the admins.`);
   }
@@ -664,6 +726,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
     if ((await hitRateLimit(`tg:${chatId}:${topic}`, "tg-warn", WARN_PER_MIN)).allowed) {
       await sendMessage(chatId, impostorWarning(banned), { threadId, replyTo: removed ? undefined : msg.message_id });
     }
+    if (banned) await noteBan(c, from, "impostor", messageText(msg), topic);
     return;
   }
   const ownPicture = imageRef(msg);
@@ -684,14 +747,24 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   }
   // a call-channel post forwarded or quoted in from elsewhere ("80x move from our call")
   const outside = msg.forward_origin || msg.external_reply ? [text, msg.external_reply?.text, msg.external_reply?.caption, msg.quote?.text].filter(Boolean).join(" ") : "";
-  if (!trusted && ((outside && forwardedCall(outside)) || scamReason(text))) {
+  const promo = Boolean(outside) && forwardedCall(outside);
+  const reason = trusted ? null : (scamReason(text) ?? roleScam(from, text));
+  if (!trusted && (promo || reason)) {
+    // Repeating a scam to call it out (forwarding a person's message, quoting it,
+    // warning about it) is reporting it: the words come down, the member stays.
+    const fromPerson = msg.forward_origin?.type === "user" || msg.forward_origin?.type === "hidden_user";
+    const pointing = !promo && (fromPerson || Boolean(msg.quote) || pointsAtScam(text));
     const removed = await deleteMessage(chatId, msg.message_id);
-    // a scam post costs the account its place in the group
-    const banned = removed ? await banMember(chatId, from.id) : false;
+    // a scam post of their own costs the account its place in the group
+    const banned = removed && !pointing ? await banMember(chatId, from.id) : false;
     await count(removed ? "scams" : "scamsMissed");
     if ((await hitRateLimit(`tg:${chatId}:${topic}`, "tg-warn", WARN_PER_MIN)).allowed) {
-      await sendMessage(chatId, scamWarning(removed, banned), { threadId, replyTo: removed ? undefined : msg.message_id });
+      await sendMessage(chatId, pointing ? pointedWarning(name, removed) : scamWarning(removed, banned), {
+        threadId,
+        replyTo: removed ? undefined : msg.message_id,
+      });
     }
+    if (banned) await noteBan(c, from, reason ?? "promo_spam", text, topic);
     return;
   }
   if (topic === TOPIC.announcements) return;
@@ -707,6 +780,8 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   const me = await getMe();
   if (!me) return;
   const cmd = parseCommand(text, me.username);
+  // /ban, /kick, /mute and Rose's other moderation commands are Rose's to act on and answer
+  if (cmd && ROSE_COMMANDS.has(cmd.name)) return;
   // the owner or an admin, replying to a message: "delete this", "kick him", /ban, /del
   const modTarget = trusted && !edited ? explicitReply(msg) : null;
   if (modTarget) {
@@ -994,6 +1069,21 @@ async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
     const name = firstName(from, c);
     if (cmd.name === "answer") {
       await answerLinked(chatId, from, c, groupMessageIds(raw));
+      return;
+    }
+    if (cmd.name === "unban") {
+      const id = Number(cmd.args.trim());
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        await sendMessage(chatId, "Send /unban and the number from my removal note, like /unban 123456789.");
+        return;
+      }
+      const ok = await unbanMember(c.groupId, id);
+      await sendMessage(
+        chatId,
+        ok
+          ? `Done, ${id} can join the group again. They'll need the invite link: t.me/gloamhq`
+          : "Telegram didn't take that. Check the number, or lift it in the group's settings under Removed users.",
+      );
       return;
     }
     if (cmd.name === "webhook" && owner) {

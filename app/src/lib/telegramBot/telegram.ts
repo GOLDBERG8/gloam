@@ -144,6 +144,32 @@ export async function sendMessage(chatId: number, text: string, opts: SendOption
   return r.ok && r.result ? r.result.message_id : null;
 }
 
+/** Telegram's limit on a photo caption. */
+export const CAPTION_MAX = 1024;
+
+/**
+ * Sends a photo (a public https URL or a file_id Telegram already holds) with
+ * a plain-text caption. Returns the new message id and the photo's file_id,
+ * so the next post can send the same picture without Telegram fetching it
+ * again; null on any failure.
+ */
+export async function sendPhoto(
+  chatId: number,
+  photo: string,
+  caption: string,
+  opts: SendOptions = {},
+): Promise<{ messageId: number; fileId: string | null } | null> {
+  if (caption.length > CAPTION_MAX) return null;
+  const body: Record<string, unknown> = { chat_id: chatId, photo, caption };
+  if (opts.threadId) body.message_thread_id = opts.threadId;
+  if (opts.replyTo) body.reply_parameters = { message_id: opts.replyTo, allow_sending_without_reply: true };
+  if (opts.parseMode) body.parse_mode = opts.parseMode;
+  const r = await call<{ message_id: number; photo?: TgPhotoSize[] }>("sendPhoto", body);
+  if (!r.ok || !r.result) return null;
+  const sizes = r.result.photo ?? [];
+  return { messageId: r.result.message_id, fileId: sizes.length ? sizes[sizes.length - 1]!.file_id : null };
+}
+
 /** Deletes a message. Works only while the bot is an admin with Delete messages. */
 export async function deleteMessage(chatId: number, messageId: number): Promise<boolean> {
   return (await call("deleteMessage", { chat_id: chatId, message_id: messageId })).ok;
@@ -156,6 +182,11 @@ export async function deleteMessage(chatId: number, messageId: number): Promise<
  */
 export async function banMember(chatId: number, userId: number): Promise<boolean> {
   return (await call("banChatMember", { chat_id: chatId, user_id: userId, revoke_messages: true })).ok;
+}
+
+/** Lets someone the bot banned join the group again. Only lifts a ban; never removes a member. */
+export async function unbanMember(chatId: number, userId: number): Promise<boolean> {
+  return (await call("unbanChatMember", { chat_id: chatId, user_id: userId, only_if_banned: true })).ok;
 }
 
 /** The bot's own account, read once per server instance. */
