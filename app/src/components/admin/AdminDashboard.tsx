@@ -21,6 +21,7 @@ import { relayChainName } from "@/lib/bridge";
 import type { RelayVolume } from "@/lib/relayVolume";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
+import { ActivityFeed, ChainCards, MovedHero, Stat, VolumeChart, type Moved, type VolumeDay } from "./AdminCharts";
 
 type MetricsPayload = {
   ok: boolean;
@@ -189,13 +190,6 @@ const NEW_EVENTS = [
 
 /** Payroll events come from the payroll flow; the first name present is the one counted. */
 const PAYROLL_KEYS = ["payroll_run_finished", "payroll_run_success", "payroll_run_paid", "payroll_run", "payroll_run_submit", "payroll_paid"];
-
-const KIND_LABEL: Record<string, string> = {
-  deposit: "Deposit",
-  transfer: "Private transfer",
-  cashout: "Cash-out",
-  trade: "Private trade",
-};
 
 const usdFmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 
@@ -586,8 +580,22 @@ export function AdminDashboard() {
     ["bugs", "Bug reports"],
   ];
   const liveRelay = relay && "enabled" in relay && relay.enabled ? relay : null;
-  const claimed = claim.totals.link_claimed;
-  const made = claim.totals.link_created;
+  // The public edges only: deposits and cash-outs carry amounts on chain; private payments never do.
+  const moved: Moved | null =
+    rev && agg
+      ? {
+          inUsd: rev.depositVolume.all,
+          outUsd: rev.cashoutVolume.all,
+          d1: rev.depositVolume.d1 + rev.cashoutVolume.d1,
+          d7: rev.depositVolume.d7 + rev.cashoutVolume.d7,
+          deposits: agg.deposits,
+          cashouts: agg.cashouts,
+        }
+      : null;
+  const volumeDays: VolumeDay[] = (rev?.daily ?? [])
+    .filter((d) => !isMain || d.day >= MAINNET_DAY)
+    .map((d) => ({ day: d.day, inUsd: d.depositUsd, outUsd: d.cashoutUsd, txs: d.txs }));
+  const todayTransfers = agg?.daily.at(-1)?.transfers ?? 0;
 
   const tabButton = ([id, label]: [Tab, string]) => (
     <button
@@ -709,77 +717,166 @@ export function AdminDashboard() {
 
         {shown === "overview" && (
           <>
-            <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Kpi
-                label="TVL"
-                value={agg ? fmtUsd(agg.heldUsd) : "Not read yet"}
-                sub={agg?.unpriced.length ? `${money}, plus ${agg.unpriced.length} unpriced` : `${money}, held in the vaults`}
-              />
-              <Kpi
-                label={isMain ? "Revenue since launch" : "Fees, 30 days"}
-                value={revenue ? fmtUsd(isMain ? revenue.total.all : revenue.total.d30) : "Not read yet"}
-                sub={revenue ? (isMain ? `cash-out fees; ${fmtUsd(revenue.total.d1)} in 24h` : `${fmtUsd(revenue.total.all)} all time`) : "after the next chain read"}
-              />
-              <Kpi
-                label={isMain ? "Volume since launch" : "Volume, 30 days"}
-                value={rev ? fmtUsd(isMain ? rev.depositVolume.all + rev.cashoutVolume.all : rev.depositVolume.d30 + rev.cashoutVolume.d30) : "Not read yet"}
-                sub={
-                  rev
-                    ? isMain
-                      ? `${fmtUsd(rev.depositVolume.all)} in, ${fmtUsd(rev.cashoutVolume.all)} out`
-                      : `${fmtUsd(rev.depositVolume.d30)} in, ${fmtUsd(rev.cashoutVolume.d30)} out`
-                    : "deposits and cash-outs"
-                }
-              />
-              <Kpi
-                label="Active wallets, 7 days"
-                value={rev ? n(rev.users.d7) : "Not read yet"}
-                sub={rev ? `${n(rev.users.d1)} in 24h, ${n(rev.users.d30)} in 30 days` : "deposited or cashed out"}
-              />
-            </section>
-
-            <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Kpi label="Depositor wallets" value={n(agg?.depositors)} sub="deposited at least once" />
-              <Kpi label="Private transfers" value={n(agg?.transfers)} sub="all time, on-chain" />
-              <Kpi
-                label="Cash-outs"
-                value={n(agg?.cashouts)}
-                sub={rev ? `${n(rev.txs.all)} transactions in all` : "all time, on-chain"}
-              />
-              <Kpi
-                label="Claim links, 14 days"
-                value={`${n(claimed)} claimed`}
-                sub={
-                  claim.mixed
-                    ? `${n(made)} made, ${n(claim.totals.link_opened)} opened since counting by network; launch day before that: ${n(claim.mixed.link_created)} made, ${n(claim.mixed.link_claimed)} claimed, either network`
-                    : `${n(made)} made in the app, ${n(claim.totals.link_opened)} opened`
-                }
-              />
-            </section>
-
-            <p className="flex flex-wrap gap-x-6 gap-y-1.5 text-[13px] text-mute">
-              <span>
-                Last activity <span className="text-soft">{fmtWhen(agg?.lastActivity)}</span>
-              </span>
-              <span>
-                Chain read <span className="text-soft">{oc ? `${fmtAge(oc.ageSec)}, ${oc.source === "fresh" ? "just now" : `cached in ${oc.source}`}` : "not yet"}</span>
-              </span>
-              <span>
-                Product events <span className="tnum text-soft">{n(prod.total)}</span>
-              </span>
-              {isMain && (
-                <span>
-                  Bridges and swaps, 30 days{" "}
-                  <span className="tnum text-soft">
-                    {liveRelay
-                      ? `${fmtUsd(liveRelay.last30.bridge.inUsd + liveRelay.last30.swap.inUsd)} in ${n(liveRelay.last30.bridge.count + liveRelay.last30.swap.count)}`
-                      : n((counters.bridge_arrived ?? 0) + (counters.swap_success ?? 0))}
+            <MovedHero
+              moved={moved}
+              window={isMain ? "since launch" : "all time"}
+              testnet={!isMain}
+              footer={
+                <span className="flex flex-wrap gap-x-6 gap-y-1.5">
+                  <span>
+                    Last activity <span className="text-soft">{fmtWhen(agg?.lastActivity)}</span>
                   </span>
+                  <span>
+                    Chain read <span className="text-soft">{oc ? `${fmtAge(oc.ageSec)}, ${oc.source === "fresh" ? "just now" : `cached in ${oc.source}`}` : "not yet"}</span>
+                  </span>
+                  {isMain && liveRelay && (
+                    <span>
+                      Bridged and swapped through Gloam, 30 days{" "}
+                      <span className="tnum text-soft">
+                        {fmtUsd(liveRelay.last30.bridge.inUsd + liveRelay.last30.swap.inUsd)}
+                      </span>
+                      , not added above: bridged money counts once it is deposited
+                    </span>
+                  )}
                 </span>
-              )}
-            </p>
+              }
+            />
 
-            <Panel title="By network">
+            <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Stat
+                label="In the vault now"
+                value={agg ? fmtUsd(agg.heldUsd) : null}
+                sub={agg?.unpriced.length ? `${money}, plus ${agg.unpriced.length} unpriced` : `${money}, across both chains`}
+              />
+              <Stat
+                label="Private payments"
+                value={agg ? n(agg.transfers) : null}
+                sub={`${n(todayTransfers)} today (UTC). Counted, never summed: amounts stay hidden`}
+              />
+              <Stat
+                label={isMain ? "Fees earned" : "Fees, play money"}
+                value={revenue ? fmtUsd(revenue.total.all) : null}
+                sub={rev ? `${isMain ? "since launch" : "all time"}, ${fmtUsd(rev.owedUsd)} to collect` : "after the next chain read"}
+              />
+              <Stat
+                label="Wallets"
+                value={agg ? n(agg.activeWallets) : null}
+                sub={`${n(agg?.depositors)} deposited${rev ? `, ${n(rev.users.d7)} active in 7 days` : ""}`}
+              />
+            </section>
+
+            <Panel title={isMain ? (volumeDays.length < 30 ? "Money in and out by day, since launch" : "Money in and out by day, last 30 days") : "Money in and out by day, last 30 days"}>
+              <VolumeChart
+                days={volumeDays}
+                caption={`Daily deposits and cash-outs in dollars, ${isMain ? "mainnet" : "testnet"}`}
+              />
+              <p className="mt-4 text-[13px] leading-relaxed text-mute">
+                UTC days, {money}. Deposits rise above the line, cash-outs drop below it. Priced at today&apos;s prices:
+                stablecoins at $1, ETH {oc?.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "not priced right now"}
+                {isMain ? ", $GLOAM from DEX Screener" : ""}.
+              </p>
+            </Panel>
+
+            <ChainCards nets={sideNets} totalMoved={moved ? moved.inUsd + moved.outUsd : 0} name={nameOf} />
+
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+              <Panel title="Latest activity">
+                <ActivityFeed rows={recentTx} name={adminName} />
+              </Panel>
+              <Panel title="Claim links, last 14 days">
+                <BarChart rows={claim.steps} />
+                <p className="mt-5 text-[13px] leading-relaxed text-mute">
+                  {claim.mixed
+                    ? `Launch day before counting by network: ${n(claim.mixed.link_created)} made, ${n(claim.mixed.link_claimed)} claimed, either network, not added here.`
+                    : "Totals only, counted without cookies or ids."}{" "}
+                  The day-by-day table and how each step is counted are below.
+                </p>
+              </Panel>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <Panel title="Funnel">
+                <BarChart rows={funnel} />
+                <p className="mt-5 text-[13px] leading-relaxed text-mute">
+                  Event counts, not unique people, except first deposits, which are unique wallets read from the chain.
+                  Recording demo sessions are not counted.
+                </p>
+              </Panel>
+              <Panel title="Last 14 days">
+                <DataTable
+                  headers={["Day", "Active wallets", "Deposits", "Transfers", "Cash-outs", "App views", "Connects", "Proofs"]}
+                  rows={days.map((d) => [
+                    fmtDay(d.day),
+                    n(d.chain?.activeWallets),
+                    n(d.chain?.deposits),
+                    n(d.chain?.transfers),
+                    n(d.chain?.cashouts),
+                    n(d.ev.app_view),
+                    n(d.ev.wallet_connect),
+                    n(d.ev.proof_created),
+                  ])}
+                  empty="No days yet"
+                  minWidth={620}
+                />
+                <p className="mt-4 text-[13px] leading-relaxed text-mute">
+                  UTC days. Active wallets deposited or received a cash-out that day.
+                </p>
+              </Panel>
+            </div>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <Panel title="How claim links are counted">
+                <p className="text-[13px] leading-relaxed text-mute">
+                  Totals only, counted without cookies or ids. Claimed can run ahead of made: claims count every claim link
+                  or code, while made counts only links made in this app whose payment landed (payroll links since 21 Oct;
+                  codes from the SDK, agents or before 13 Oct are not counted). Opened counts each link once per browser, so a
+                  link opened in a chat app and again in a wallet counts twice. Counting by network started on launch day at
+                  17:43 UTC; launch-day counts from before that could be either network, so they are listed apart and not
+                  added to either total. Everything before launch day is Testnet.
+                </p>
+              </Panel>
+              <Panel title="Claim links by day">
+                <DataTable
+                  headers={["Day", "Made", "Opened", "Claimed", "Claimer paid"]}
+                  rows={claim.rows.map((d) => [
+                    d.label ? (
+                      <span key="d" className="text-mute">
+                        {fmtDay(d.day)}, {d.label}
+                      </span>
+                    ) : (
+                      fmtDay(d.day)
+                    ),
+                    n(d.link_created),
+                    n(d.link_opened),
+                    n(d.link_claimed),
+                    n(d.claimer_sent),
+                  ])}
+                  empty="No claim links yet"
+                  minWidth={420}
+                />
+              </Panel>
+            </div>
+            <Panel title="Held by asset">
+              <DataTable
+                headers={["Network", "Asset", "Held now", "USD", "Deposited", "Cashed out"]}
+                rows={sideNets.flatMap((m) =>
+                  m.assets.map((a) => [
+                    nameOf(m),
+                    a.symbol,
+                    a.held ?? "Unknown",
+                    fmtUsd(a.heldUsd),
+                    `${a.deposited} (${a.depositCount})`,
+                    `${a.cashedOut} (${a.cashoutCount})`,
+                  ])
+                )}
+                empty="Nothing held or moved yet"
+              />
+              <p className="mt-4 text-[13px] leading-relaxed text-mute">
+                Stablecoins count as $1. ETH {oc?.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "is not priced right now"};
+                stock tokens at live equity marks{oc?.prices.stocks === "live" ? "" : ", not available right now"}.
+                Counts in brackets.
+              </p>
+            </Panel>
+            <Panel title="By network, in detail">
               <DataTable
                 headers={["", ...sideNets.map(nameOf), "Total"]}
                 rows={[
@@ -840,132 +937,6 @@ export function AdminDashboard() {
                 Current vaults only, {money}. Active wallets deposited or received a cash-out; transfers and trades carry
                 no wallet. The total counts a wallet used on both networks once.
               </p>
-            </Panel>
-
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <Panel title="Claim links, last 14 days">
-                <BarChart rows={claim.steps} />
-                <p className="mt-5 text-[13px] leading-relaxed text-mute">
-                  Totals only, counted without cookies or ids. Claimed can run ahead of made: claims count every claim link
-                  or code, while made counts only links made in this app whose payment landed (payroll links since 21 Oct;
-                  codes from the SDK, agents or before 13 Oct are not counted). Opened counts each link once per browser, so a
-                  link opened in a chat app and again in a wallet counts twice. Counting by network started on launch day at
-                  17:43 UTC; launch-day counts from before that could be either network, so they are listed apart and not
-                  added to either total. Everything before launch day is Testnet.
-                </p>
-              </Panel>
-              <Panel title="Claim links by day">
-                <DataTable
-                  headers={["Day", "Made", "Opened", "Claimed", "Claimer paid"]}
-                  rows={claim.rows.map((d) => [
-                    d.label ? (
-                      <span key="d" className="text-mute">
-                        {fmtDay(d.day)}, {d.label}
-                      </span>
-                    ) : (
-                      fmtDay(d.day)
-                    ),
-                    n(d.link_created),
-                    n(d.link_opened),
-                    n(d.link_claimed),
-                    n(d.claimer_sent),
-                  ])}
-                  empty="No claim links yet"
-                  minWidth={420}
-                />
-              </Panel>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <Panel title="Funnel">
-                <BarChart rows={funnel} />
-                <p className="mt-5 text-[13px] leading-relaxed text-mute">
-                  Event counts, not unique people, except first deposits, which are unique wallets read from the chain.
-                  Recording demo sessions are not counted.
-                </p>
-              </Panel>
-              <Panel title="Last 14 days">
-                <DataTable
-                  headers={["Day", "Active wallets", "Deposits", "Transfers", "Cash-outs", "App views", "Connects", "Proofs"]}
-                  rows={days.map((d) => [
-                    fmtDay(d.day),
-                    n(d.chain?.activeWallets),
-                    n(d.chain?.deposits),
-                    n(d.chain?.transfers),
-                    n(d.chain?.cashouts),
-                    n(d.ev.app_view),
-                    n(d.ev.wallet_connect),
-                    n(d.ev.proof_created),
-                  ])}
-                  empty="No days yet"
-                  minWidth={620}
-                />
-                <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                  UTC days. Active wallets deposited or received a cash-out that day.
-                </p>
-              </Panel>
-            </div>
-
-            <Panel title="Held by asset">
-              <DataTable
-                headers={["Network", "Asset", "Held now", "USD", "Deposited", "Cashed out"]}
-                rows={sideNets.flatMap((m) =>
-                  m.assets.map((a) => [
-                    nameOf(m),
-                    a.symbol,
-                    a.held ?? "Unknown",
-                    fmtUsd(a.heldUsd),
-                    `${a.deposited} (${a.depositCount})`,
-                    `${a.cashedOut} (${a.cashoutCount})`,
-                  ])
-                )}
-                empty="Nothing held or moved yet"
-              />
-              <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                Stablecoins count as $1. ETH {oc?.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "is not priced right now"};
-                stock tokens at live equity marks{oc?.prices.stocks === "live" ? "" : ", not available right now"}.
-                Counts in brackets.
-              </p>
-            </Panel>
-
-            <Panel title="Recent on-chain activity">
-              <DataTable
-                headers={["Network", "Kind", "Detail", "Wallet", "Tx", "When"]}
-                rows={recentTx.map((tx) => {
-                  const net = getNetwork(isNetworkKey(tx.network) ? tx.network : "robinhood");
-                  return [
-                    adminName(net),
-                    KIND_LABEL[tx.kind] ?? tx.kind,
-                    tx.detail,
-                    tx.wallet ? (
-                      <a
-                        key="a"
-                        href={net.explorerAddress(tx.wallet)}
-                        className="text-mute transition-colors hover:text-foreground"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {shortAddress(tx.wallet, 4)}
-                      </a>
-                    ) : (
-                      <span key="a" className="text-faint">
-                        Private
-                      </span>
-                    ),
-                    <a
-                      key="t"
-                      href={net.explorerTx(tx.tx)}
-                      className="text-mute transition-colors hover:text-foreground"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {tx.tx.slice(0, 10)}…
-                    </a>,
-                    tx.ts ? fmtWhen(tx.ts) : `#${tx.block}`,
-                  ];
-                })}
-                empty="No on-chain activity yet"
-              />
             </Panel>
           </>
         )}

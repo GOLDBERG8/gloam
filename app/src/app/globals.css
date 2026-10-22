@@ -123,6 +123,10 @@
   --shadow-pop: 0 2px 6px rgba(11, 12, 14, 0.05), 0 28px 70px -24px rgba(11, 12, 14, 0.3);
   --chart-up: #2e7d53;
   --chart-down: #b4362a;
+  /* Money in and out on /admin. Checked with the dataviz validator: CVD and normal-vision
+     separation pass; the gray is deliberately neutral, so direction and labels carry it too. */
+  --chart-in: #2e7d53;
+  --chart-out: #979ba2;
 }
 
 /* Native dropdown lists take their colours from the option itself on Windows,
@@ -188,6 +192,8 @@ html[data-theme="dark"],
   --shadow-pop: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 30px 80px -24px rgba(0, 0, 0, 0.85);
   --chart-up: #8fd3ad;
   --chart-down: #f08a7e;
+  --chart-in: #4fa97b;
+  --chart-out: #6c7077;
 }
 
 /* Inside the app the ground drops to a soft neutral so cards float on it
