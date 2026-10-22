@@ -27,6 +27,7 @@ Add shielded balances, private payments, and selective disclosure to any app or 
 - [Selective disclosure](#selective-disclosure)
 - [Private agents](#private-agents)
 - [Private agent payments (x402)](#private-agent-payments-x402)
+- [Take payments and read their notes](#take-payments-and-read-their-notes)
 - [API reference](#api-reference)
 - [Framework integration](#framework-integration)
 - [Examples](#examples)
@@ -47,7 +48,7 @@ The Gloam vault app is the reference implementation, not a special case. The sam
 ## What you can build
 
 - **Shielded balances.** Deposit stablecoins (USDG on Robinhood Chain; USDC.e, pathUSD, USDT0 or OUSD on Tempo) or $GLOAM into a private balance only the holder can see or spend. On testnet you can also practice with test ETH and stock tokens.
-- **Private payments.** Send inside the vault to a receive tag, with on-chain encrypted discovery. No public transfer, no visible amount.
+- **Private payments.** Send inside the vault to a receive tag, with on-chain encrypted discovery where the network has a payment-message board (the testnets today; on mainnet the payer hands over a sealed code). No public transfer, no visible amount.
 - **Cash out.** Unshield back to a public balance with a browser- or node-generated Groth16 proof.
 - **Selective disclosure.** Let a holder prove one balance to a chosen party, an auditor or a counterparty, revealing nothing else. Provable, not a dark pool.
 - **Private agents.** The same core runs server-side, so an autonomous agent can hold and move value under policy with its size and strategy hidden.
@@ -360,6 +361,50 @@ The sealed ticket is the same format the Gloam app uses for paying a receive tag
 
 **This is not a Tempo Zone.** A Zone is operator-visible: the zone operator sees every transaction inside it. Gloam is private from the public and from any operator; only the payer and the payee learn the amount. Compliance visibility is opt-in per payment via `buildComplianceDisclosure`, an issuer-scoped disclosure that reuses the shield-circuit proof rather than handing an operator a blanket view. See [`TEMPO_EXPANSION.md`](https://github.com/cryptoduke01/gloam/blob/main/TEMPO_EXPANSION.md).
 
+## Take payments and read their notes
+
+New in 0.2.0. A service can ask to be paid privately, with a note on each payment (an invoice number, an agent ID), and credit each payment by its note. Only your key reads the note, and nothing on chain ties the payer to it.
+
+1. **Hold a receive key.** `generateReceiveKey()` gives you a Gloam address (`gloamr1.…`) to share and a private key to keep on your server.
+2. **Make a request link** with `buildPaymentRequestLink`: the same link the Gloam app makes, with your address, the network, the token, an optional amount and a note of up to 80 characters. A longer note is refused, not cut.
+3. **The payer pays it** from their private balance in Gloam. The note travels inside the payment, sealed to your address.
+4. **Find it.** Where the network has a payment-message board, `scanIncomingPayments` returns every payment sealed to your key, with its amount, token and note. It only returns payments that are in the vault and not yet spent, read at one block, and it splits any block range the node refuses. Resume from `scannedTo + 1`.
+5. **Secure it, then credit.** Until you move it, the payer could still spend it back. `sweepReceivedNote` moves it into a note only you know, through the Gloam relay, so your server needs no gas. Credit only when it returns `final: true`.
+
+```ts
+import {
+  mainnetNetwork, generateReceiveKey, buildPaymentRequestLink,
+  scanIncomingPayments, openIncomingPayment, notePackageToExport,
+  sweepReceivedNote, sweepChainFromClient, relaySubmitter,
+} from "@gloamtrade/sdk";
+
+const net = mainnetNetwork("robinhood")!;
+const key = await generateReceiveKey();       // keep key.privateJwk secret
+
+const link = buildPaymentRequestLink({
+  payTo: key.tag, network: net, asset: "USDG", amount: "25", note: "agent:42",
+});
+
+// With a payment-message board: scan for payments to your key.
+const { payments, scannedTo } = await scanIncomingPayments({ client, network: net, receiveKey: key });
+
+// Without one (mainnet today): check the sealed code the payer hands over.
+const check = await openIncomingPayment({ client, network: net, receiveKey: key, sealedTicket: code });
+
+for (const p of payments) {
+  const r = await sweepReceivedNote({
+    note: await notePackageToExport(p.notePackage),
+    poolAddress: net.pool, chainId: net.chainId, prove,
+    chain: sweepChainFromClient(client, { pool: net.pool, fromBlock: net.deployBlock }),
+    submit: relaySubmitter(),
+    beforeSubmit: (fresh) => saveNote(fresh),  // persist before it is sent
+  });
+  if (r.final) creditAgent(p.note, p.amountWei);
+}
+```
+
+**Mainnet today:** Robinhood Chain and Tempo mainnet have no payment-message board yet, so a payment to a Gloam address is not posted on chain there, and `scanIncomingPayments` throws `NoPayMemoBoardError`. After paying, the payer's app shows a sealed code (`gloam2t.…`). Take it from the payer (a paste box, your API) and check it with `openIncomingPayment`, which says whether it is ready, has not landed yet, or was already spent. The testnets have boards, so scanning works there now. The full runnable version is [`examples/receive-and-credit.ts`](https://github.com/cryptoduke01/gloam/tree/main/packages/sdk/examples/receive-and-credit.ts).
+
 ## API reference
 
 Everything exports from one barrel. The crypto and math core is pure and runs anywhere. Proving (snarkjs plus artifacts) and storage (notes, keys) are injected, so the same core serves a browser app and a node signer.
@@ -457,6 +502,22 @@ POOL_TRANSFER_ABI, POOL_STATE_ABI, transferCallArgs(intent)  // sign a transfer 
 
 A sweep spends the received note into a fresh note of the whole amount plus a zero-value change note, both with secrets only the payee knows. It checks the nullifier first (`already_spent` if the payer got there), stores nothing itself (persist the fresh note in `beforeSubmit`), and reports `final: true` only once the sweep confirms or its fresh note is seen on chain.
 
+### Request links and incoming payments (new in 0.2.0)
+
+```ts
+buildPaymentRequestLink({ payTo, network, asset, amount?, note?, name?, origin? }): string  // the app's exact link
+parsePaymentRequestLink(link)                                 // read the fields back
+normalizeRequestAmount(input, asset), findRequestAsset(net, s), REQUEST_NOTE_MAX (80)
+scanIncomingPayments({ client, network, receiveKey, fromBlock?, toBlock?, board? })
+  : Promise<{ payments: IncomingPayment[]; scannedTo: bigint }>  // where the network has a board
+openIncomingPayment({ client, network, receiveKey, sealedTicket })
+  : Promise<{ status: "ready" | "not_in_vault_yet" | "already_spent"; payment }>  // a code handed over
+payMemoBoardFor(chainId), PAY_MEMO_BOARDS, NoPayMemoBoardError
+cleanPaymentNote(s), PAYMENT_NOTE_MAX                         // the app's note rules
+```
+
+`IncomingPayment` carries `commitment`, `nullifier`, `amountWei`, `asset`, `note`, the `sealedTicket`, the opened `notePackage` (pass `notePackageToExport(notePackage)` to `sweepReceivedNote`), and where it was posted. Note packages now carry the payer's note under `n`, byte for byte like the app.
+
 ### Merkle, rates, privacy, constants
 
 ```ts
@@ -496,7 +557,7 @@ export default nextConfig;
 
 ## Examples
 
-Four runnable references, one for each shape a builder starts from:
+Runnable references, one for each shape a builder starts from:
 
 | Example | Runtime | What it shows |
 | --- | --- | --- |
@@ -504,6 +565,7 @@ Four runnable references, one for each shape a builder starts from:
 | [pay-bot](https://github.com/cryptoduke01/gloam/tree/main/examples/pay-bot) | Node | A private payment end to end: shield, sync, send. |
 | [pay-x402](https://github.com/cryptoduke01/gloam/tree/main/examples/pay-x402) | Node | A private agent payment over x402: price, pay sealed to the payee, sweep, serve. |
 | [web-shield](https://github.com/cryptoduke01/gloam/tree/main/examples/web-shield) | Browser | Shield in the browser, read the balance back from chain. |
+| [receive-and-credit](https://github.com/cryptoduke01/gloam/tree/main/packages/sdk/examples/receive-and-credit.ts) | Node | Take payments by request link, read each payment's note, secure it, credit the account it names. |
 
 ![Add money privately in the browser](https://raw.githubusercontent.com/cryptoduke01/gloam/main/app/public/media/readme-browser.jpg)
 

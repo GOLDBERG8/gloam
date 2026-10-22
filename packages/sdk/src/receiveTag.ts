@@ -24,6 +24,7 @@ import type { Address, Hex } from "viem";
 import { NATIVE_ASSET } from "./constants.js";
 import { noteNullifierPoseidon } from "./note.js";
 import { fieldToHex, hexToField } from "./poseidon.js";
+import { cleanPaymentNote } from "./paymentNote.js";
 import type { NoteExport } from "./witness.js";
 
 export const RECEIVE_TAG_PREFIX = "gloamr1.";
@@ -200,10 +201,13 @@ export interface NotePackage {
   secret: Hex;
   commitment: Hex;
   message?: string;
+  /** The payer's private note to the payee (an invoice number, an agent ID), cleaned, at most 80 characters. */
+  note?: string;
 }
 
-/** Compact gloam1. form, byte-identical to the app's encodeNotePackage. */
+/** Compact gloam1. form, byte-identical to the app's encodeNotePackage (a note goes under "n"). */
 export function encodeNotePackage(pack: Omit<NotePackage, "v" | "type" | "scheme"> & Partial<NotePackage>): string {
+  const note = cleanPaymentNote(pack.note);
   const json = JSON.stringify({
     v: 1,
     t: "gloam-private-note",
@@ -213,6 +217,8 @@ export function encodeNotePackage(pack: Omit<NotePackage, "v" | "type" | "scheme
     w: pack.amountWei,
     k: pack.secret,
     c: pack.commitment,
+    // Only when there is one, so a package without a note keeps the old bytes.
+    ...(note ? { n: note } : {}),
   });
   return NOTE_PACKAGE_PREFIX + b64urlEncode(new TextEncoder().encode(json));
 }
@@ -238,6 +244,8 @@ export function decodeNotePackage(input: string): NotePackage {
     secret: String(obj.secret ?? obj.k ?? "") as Hex,
     commitment: String(obj.commitment ?? obj.c ?? "") as Hex,
   };
+  const note = cleanPaymentNote(obj.note ?? obj.n);
+  if (note) pack.note = note;
   if (!/^0x[0-9a-fA-F]+$/.test(pack.secret) || !/^\d+$/.test(pack.amountWei) || !/^0x[0-9a-fA-F]+$/.test(pack.commitment)) {
     throw new Error("Not a valid Gloam note package.");
   }

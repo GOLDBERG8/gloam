@@ -23,6 +23,8 @@
  *   x402      private agent payments over HTTP 402 (settle-then-prove)
  *   receive   receive tags: seal a payment so only its payee can open it
  *   sweep     payee side: move a received payment to a fresh note (final)
+ *   requests  payment request links (pay my Gloam address, with a private note)
+ *   incoming  payee side: find payments sealed to your key and read their notes
  *   api       GloamApiClient: the partner API (relay with a key, proofs, links)
  *   constants pool + verifier addresses, chain ids, networks (mainnet and
  *             testnet), assets + beta limits, cash-out fee, circuit files
@@ -35,7 +37,7 @@
  * pools have no swap at all), so its on-chain path reverts today.
  */
 
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "0.2.0";
 
 export * from "./intents.js";
 export * from "./rates.js";
@@ -54,5 +56,8 @@ export * from "./sync.js";
 export * from "./x402.js";
 export * from "./receiveTag.js";
 export * from "./sweep.js";
+export * from "./requests.js";
+export * from "./incoming.js";
+export { PAYMENT_NOTE_MAX, cleanPaymentNote } from "./paymentNote.js";
 export * from "./relay.js";
 export * from "./api.js";
