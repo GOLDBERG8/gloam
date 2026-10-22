@@ -449,7 +449,28 @@ export type LocalNote = {
    * dropped, because it may still land (lib/claimSweep reconciles it).
    */
   sweepPending?: boolean;
+  /**
+   * A cash out of this note scheduled with the relay ("cash out later",
+   * lib/cashOutLater). While it waits or is sent it is out of the balance; when
+   * it comes back unsent (expired, failed, cancelled) the note is spendable again.
+   */
+  cashOut?: CashOutMark;
 };
+
+export type CashOutMark = {
+  /** The relay's job id (no secret: the job holds only the proof and its public inputs). */
+  job: string;
+  /** When it goes out, about (ms). */
+  at: number;
+  /** Where it goes, for the note's own row. */
+  to: Address;
+  state: "scheduled" | "sent" | "expired" | "failed" | "cancelled";
+};
+
+/** A cash out is waiting or on its way: the note will be spent, so it is not counted. */
+export function cashOutPending(n: Pick<LocalNote, "cashOut">): boolean {
+  return n.cashOut?.state === "scheduled" || n.cashOut?.state === "sent";
+}
 
 export function confirmedNotes(notes: LocalNote[]): LocalNote[] {
   return notes.filter((n) => Boolean(n.txHash) && n.status !== "recovered");
@@ -459,11 +480,12 @@ export function confirmedNotes(notes: LocalNote[]): LocalNote[] {
  * Notes you can still spend (have a local secret).
  * Includes imports (no txHash yet) and confirmed shields/transfers.
  * Excludes recovered and chain-history-only rows without a secret.
- * Excludes historic sender payment rows (id pay-*), and a secured claim's
- * fresh note until its move lands (the claimed note still counts until then).
+ * Excludes historic sender payment rows (id pay-*), a secured claim's fresh
+ * note until its move lands (the claimed note still counts until then), and a
+ * note whose cash out is scheduled or on its way.
  */
 export function activeSpendableNotes(notes: LocalNote[]): LocalNote[] {
-  return notes.filter((n) => holdsSecret(n) && !n.sweepPending);
+  return notes.filter((n) => holdsSecret(n) && !n.sweepPending && !cashOutPending(n));
 }
 
 /** Not spent, and this browser has its secret (a pending secured claim too). */
@@ -626,7 +648,7 @@ export function saveLocalNote(note: LocalNote) {
 
 export function updateLocalNote(
   id: string,
-  patch: Partial<Pick<LocalNote, "leafIndex" | "txHash" | "status" | "secured" | "sweepPending">>
+  patch: Partial<Pick<LocalNote, "leafIndex" | "txHash" | "status" | "secured" | "sweepPending" | "cashOut">>
 ) {
   if (typeof window === "undefined") return;
   const next = getAllNotes().map((n) => (n.id === id ? { ...n, ...patch } : n));

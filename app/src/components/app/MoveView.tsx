@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { formatUnits, type Hex } from "viem";
-import { useReadContract, useWriteContract } from "wagmi";
+import { formatUnits, isAddress, type Address, type Hex } from "viem";
+import { useConfig, useReadContract, useWriteContract } from "wagmi";
+import { writeContract as writeContractNow } from "wagmi/actions";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { shortAddress } from "@/lib/chain";
@@ -103,6 +104,15 @@ import { SentLinks } from "./SentLinks";
 import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
 import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
 import { surelyNotSent } from "@/lib/walletErrors";
+import {
+  cancelCashOut,
+  dismissReturnedCashOut,
+  returnedCashOutNotes,
+  scheduleCashOut,
+  scheduledCashOutNotes,
+  type CashOutWindow,
+} from "@/lib/cashOutLater";
+import { freshPath, matchesRecentIncoming, roundDownToWhole, splitForCashOut } from "@/lib/cashOutSplit";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
@@ -122,7 +132,7 @@ type PayStyle = "direct" | "bearer";
 const TESTNET_CHAIN_IDS = new Set<number>([46630, 42431]);
 
 /** Relay failures after which the payment may still have gone out (a timeout, a lost reply). */
-const RELAY_MAYBE_SENT = new Set(["rpc", "network", "error", "in_flight"]);
+const RELAY_MAYBE_SENT = new Set(["rpc", "network", "error", "internal", "in_flight"]);
 
 export function MoveView() {
   const shieldLive = isShieldDeployed();
@@ -130,7 +140,8 @@ export function MoveView() {
   const { address, isConnected, chainId } = useAppAccount();
   const { network } = useNetwork();
   const onProduct = chainId === network.chainId;
-  const { open, refresh: refreshNotes } = useLocalShieldNotes(address);
+  const { open, local: allLocal, refresh: refreshNotes } = useLocalShieldNotes(address);
+  const wagmiConfig = useConfig();
   const {
     loading: treeLoading,
     error: treeError,
@@ -164,6 +175,12 @@ export function MoveView() {
     request ? null : readFirstPaySuggestion(searchParams, network.chainId)
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Cash out: how much ("" is the whole balance), when, and to which wallet.
+  const [cashOutInput, setCashOutInput] = useState("");
+  const [cashOutWhen, setCashOutWhen] = useState<"now" | CashOutWindow>("now");
+  const [cashOutDest, setCashOutDest] = useState<"mine" | "other">("mine");
+  const [otherTo, setOtherTo] = useState("");
+  const [scheduledNotice, setScheduledNotice] = useState<{ at: number; label: string } | null>(null);
   const [sendAmount, setSendAmount] = useState(
     () => request?.amount ?? suggestion?.amount ?? ""
   );
@@ -651,7 +668,33 @@ export function MoveView() {
   const { deposited: poolForCashOut } = usePoolDeposited(
     mode === "cashout" ? cashOutAsset : null
   );
-  const cashOutAmount = selected ? BigInt(selected.amountWei) : 0n;
+  // The whole balance unless a smaller amount is typed; a smaller one is set
+  // aside privately first (lib/cashOutSplit), then cashed out.
+  const noteWei = selected ? BigInt(selected.amountWei) : 0n;
+  const typedWei = cashOutInput.trim() && selected ? parseAssetAmount(cashOutInput.trim(), selected.asset) : null;
+  const cashOutAmountInvalid =
+    cashOutInput.trim() !== "" && (typedWei === null || typedWei <= 0n || typedWei > noteWei);
+  const cashOutAmount = typedWei !== null && !cashOutAmountInvalid ? typedWei : noteWei;
+  const cashOutPartial = !cashOutAmountInvalid && cashOutAmount < noteWei;
+  // Where it goes: the connected wallet, or another address (a fresh one is best).
+  const otherToClean = otherTo.trim();
+  const cashOutTo: Address | null =
+    cashOutDest === "mine" ? ((address as Address | undefined) ?? null) : isAddress(otherToClean) ? (otherToClean as Address) : null;
+  const depositWallets = useMemo(
+    () => new Set(allLocal.map((n) => n.from?.toLowerCase()).filter((a): a is string => Boolean(a))),
+    [allLocal]
+  );
+  const cashOutLinkWarning = !cashOutTo
+    ? null
+    : depositWallets.has(cashOutTo.toLowerCase())
+      ? "This wallet added money to Gloam, so the cash out can be linked back to you."
+      : address && cashOutTo.toLowerCase() === address.toLowerCase()
+        ? "This is the wallet you use with Gloam, so the cash out can be linked back to you."
+        : null;
+  const cashOutMatchesRecent =
+    selected != null && !cashOutAmountInvalid && matchesRecentIncoming(cashOutAmount, allLocal, selected.asset);
+  const scheduledRows = useMemo(() => scheduledCashOutNotes(allLocal), [allLocal]);
+  const returnedRows = useMemo(() => returnedCashOutNotes(allLocal), [allLocal]);
   // Cash-out fee (mainnet pools). The proof still spends the whole note; the
   // pool keeps the fee and pays the rest. Older pools fail this read: no fee.
   const demoMode = useDemo();
@@ -677,22 +720,42 @@ export function MoveView() {
   async function onCashOut() {
     if (!selected || !address || !network.pool || !poseidonMode) return;
     setError(null);
+    setScheduledNotice(null);
+    const later = cashOutWhen !== "now";
+    const amount = cashOutAmount;
+    const to = cashOutTo;
 
-    if (poolForCashOut != null && poolForCashOut < BigInt(selected.amountWei)) {
+    if (cashOutAmountInvalid || amount <= 0n || amount > noteWei) {
+      setError("Enter an amount up to this balance.");
+      return;
+    }
+    if (!to) {
+      setError("Paste the address to cash out to.");
+      return;
+    }
+    if (demoMode && (later || amount < noteWei)) {
+      setError("The demo cashes out whole balances, now.");
+      return;
+    }
+    if (later && !relayAvailable) {
+      setError("Cashing out later needs the Gloam relay, which is off right now. Cash out now instead.");
+      return;
+    }
+    if (poolForCashOut != null && poolForCashOut < amount) {
       setError(
-        `Not enough in the shared vault to cash out right now (${formatAssetLabel(poolForCashOut, selected.asset)} available, ${formatAssetLabel(selected.amountWei, selected.asset)} needed). It opens up once more of this asset is added.`
+        `Not enough in the shared vault to cash out right now (${formatAssetLabel(poolForCashOut, selected.asset)} available, ${formatAssetLabel(amount, selected.asset)} needed). It opens up once more of this asset is added.`
       );
       return;
     }
     // Never to the vault or the memo board: the money would be stuck there.
-    const targetProblem = cashOutTargetProblem(address, network);
+    const targetProblem = cashOutTargetProblem(to, network);
     if (targetProblem) {
       setError(targetProblem);
       return;
     }
-    // The cash out goes to this public wallet, relay or not (on Tempo, also
-    // checked against the asset's TIP-403 issuer policy).
-    const screen = await screenWallets([address], {
+    // The wallet it pays, relay or not (on Tempo, also checked against the
+    // asset's TIP-403 issuer policy).
+    const screen = await screenWallets([to], {
       chainId: network.chainId,
       asset: selected.asset,
       flow: "cashout",
@@ -708,37 +771,84 @@ export function MoveView() {
     setRelayHash(undefined);
     handledHash.current = null;
     pendingAction.current = "cashout";
-    spentNoteId.current = selected.id;
     pendingChange.current = null;
 
+    let splitDone = false;
     try {
-      const path = await pathForLeaf(selected.leafIndex!);
+      // A part of the balance: set it aside in its own private note first.
+      let target: LocalNote = selected;
+      let path: PoseidonMerklePath | null;
+      if (amount < noteWei) {
+        const startPath = await pathForLeaf(selected.leafIndex!);
+        if (!startPath) throw new Error("Could not read your private balance. Refresh and try again.");
+        target = await splitForCashOut({
+          note: selected,
+          amount,
+          path: startPath as PoseidonMerklePath,
+          owner: address as Address,
+          relayOn,
+          sendWithWallet: (t) =>
+            writeContractNow(wagmiConfig, {
+              address: network.pool!,
+              abi: shieldPoolAbi,
+              functionName: "transfer",
+              args: [t.proof, t.root, t.nullifier, [t.commitments[0], t.commitments[1]]],
+              gas: gasFor(network.chainId, TRANSFER_GAS_LIMIT),
+              chainId: network.chainId as never,
+            }),
+          onStatus: setStatus,
+        });
+        splitDone = true;
+        refreshNotes();
+        path = (await freshPath(target.commitment))?.path ?? null;
+      } else {
+        path = (await pathForLeaf(selected.leafIndex!)) as PoseidonMerklePath | null;
+      }
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
+      spentNoteId.current = target.id;
       setStatus("Proving privately, this takes 10 to 30 seconds…");
       const w = await buildPoseidonUnshieldWitness({
-        secretHex: selected.secret,
-        amount: BigInt(selected.amountWei),
-        asset: selected.asset,
-        to: address,
-        path: path as PoseidonMerklePath,
+        secretHex: target.secret,
+        amount: BigInt(target.amountWei),
+        asset: target.asset,
+        to,
+        path,
       });
       if (!w.checks.commitmentMatches) {
         throw new Error(w.blocker ?? "This balance does not match the vault.");
       }
       const { proofBytes } = await proveUnshieldInBrowser(w.circomInput);
+      const call = {
+        chainId: network.chainId,
+        proof: proofBytes,
+        root: fieldToBytes32(w.publicInputs.root),
+        nullifier: fieldToBytes32(w.publicInputs.nullifier),
+        asset: target.asset,
+        to,
+        amount: BigInt(target.amountWei),
+      };
+      if (later) {
+        setStatus("Scheduling with the Gloam relay…");
+        const job = await scheduleCashOut({ ...call, window: cashOutWhen as CashOutWindow });
+        // Out of the balance while it waits; the chain settles it once it goes out.
+        updateLocalNote(target.id, { cashOut: { job: job.id, at: job.sendAfter, to, state: "scheduled" } });
+        spentNoteId.current = null;
+        setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(target.amountWei, target.asset) });
+        setCashOutInput("");
+        refreshNotes();
+        setBusy(false);
+        setStatus(null);
+        void import("@/lib/track").then(({ track }) => {
+          track("unshield_scheduled", { window: cashOutWhen });
+        });
+        return;
+      }
       if (relayOn) {
         setStatus("Sending through the Gloam relay…");
-        const h = await relayUnshield({
-          chainId: network.chainId,
-          proof: proofBytes,
-          root: fieldToBytes32(w.publicInputs.root),
-          nullifier: fieldToBytes32(w.publicInputs.nullifier),
-          asset: selected.asset,
-          to: address,
-          amount: BigInt(selected.amountWei),
-        });
+        const h = await relayUnshield(call);
         setRelayHash(h);
         setSuccessTitle("Cashed out");
+        setCashOutInput("");
         return;
       }
       setStatus("Confirm the cash out in your wallet…");
@@ -746,26 +856,34 @@ export function MoveView() {
         address: network.pool,
         abi: shieldPoolAbi,
         functionName: "unshield",
-        args: [
-          proofBytes,
-          fieldToBytes32(w.publicInputs.root),
-          fieldToBytes32(w.publicInputs.nullifier),
-          selected.asset,
-          address,
-          BigInt(selected.amountWei),
-        ],
+        args: [call.proof, call.root, call.nullifier, call.asset, call.to, call.amount],
         gas: gasFor(network.chainId, SHIELD_GAS_LIMIT),
         chainId: network.chainId,
       });
       setSuccessTitle("Cashed out");
+      setCashOutInput("");
       void import("@/lib/track").then(({ track }) => {
         track("unshield_success");
       });
       // cash out is intentional exit, no onboarding mark
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Cash out failed");
+      const msg = e instanceof Error ? e.message : "Cash out failed";
+      // The first step landed: the amount is its own note in the balance now.
+      setError(splitDone ? `${msg} The amount is set aside in your private balance, so you can cash it out from there.` : msg);
       setBusy(false);
       setStatus(null);
+      refreshNotes();
+    }
+  }
+
+  async function cancelScheduled(note: LocalNote) {
+    if (!note.cashOut) return;
+    const ok = await cancelCashOut(note.cashOut.job);
+    if (ok) {
+      updateLocalNote(note.id, { cashOut: undefined });
+      refreshNotes();
+    } else {
+      setError("It is going out right now, or the relay could not be reached. It shows as cashed out once it lands; if not, try Cancel again.");
     }
   }
 
@@ -1951,28 +2069,88 @@ export function MoveView() {
                       Cashing out makes this amount public
                     </p>
                     <p className="mt-1 text-soft">
-                      The explorer will show the asset, the amount and your
-                      wallet. To keep the size private, send it privately or
-                      trade privately instead.
+                      The explorer will show the asset, the amount and the wallet
+                      it goes to. Cashing out later, a different amount, or to a
+                      fresh wallet makes it much harder to link back to you.
                     </p>
                   </div>
+
+                  {returnedRows.map((n) => (
+                    <div key={n.id} className="rounded-[16px] bg-surface px-4 py-3.5 text-[13px] leading-relaxed">
+                      <p className="text-foreground">
+                        {`Your cash out of ${formatAssetLabel(n.amountWei, n.asset)} didn't go out in time, so nothing moved. It's back in your private balance: cash out again.`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          dismissReturnedCashOut(n.id);
+                          refreshNotes();
+                        }}
+                        className="mt-2 font-medium underline underline-offset-4"
+                      >
+                        Got it
+                      </button>
+                    </div>
+                  ))}
+
                   {selected && (
                     <div className="rounded-[16px] bg-surface p-[16px] sm:p-5">
-                      <p className="text-[13px] text-mute">
-                        You get, in your connected wallet
+                      <label htmlFor="cashout-amt" className="text-[13px] text-mute">
+                        Amount
+                      </label>
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          id="cashout-amt"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={cashOutInput}
+                          onChange={(e) => setCashOutInput(e.target.value.replace(/[^0-9.]/g, ""))}
+                          placeholder={maxEth}
+                          aria-describedby="cashout-amt-help"
+                          className="tnum min-w-0 flex-1 bg-transparent text-[32px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-foreground"
+                        />
+                        <span className="shrink-0 text-[15px] text-mute">{assetLabel(selected.asset)}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCashOutInput("")}>
+                          All of it
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={roundDownToWhole(noteWei, assetDecimals(selected.asset)) <= 0n}
+                          onClick={() => {
+                            const whole = roundDownToWhole(cashOutAmountInvalid ? noteWei : cashOutAmount, assetDecimals(selected.asset));
+                            if (whole > 0n) setCashOutInput(formatUnits(whole, assetDecimals(selected.asset)));
+                          }}
+                        >
+                          Round it
+                        </button>
+                      </div>
+                      <p id="cashout-amt-help" className={`mt-2 text-[12.5px] leading-relaxed ${cashOutAmountInvalid ? "text-warn" : "text-mute"}`}>
+                        {cashOutAmountInvalid
+                          ? `Enter an amount up to ${formatAssetLabel(noteWei, selected.asset)}.`
+                          : cashOutPartial
+                            ? `First this sets ${formatAssetLabel(cashOutAmount, selected.asset)} aside privately, then cashes it out. The rest stays in your private balance.`
+                            : `The whole balance: ${formatAssetLabel(noteWei, selected.asset)}.`}
                       </p>
-                      <p className="tnum mt-2.5 truncate text-[32px] font-light leading-none tracking-[-0.02em] text-foreground">
-                        {formatAssetAmount(cashOutAmount - cashOutFee, selected.asset)}{" "}
-                        <span className="text-[15px] tracking-normal text-mute">
-                          {assetLabel(selected.asset)}
-                        </span>
-                      </p>
-                      {cashOutFeeBps > 0 && (
-                        <p className="tnum mt-2 text-[12.5px] text-mute">
-                          You receive {formatAssetLabel(cashOutAmount - cashOutFee, selected.asset)} (
-                          {formatFeePercent(cashOutFeeBps)} fee: {formatAssetLabel(cashOutFee, selected.asset)})
+                      {cashOutMatchesRecent && !cashOutAmountInvalid && (
+                        <p className="mt-2 text-[12.5px] leading-relaxed text-warn">
+                          This matches money that came in recently. Cash out later or a different amount to keep them apart.
                         </p>
                       )}
+                      <div className="mt-4 border-t border-line pt-3">
+                        <p className="text-[13px] text-mute">You get</p>
+                        <p className="tnum mt-1.5 truncate text-[22px] font-light leading-tight text-foreground">
+                          {formatAssetAmount(cashOutAmount - cashOutFee, selected.asset)}{" "}
+                          <span className="text-[14px] text-mute">{assetLabel(selected.asset)}</span>
+                        </p>
+                        {cashOutFeeBps > 0 && (
+                          <p className="tnum mt-1 text-[12.5px] text-mute">
+                            {formatFeePercent(cashOutFeeBps)} fee: {formatAssetLabel(cashOutFee, selected.asset)}
+                          </p>
+                        )}
+                      </div>
                       <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3 text-[13px]">
                         <span className="text-mute">
                           In the vault ({assetLabel(selected.asset)})
@@ -2001,6 +2179,110 @@ export function MoveView() {
                       ) : null}
                     </div>
                   )}
+
+                  <div>
+                    <p id="cashout-to" className="text-[13px] text-mute">To</p>
+                    <div role="radiogroup" aria-labelledby="cashout-to" className="mt-2 grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          ["mine", "My wallet", address ? shortAddress(address) : "Connect a wallet"],
+                          ["other", "Another address", "A fresh one is best"],
+                        ] as const
+                      ).map(([dest, label, hint]) => {
+                        const active = cashOutDest === dest;
+                        return (
+                          <button
+                            key={dest}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => setCashOutDest(dest)}
+                            className={`flex min-h-[60px] min-w-0 items-start gap-3 rounded-[14px] border px-3.5 py-3 text-left transition-colors ${
+                              active ? "border-foreground bg-panel" : "border-line hover:border-line-strong hover:bg-surface"
+                            }`}
+                          >
+                            <span
+                              aria-hidden
+                              className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors ${
+                                active ? "border-foreground bg-foreground" : "border-line-strong"
+                              }`}
+                            >
+                              {active && <span className="h-2 w-2 rounded-full bg-panel" />}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[14.5px] leading-snug text-foreground">{label}</span>
+                              <span className="mt-0.5 block text-[12px] leading-snug text-mute">{hint}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {cashOutDest === "other" && (
+                      <>
+                        <label htmlFor="cashout-other" className="sr-only">
+                          Address to cash out to
+                        </label>
+                        <input
+                          id="cashout-other"
+                          value={otherTo}
+                          autoComplete="off"
+                          spellCheck={false}
+                          onChange={(e) => setOtherTo(e.target.value.trim())}
+                          placeholder="0x… a wallet that never added money to Gloam"
+                          className="gl-input tnum mt-3"
+                        />
+                        {otherToClean && !isAddress(otherToClean) && (
+                          <p className="mt-2 text-[12.5px] text-warn">That isn&apos;t a valid 0x address. Check it and paste it again.</p>
+                        )}
+                      </>
+                    )}
+                    {cashOutLinkWarning ? (
+                      <p className="mt-2 text-[12.5px] leading-relaxed text-warn">{cashOutLinkWarning}</p>
+                    ) : cashOutDest === "other" && cashOutTo ? (
+                      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                        For privacy, a fresh wallet that never added money to Gloam is best.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <p id="cashout-when" className="text-[13px] text-mute">When</p>
+                    <div role="radiogroup" aria-labelledby="cashout-when" className="mt-2 grid grid-cols-3 gap-2">
+                      {(
+                        [
+                          ["now", "Now"],
+                          ["hour", "Within an hour"],
+                          ["6h", "Within 6 hours"],
+                        ] as const
+                      ).map(([when, label]) => {
+                        const active = cashOutWhen === when;
+                        const off = when !== "now" && (!relayAvailable || demoMode);
+                        return (
+                          <button
+                            key={when}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            disabled={off}
+                            onClick={() => setCashOutWhen(when)}
+                            className={`min-h-[48px] rounded-[14px] border px-2 py-2.5 text-center text-[13.5px] leading-snug transition-colors disabled:opacity-40 ${
+                              active ? "border-foreground bg-panel text-foreground" : "border-line text-soft hover:border-line-strong hover:bg-surface"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                      {cashOutWhen === "now"
+                        ? relayAvailable
+                          ? "Later sends it at a random time in that window, so it can't be matched to a payment by timing."
+                          : "Cashing out later needs the Gloam relay, which is off right now."
+                        : "Your proof is made now and the Gloam relay sends it at a random time in that window. It can't change the amount or where it goes. If it can't go out in time, nothing moves and it stays in your private balance."}
+                    </p>
+                  </div>
+
                   {relayToggle}
                   {!connectedOk ? (
                     connectPrompt("cash out")
@@ -2017,7 +2299,10 @@ export function MoveView() {
                         working ||
                         selected?.leafIndex == null ||
                         cashOutInventoryShort ||
-                        cashOutFeeUnknown
+                        cashOutFeeUnknown ||
+                        cashOutAmountInvalid ||
+                        !cashOutTo ||
+                        (cashOutWhen !== "now" && !relayAvailable)
                       }
                       onClick={() => void onCashOut()}
                       className="btn btn-ink btn-lg btn-block"
@@ -2031,6 +2316,10 @@ export function MoveView() {
                         "Not enough in the vault yet"
                       ) : cashOutFeeUnknown ? (
                         "Loading the cash-out fee…"
+                      ) : cashOutWhen !== "now" ? (
+                        "Schedule the cash out"
+                      ) : cashOutDest === "other" ? (
+                        "Cash out to this address"
                       ) : (
                         "Cash out to my wallet"
                       )}
@@ -2047,6 +2336,39 @@ export function MoveView() {
                         Refresh
                       </button>
                     </p>
+                  )}
+
+                  {scheduledNotice && (
+                    <div className="rounded-[16px] bg-sealed-soft px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
+                      {`Cash out of ${scheduledNotice.label} scheduled for about ${new Date(scheduledNotice.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. You can close Gloam: the relay sends it then.`}
+                    </div>
+                  )}
+
+                  {scheduledRows.length > 0 && (
+                    <div className="rounded-[16px] bg-surface px-4 py-3">
+                      <p className="text-[13px] text-mute">Scheduled cash outs</p>
+                      <ul className="mt-1 divide-y divide-line">
+                        {scheduledRows.map((n) => (
+                          <li key={n.id} className="flex items-center justify-between gap-3 py-2.5 text-[13.5px]">
+                            <span className="min-w-0">
+                              <span className="tnum block text-foreground">{formatAssetLabel(n.amountWei, n.asset)}</span>
+                              <span className="block truncate text-[12px] text-mute">
+                                {n.cashOut?.state === "sent"
+                                  ? "On its way"
+                                  : `About ${new Date(n.cashOut!.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                                {" · to "}
+                                {shortAddress(n.cashOut!.to)}
+                              </span>
+                            </span>
+                            {n.cashOut?.state === "scheduled" && (
+                              <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => void cancelScheduled(n)}>
+                                Cancel
+                              </button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
               )}
@@ -2488,8 +2810,11 @@ export function MoveView() {
             </>
           ) : (
             <p>
-              The money is back in your wallet. That amount is public on the
-              explorer, so only cash out when you need it in the open.
+              {cashOutDest === "other"
+                ? "The money is on its way to that address."
+                : "The money is back in your wallet."}{" "}
+              That amount is public on the explorer, so only cash out when you
+              need it in the open.
             </p>
           )
         }
