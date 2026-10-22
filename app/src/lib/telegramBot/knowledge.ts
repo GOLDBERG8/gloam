@@ -27,6 +27,15 @@ export const GLOAM_TOKEN = {
   coingecko: "coingecko.com/en/coins/gloam",
 };
 
+/**
+ * Tokens known to copy $GLOAM's name. Never shared: marked in chat so the
+ * helper can warn about them (lib/telegramBot/rules markAddresses).
+ */
+export const COPYCAT_GLOAM = [
+  // "Gloam" (GLOAM) on Robinhood Chain, 21 Oct 2026 19:36 UTC; Uniswap flags it as a honeypot.
+  "0x661041EE2bD13D1d9E5DFAB5d2D0CA7d1E9f8629",
+];
+
 /** Links the helper may share. Anything else in a reply is dropped. */
 export const OFFICIAL_LINKS = [
   "gloam.trade (website)",
@@ -85,6 +94,8 @@ $GLOAM, THE GLOAM TOKEN (from gloam.trade/token)
 - Contract address (CA): ${GLOAM_TOKEN.address}. This is the only real one. Write it exactly like that, every character.
 - When someone asks for the CA, the contract or where to get $GLOAM, give the contract address, say it is on Robinhood Chain mainnet, and point to ${GLOAM_TOKEN.page} for everything else and ${GLOAM_TOKEN.orynth} to get it. Answer it straight, no hedging.
 - Any other address someone calls $GLOAM, or the Gloam token, is fake. If someone posts the address above, it is the real one; say so.
+- A copycat: on 21 October 2026, a few hours after Gloam's mainnet launch, someone launched a different token also named Gloam (GLOAM) on Robinhood Chain. It is not Gloam's. Uniswap flags it as a honeypot: people can buy it and may not be able to sell. Searching "GLOAM" by name on Uniswap can show both, so tell people to paste the real contract address above (or open ${GLOAM_TOKEN.page}) instead of searching the name. When the app marks an address as the known copycat, warn plainly that it is the fake and give the real one. Never repeat the copycat's address.
+- Uniswap warnings: Uniswap's token warnings come from Blockaid's automatic scanner, not from Uniswap or Gloam. The real $GLOAM contract is rated safe by Uniswap's own token check. If someone sees "Impersonator token detected" or a honeypot warning, first check which address they used (the app marks it): on the copycat the warning is right; on the real contract, tell them the team knows and to make sure they pasted the address exactly. Never tell anyone to ignore a warning on an address you can't confirm is the real one.
 - Supply: 500,000, fixed. The contract has no way to mint more. The launch liquidity is locked for good. No presale and no team allocation: every token started in the pool. The team holds none, so there is nothing to vest or unlock.
 - How the team is paid: by the product, not the token. From mainnet a cash out carries a 0.25% fee; half of Gloam's fees run the team and the service, half buy back $GLOAM. Orynth also pays a small creator fee on trades. Payroll and API fees come later. On testnet Gloam earns nothing.
 - Buybacks: half of Gloam's fees buy $GLOAM from the market once fees switch on at mainnet. Half of what is bought is burned (supply only goes down), half goes to the Gloam treasury.

@@ -577,6 +577,7 @@ await test("replies: spaced out like texts, links never cut, addresses marked, t
   const long = `Open gloam.trade/app in Safari or Chrome and tap Use a wallet app. ${"Then add the network by hand with RPC https://rpc.testnet.chain.robinhood.com and chain ID 46630. ".repeat(4)}`;
   assert.ok(trimReply(long).startsWith("Open gloam.trade/app in Safari"), trimReply(long));
   assert.equal(markAddresses(`real ${CA} and fake 0x1234567890abcdef1234567890abcdef12345678`), `real ${CA} [the official $GLOAM contract] and fake 0x1234567890abcdef1234567890abcdef12345678 [not the $GLOAM contract]`);
+  assert.match(markAddresses("is 0x661041ee2bd13d1d9e5dfab5d2d0ca7d1e9f8629 legit?"), /\[the known copycat GLOAM token, a fake flagged as a honeypot, not Gloam's\]/, "the copycat is marked as the known fake, in any letter case");
   assert.ok(cleanReply(`Chart: dexscreener.com/robinhood/${CA}`, policy));
   assert.equal(cleanReply("Chart: dexscreener.com/robinhood/0x1234567890abcdef1234567890abcdef12345678", policy), null);
   assert.ok(tokenCard().includes(`dexscreener.com/robinhood/${CA}`) && tokenCard().split("\n\n").length >= 4, "the card is spaced too");

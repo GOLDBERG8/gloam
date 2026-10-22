@@ -7,7 +7,7 @@
 import { createHash, timingSafeEqual } from "crypto";
 import { english } from "viem/accounts";
 import { isMainnetLive, mainnetPool } from "@/lib/mainnet";
-import { GLOAM_TOKEN } from "./knowledge";
+import { COPYCAT_GLOAM, GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
 
 /** Forum topics in t.me/gloamhq, by message_thread_id. General messages carry no thread id. */
@@ -925,9 +925,14 @@ export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
  */
 export function markAddresses(text: string): string {
   return text.replace(ANY_EVM_ADDRESS, (a) =>
-    a.toLowerCase() === GLOAM_TOKEN.address.toLowerCase() ? `${a} [the official $GLOAM contract]` : `${a} [not the $GLOAM contract]`,
+    a.toLowerCase() === GLOAM_TOKEN.address.toLowerCase()
+      ? `${a} [the official $GLOAM contract]`
+      : COPYCAT.has(a.toLowerCase())
+        ? `${a} [the known copycat GLOAM token, a fake flagged as a honeypot, not Gloam's]`
+        : `${a} [not the $GLOAM contract]`,
   );
 }
+const COPYCAT = new Set(COPYCAT_GLOAM.map((a) => a.toLowerCase()));
 
 const CA_WORD = String.raw`(?:ca|c\.a\.?|contract(?:\s+(?:address|addy))?|token\s+(?:address|addy|contract)|addy)`;
 const CA_ONLY = new RegExp(
@@ -952,7 +957,7 @@ export function tokenCard(): string {
     `$GLOAM on Robinhood Chain mainnet:\n${GLOAM_TOKEN.address}`,
     "Fixed supply of 500,000. Launch liquidity locked for good. No presale and no team allocation.",
     `Uses, tokenomics and roadmap: ${GLOAM_TOKEN.page}\nGet it on Orynth: ${GLOAM_TOKEN.orynth}\nChart: ${GLOAM_TOKEN.chart}`,
-    "That address is the only real one. Not financial advice.",
+    "That address is the only real one. A copycat token also called GLOAM trades on Robinhood Chain too, so on Uniswap paste this address instead of searching the name. Not financial advice.",
   ].join("\n\n");
 }
 
