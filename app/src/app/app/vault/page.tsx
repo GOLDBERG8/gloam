@@ -3,9 +3,31 @@ import { Suspense } from "react";
 import { AppShell } from "@/components/app/AppShell";
 import { VaultHub } from "@/components/app/VaultHub";
 
-export const metadata: Metadata = {
-  title: "Vault",
+const PAID = {
+  title: "You've been sent a private payment",
+  description: "Open it in Gloam to claim it. Only you will see the amount.",
 };
+
+/**
+ * A link that opens the vault on "receive" carries a payment in its fragment
+ * (a payment to a Gloam address, or a claim link opened in the app), so its
+ * preview in a chat says so, like /claim's, instead of the plain vault card.
+ */
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<Metadata> {
+  const { mode } = await searchParams;
+  if (mode !== "receive") return { title: "Vault" };
+  return {
+    title: { absolute: PAID.title },
+    description: PAID.description,
+    robots: { index: false, follow: false },
+    openGraph: { ...PAID, images: [{ url: "/claim/opengraph-image", width: 1200, height: 630, alt: PAID.title }] },
+    twitter: { card: "summary_large_image", ...PAID, images: ["/claim/twitter-image"] },
+  };
+}
 
 function VaultSkeleton() {
   return (
