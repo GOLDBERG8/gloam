@@ -83,6 +83,9 @@ const {
   parseCommand,
   scamReason,
   roleScam,
+  memberScam,
+  defanged,
+  WARN_ONLY,
   pointsAtScam,
   secretLeak,
   tidyReply,
@@ -1209,7 +1212,7 @@ await test("moderation: the fake migration airdrop and role names; reporters are
     assert.ok(!impersonates(u), JSON.stringify(u));
   }
   assert.equal(roleScam({ first_name: "Dev Mike" }, "all holders dm me now"), "role_impostor");
-  assert.equal(roleScam({ first_name: "Support Desk" }, "claim your airdrop allocation here"), "role_impostor");
+  assert.equal(roleScam({ first_name: "Support Desk" }, "claim your airdrop allocation here"), "role_pitch", "a pitch comes down with a warning");
   assert.equal(roleScam({ first_name: "Dev" }, "is there an airdrop?"), null, "a Dev asking is fine");
   assert.equal(roleScam({ first_name: "Dev" }, "the dev said mainnet is live"), null);
   assert.equal(roleScam({ first_name: "Ada" }, "all holders dm me now"), null, "no role in the name: scamReason's job");
@@ -1259,6 +1262,103 @@ await test("moderation: the fake migration airdrop and role names; reporters are
   reset();
   await handleUpdate(upd(dm(OWNER, "/unban someone")));
   assert.equal(calls.filter((x) => x.method === "unbanChatMember").length, 0);
+});
+
+await test("moderation: everyday messages never cost anyone their place", async () => {
+  // links people post for good reasons, next to wallet, claim and reward words
+  for (const text of [
+    "My wallet sent it but the balance is not showing robin.etherscan.io/tx/0xabababababababababababababababababababababababababababababababab",
+    "Claimed my payment, here's the tx https://robin.etherscan.io/tx/0xabababababababababababababababababababababababababababababababab",
+    "Bridged to my wallet with relay.link, all good",
+    "Just connected my wallet on app.uniswap.org and bought some",
+    "swapped on uniswap.org, wallet shows it",
+    `Rewards for testers are on gloam.trade/testers, chart on dexscreener.com/robinhood/${CA}`,
+    "got my GLOAM on orynth.dev/projects/gloam, wallet shows it",
+    "the claim page links coingecko.com/en/coins/gloam now",
+  ]) {
+    assert.equal(scamReason(text), null, text);
+  }
+  // Glim's own card, repeated by anyone, under any name
+  assert.equal(scamReason(tokenCard()), null, "the /ca card is no lure");
+  assert.equal(scamReason(scanCodes(tokenCard()).masked), null);
+  assert.equal(memberScam({ first_name: "Tolu | Team" }, tokenCard()), null);
+  assert.equal(memberScam({ first_name: "Ada" }, "No presale and no team allocation: every token started in the pool."), null);
+  // role words in a name, everyday words in the message
+  const everyday: [string, string][] = [
+    ["Dev", "send me your gloam address and I'll send you some usdg to test"],
+    ["Dev Patel", "Send me your address, I'll pay you back"],
+    ["Sam | Founder @ Acme", "Just claimed my first payment code, smooth"],
+    ["Sam | Founder @ Acme", "Loving the rewards idea for testers"],
+    ["Sam | Founder @ Acme", "snapshot of my balance after the claim"],
+    ["Priya (CTO)", scanCodes(`here you go ${CLAIM}`).masked],
+    ["Tolu | Team", scanCodes(`here you go ${CLAIM}`).masked],
+    ["Kemi | CTO", scanCodes(`claim it: ${CLAIM}`).masked],
+    ["Ada", "testers dm me if you want to pair up and test payments"],
+    ["Admin Mike", "connect your wallet at gloam.trade/app and try a payment"],
+  ];
+  for (const [first, text] of everyday) assert.equal(memberScam({ first_name: first }, text), null, `${first}: ${text}`);
+  // DM chat members say too: it comes down with a warning, never a removal
+  for (const text of ["dm me now lol", "everyone message me your gloam address, I'm sending 1 usdg to each"]) {
+    const why = memberScam({ first_name: "Ada" }, text);
+    assert.ok(why && WARN_ONLY.has(why), text);
+  }
+  // a real pull for funds or secrets under a role name still removes
+  assert.equal(memberScam({ first_name: "Owner Mike" }, "send me 0.1 eth and I'll double it"), "role_impostor");
+  assert.equal(memberScam({ first_name: "Admin Mike" }, "connect your wallet to get the bonus"), "role_impostor");
+  assert.equal(memberScam({ first_name: "Admin Mike" }, "verify your wallet before the snapshot"), "role_impostor");
+  assert.equal(memberScam({ first_name: "Dev Mike" }, "airdrop for holders, send me your tx hash"), "role_impostor");
+  assert.equal(memberScam({ first_name: "Founder" }, "transfer your funds to this new wallet"), "role_impostor");
+  assert.equal(memberScam({ first_name: "Admin Mike" }, "everyone DM me, then send me 50 usdg"), "role_impostor", "a removal beats a warning");
+  assert.equal(memberScam({ first_name: "Ada" }, "All HOLDERS DM ME Immediately"), "dm_support");
+
+  // end to end: none of them costs a ban
+  reset();
+  await handleUpdate(upd(dm(OWNER, "hi")));
+  let id = 1200;
+  for (const [first, text] of [
+    ...everyday,
+    ["Ada", "Bridged to my wallet with relay.link, all good"],
+    ["Ada", tokenCard()],
+    ["Ada", "dm me now lol"],
+    ["Ada", "everyone message me your gloam address, I'm sending 1 usdg to each"],
+  ] as [string, string][]) {
+    reset();
+    await handleUpdate(upd(inTopic(TOPIC.general, text, user(id++, first))));
+    assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, `${first}: ${text}`);
+    assert.ok(!sends().some((x) => x.body.chat_id === OWNER.id && String(x.body.text).includes("I removed")), `${first}: no removal note`);
+  }
+  // the DM chat came down with a friendly word, not a removal
+  assert.equal(deletes().length, 1);
+  assert.ok(String(sends().pop()!.body.text).includes("You're not removed"));
+  // "testers, DM me if you want to pair up" stays up
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.testers, "testers dm me if you want to pair up and test payments", user(id++, "Ada"))));
+  assert.equal(deletes().length, 0);
+  // /spam on DM chat: down, the account stays
+  reset();
+  const chatty = inTopic(TOPIC.general, "dm me now lol", user(id++, "Bayo"));
+  await handleUpdate(upd(chatty));
+  await handleUpdate(upd(inTopic(TOPIC.general, "/spam", user(id++, "Reporter"), { reply_to_message: chatty })));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").length, 0, "a report on DM chat removes nobody");
+});
+
+await test("moderation: the owner's removal note quotes the message, defanged", async () => {
+  assert.equal(
+    defanged("Claim at https://gloam-claim.xyz/start now, DM @fakeadmin or mail x@evil.io /unban 5"),
+    "Claim at https[:]//gloam-claim[.]xyz/start now, DM [@]fakeadmin or mail x[@]evil[.]io [/]unban 5",
+  );
+  assert.equal(defanged(SEED), "[a seed phrase or key, not repeated]");
+  assert.equal(defanged(`claim it ${CLAIM}`), "claim it [claim link]");
+  assert.ok(defanged("x".repeat(400))!.length <= 160);
+  reset();
+  await handleUpdate(upd(dm(OWNER, "hi")));
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, "Gloam airdrop is live, claim at gloam-airdrop.xyz before it ends", user(1300, "Mike"))));
+  assert.equal(calls.filter((x) => x.method === "banChatMember").pop()?.body.user_id, 1300);
+  const note = String(sends().find((x) => x.body.chat_id === OWNER.id)?.body.text ?? "");
+  assert.ok(note.includes('"Gloam airdrop is live, claim at gloam-airdrop[.]xyz before it ends"'), note);
+  assert.ok(!note.includes("gloam-airdrop.xyz"), "nothing in the note can be tapped");
+  assert.ok(note.includes("/unban 1300"));
 });
 
 await test("buy alerts: a burst carries over to the next check, never split inside a block", async () => {

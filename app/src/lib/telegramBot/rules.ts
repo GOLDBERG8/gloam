@@ -350,26 +350,44 @@ export function forwardedCall(text: string): boolean {
 /** Asking to be contacted privately: "DM me", "D.m for collab", "inbox us for details". */
 const DM_ASK =
   /\b(?:d\.?\s?m|p\.?\s?m|inbox|message|contact|text)\s+(?:me|us)\b|\bhit\s+(?:me|us)\s+up\b|\b(?:d\.?\s?m|p\.?\s?m|inbox)\s+(?:me\s+|us\s+)?(?:for|to)\b|\b(?:d\.?\s?m|p\.?\s?m|inbox)\s+(?:collab\w*|partnership|promo\w*|details|business|deals?|offers?)\b/i;
-/** "All holders DM me", "investors inbox me now", "DM me immediately": a stranger pulling people into private chats. */
+/** "All holders DM me", "investors inbox me now": a stranger pulling the people with money into private chats. */
 const DM_LURE =
-  /\b(?:all\s+)?(?:holders?|investors?|members?|everyone|every\s*one|testers?|users?|community|fam)\b[^.!?\n]{0,30}?\b(?:dm|pm|inbox|message|text|contact)\s+(?:me|us)\b|\b(?:dm|pm|inbox|message)\s+(?:me|us)\s+(?:now|immediately|asap|urgently|quick(?:ly)?|right\s+now|fast)\b/i;
+  /\b(?:all\s+)?(?:holders?|investors?|buyers?|whales?)\b[^.!?\n]{0,30}?\b(?:dm|pm|inbox|message|text|contact)\s+(?:me|us)\b/i;
+/**
+ * "Everyone DM me", "DM me now": the same pull, but members say it too ("dm me
+ * now lol"), so it comes down with a warning and never costs a place in the
+ * group. "Testers, DM me if you want to pair up" is an invitation, left alone.
+ */
+const DM_CHAT =
+  /\b(?:everyone|every\s*one|members?|testers?|users?|community|fam|guys)\b[^.!?\n]{0,30}?\b(?:dm|pm|inbox|message|text|contact)\s+(?:me|us)\b|\b(?:dm|pm|inbox|message)\s+(?:me|us)\s+(?:now|immediately|asap|urgently|quick(?:ly)?|right\s+now|fast)\b/i;
+const INVITATION = /^\W*(?:if|when)\s+(?:you|u|ya|anyone|someone|any\s+of\s+you)\b/i;
 const WALLET_FIX =
   /\b(?:validate|validation|rectify|rectification|reactivate|synchroni[sz]e|resync|whitelist)\s+(?:your\s+|ur\s+|the\s+)?wallets?\b|\bsync\s+(?:your|ur)\s+wallets?\b|\bwallet\s+(?:validation|rectification|synchroni[sz]ation)\b/i;
 const LINK_RE =
   /\b(?:https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|t\.me\/[^\s<>"']+|(?:[a-z0-9-]+\.)+(?:com|io|xyz|org|net|app|finance|link|site|online|live|pro|top|info|co|me|cc|vip|club|fi|dev|gg|ai|so|claims?|gift|cash|money|exchange|network|tech|trade)(?:\/[^\s<>"']*)?)/gi;
 const LURE =
   /\b(?:wallets?|claim(?:ing|ed)?|airdrops?|giveaways?|rewards?|bonus|free (?:tokens?|money|usdc|usdt|eth|crypto)|connect|whitelist|presale|mint|eligible|allocation)\b/i;
-/** Hosts people post here for good reasons (faucets, explorers, wallets). Not flagged as phishing. */
+/**
+ * Hosts people post here for good reasons (faucets, explorers, wallets, the
+ * bridge, $GLOAM's pages and pool). Not flagged as phishing, and neither is any
+ * link the helper may share itself.
+ */
 const SAFE_HOSTS = [
   "gloam.trade",
   "x.com",
   "twitter.com",
   "robinhood.com",
+  "robin.etherscan.io",
   "tempo.xyz",
   "paxos.com",
   "github.com",
   "metamask.io",
   "rabby.io",
+  "relay.link",
+  "uniswap.org",
+  "orynth.dev",
+  "dexscreener.com",
+  "coingecko.com",
   "imgur.com",
   "prnt.sc",
   "loom.com",
@@ -403,11 +421,34 @@ function askingForHelp(text: string, m: RegExpExecArray): boolean {
 export type ScamReason =
   | "secret_request"
   | "dm_support"
+  | "dm_lure"
   | "wallet_fix"
   | "phishing_link"
   | "promo_spam"
   | "migration_airdrop"
-  | "role_impostor";
+  | "role_impostor"
+  | "role_pitch";
+
+/**
+ * Reasons that take the message down with a warning but leave the person in
+ * the group: they read like a scam, but ordinary members say them too.
+ */
+export const WARN_ONLY: ReadonlySet<ScamReason> = new Set<ScamReason>(["dm_lure", "role_pitch"]);
+
+/** "No presale and no team allocation": a drop word said to deny one. */
+const NO_DROP = /\bno\s+(?:presales?|(?:team\s+|insider\s+)?allocations?|airdrops?|whitelists?|giveaways?)\b/gi;
+
+/**
+ * The words that get scored: Glim's own token card and facts taken out (they
+ * name presales and allocations next to Orynth and DEX Screener links, and a
+ * member repeating them is no lure), and so are the labels scanCodes puts in
+ * place of codes ("[claim link]" is a payment, not a claim pitch).
+ */
+function scorable(raw: string): string {
+  let text = norm(raw);
+  for (const line of tokenCard().split("\n")) if (line.trim()) text = text.split(line.trim()).join(" ");
+  return text.replace(new RegExp(SHARED_LABEL.source, "gi"), " ").replace(NO_DROP, " ");
+}
 
 /** "We are redeploying the CA", "migrating to a new contract", "v2 token". */
 const MIGRATION =
@@ -419,10 +460,18 @@ const PRIVATE_ASK =
   /\b(?:send|dm|pm|inbox|message|text|contact)\s+(?:me|us)\b|\b(?:send|share|drop)\s+(?:your\s+|any\s+)?(?:tx|txn|transaction)\b|\bto\s+register\b|\bregister\s+(?:for|your)\b/i;
 /** Safety advice about that same scam ("the team will never migrate the CA and ask you to DM them"). */
 const SAFETY_WORDS = /\b(?:never|scam\w*|fake|beware|careful)\b/i;
-/** "Send me your tx hash / wallet address / funds": pulling something private out of people. */
-const SEND_ME =
-  /\bsend\s+(?:me|us)\b[^.!?\n]{0,60}\b(?:tx|txn|transaction|hash|wallet|address|seed|phrase|key|funds|eth|usdc|usdt|usdg)\b/i;
-const DROP_WORDS = /\b(?:airdrop|giveaway|reward|claim|whitelist|presale|allocation|snapshot)\w*/i;
+/** "Send me 0.1 ETH", "transfer your funds to this wallet": a pull for money. An address is not money: "send me your address" is how people test payments. */
+const FUNDS_PULL =
+  /\b(?:send|transfer|pay)\s+(?:me|us)\s+(?:your\s+|ur\s+|some\s+|the\s+|any\s+|a\s+(?:little|bit|few)\s+(?:of\s+)?|[\d.,]+\s*)?(?:funds|money|cash|eth|usdc|usdt|usdg|crypto|tokens?|\$gloam|gas)\b(?!\s*(?:address|addr|code|link|hash))|\b(?:send|transfer|move)\s+(?:your\s+|ur\s+|the\s+|all\s+(?:your\s+)?|[\d.,]+\s*)?(?:funds|money|eth|usdc|usdt|usdg|crypto|tokens?|\$gloam)\s+to\s+(?:me|us|my|our|this|the\s+(?:new|safe|secure|below)|0x)/i;
+/** "Connect your wallet", "verify your wallet": a pull for a signature. Pointing at gloam.trade itself is not. */
+const WALLET_PULL = /\b(?:connect|verify|validate|link|sync|unlock|restore)\s+(?:your|ur)\s+wallets?\b/i;
+/** "Send me your tx hash" ... */
+const TX_PULL =
+  /\b(?:send|share|drop|post|dm|pm|give|submit)\s+(?:me\s+|us\s+)?(?:your\s+|ur\s+|any\s+|the\s+)?(?:tx|txn|transaction)s?(?:\s*(?:hash|id)s?)?\b|\b(?:tx|txn|transaction)\s*(?:hash|id)\b[^.!?\n]{0,30}\b(?:dm|pm|inbox|to\s+register)\b/i;
+/** ... for an airdrop, a refund or a snapshot: what the fake drop promises. A claim is not one (people claim payments here). */
+const DROP_PROMISE = /\b(?:airdrop\w*|snapshot\w*|compensat\w*|reimburs\w*|refund\w*|whitelist\w*|allocation\w*)/i;
+/** A drop pitch: "airdrop", "presale", "allocation". Claims, rewards and snapshots are everyday talk here. */
+const DROP_WORDS = /\b(?:airdrop|giveaway|whitelist|presale|allocation)\w*/i;
 
 /**
  * Obvious scam patterns, conservative on purpose: asking for a seed phrase or
@@ -432,7 +481,7 @@ const DROP_WORDS = /\b(?:airdrop|giveaway|reward|claim|whitelist|presale|allocat
  * flagged.
  */
 export function scamReason(raw: string): ScamReason | null {
-  const text = norm(raw);
+  const text = scorable(raw);
   for (const re of [SECRET_REQUEST, SECRET_QUESTION]) {
     const m = re.exec(text);
     if (m && !negated(text, m.index, m[0])) return "secret_request";
@@ -458,11 +507,32 @@ export function scamReason(raw: string): ScamReason | null {
   }
   if (LURE.test(text)) {
     for (const link of text.match(LINK_RE) ?? []) {
-      const { host, path } = hostOf(link);
-      if (host === "t.me" ? !isGroupLink(host, path) : !SAFE_HOSTS.some((s) => onHost(host, s))) return "phishing_link";
+      const { host } = hostOf(link);
+      if (!linkAllowed(link) && (host === "t.me" || !SAFE_HOSTS.some((s) => onHost(host, s)))) return "phishing_link";
     }
   }
+  const chat = DM_CHAT.exec(text);
+  if (chat && !negated(text, chat.index, chat[0]) && !askingForHelp(text, chat) && !INVITATION.test(text.slice(chat.index + chat[0].length))) {
+    return "dm_lure";
+  }
   return null;
+}
+
+/** A match that is not negated in its own clause. */
+function says(re: RegExp, text: string): boolean {
+  const m = re.exec(text);
+  return Boolean(m && !negated(text, m.index, m[0]));
+}
+
+/**
+ * A real pull for funds or secrets: send me money, a seed phrase or key,
+ * connect or verify your wallet, a tx hash for an airdrop, holders into DMs.
+ * The only thing a role in a name gets someone removed for.
+ */
+function realPull(text: string): boolean {
+  if (says(SECRET_REQUEST, text) || says(FUNDS_PULL, text) || says(DM_LURE, text)) return true;
+  if (says(WALLET_PULL, text) && !/\bgloam\.trade\b/i.test(text)) return true;
+  return says(TX_PULL, text) && DROP_PROMISE.test(text);
 }
 
 const BIP39 = new Set(english);
@@ -551,21 +621,51 @@ function roleOnlyName(u: { first_name?: string; last_name?: string }): boolean {
 }
 
 /**
- * Someone whose name carries a role ("Owner", "Dev Mike", "Support") pulling
- * people somewhere private, or posting a migration or airdrop pitch. A role in
- * a name alone is not enough, and neither is a question: "Dev" asking "is
- * there an airdrop?" is fine. Only ever checked for people who are not the
- * owner or an admin.
+ * Someone whose name carries a role ("Owner", "Dev Mike", "Support"). A real
+ * pull for funds or secrets is a removal ("role_impostor"). A pitch (DM me, an
+ * airdrop or presale, a CA migration) only comes down with a warning
+ * ("role_pitch"): "Sam | Founder @ Acme" has a role in his name too. A role in
+ * a name alone is nothing, and neither is a question: "Dev" asking "is there
+ * an airdrop?" is fine. Only ever checked for people who are not the owner or
+ * an admin.
  */
 export function roleScam(u: { first_name?: string; last_name?: string }, raw: string): ScamReason | null {
   const words = nameWords(u);
   if (!words.some((w) => ROLE.has(w))) return null;
-  const text = norm(raw);
+  const text = scorable(raw);
   if (text.includes("?") || ASKING.test(text)) return null;
-  const pull = DM_LURE.test(text) || SEND_ME.test(text) || (MIGRATION.test(text) && DROP.test(text));
+  if (realPull(text)) return "role_impostor";
   const strongRole = words.some((w) => ROLE.has(w) && !PERSONAL.has(w));
-  const pitch = DM_ASK.test(text) || DROP_WORDS.test(text);
-  return pull || (strongRole && pitch) ? "role_impostor" : null;
+  const migration = MIGRATION.test(text) && DROP_PROMISE.test(text);
+  return migration || (strongRole && (DM_ASK.test(text) || DROP_WORDS.test(text))) ? "role_pitch" : null;
+}
+
+/** What a member's message comes down for, a removal before a warning: the words' own reason, or the name's. */
+export function memberScam(u: { first_name?: string; last_name?: string }, raw: string): ScamReason | null {
+  const words = scamReason(raw);
+  if (words && !WARN_ONLY.has(words)) return words;
+  const role = roleScam(u, raw);
+  return role && !WARN_ONLY.has(role) ? role : (words ?? role);
+}
+
+/**
+ * A short quote of what got someone removed, safe for the owner's note: codes
+ * as their labels, a secret never, and every link, handle and command broken
+ * so nothing in it can be tapped ("gloam-claim[.]xyz", "[@]helpdesk").
+ */
+export function defanged(raw: string, max = 160): string | null {
+  const text = scanCodes(raw).masked;
+  if (secretLeak(text)) return "[a seed phrase or key, not repeated]";
+  const t = text
+    .replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, " ")
+    .replace(/:\/\//g, "[:]//")
+    .replace(/(?<=[\p{L}\p{N}_-])\.(?=\p{L}{2,})/gu, "[.]")
+    .replace(/@(?=\w)/g, "[@]")
+    .replace(/(^|\s)\/(?=[a-z])/gi, "$1[/]")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return null;
+  return t.length > max ? `${t.slice(0, max - 3).trimEnd()}...` : t;
 }
 
 /**

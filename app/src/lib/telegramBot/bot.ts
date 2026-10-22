@@ -61,6 +61,7 @@ import {
   trimReply,
   wantsGroupAnswer,
   cleanReply,
+  defanged,
   explicitReply,
   forwardedCall,
   handsToAdmin,
@@ -72,6 +73,7 @@ import {
   looksLikeQuestion,
   markAddresses,
   mayNeedHelp,
+  memberScam,
   memoryText,
   mentionsBot,
   messageText,
@@ -81,8 +83,6 @@ import {
   pointsAtScam,
   readSentinel,
   ROSE_COMMANDS,
-  roleScam,
-  scamReason,
   scanCodes,
   secretLeak,
   sharesPhrase,
@@ -96,6 +96,7 @@ import {
   topicOf,
   wantsReport,
   welcomeHtml,
+  WARN_ONLY,
   withoutTag,
   wordCount,
   type ChatLine,
@@ -373,15 +374,25 @@ function pointedWarning(name: string, removed: boolean): string {
   return `${first}\n\nGloam admins never DM first and will never ask for your seed phrase, private key or funds. Reply /spam to a scam message and I'll deal with it.`;
 }
 
+/** Words that read like a scam but that members say too ("everyone DM me"): the words go, the person stays. */
+function warnOnlyWarning(name: string, removed: boolean): string {
+  const first = removed
+    ? `${name}, I took that message down because it reads like the scams that go around here. You're not removed, just keep chats in the group.`
+    : `${name}, careful: that reads like the scams that go around here. Keep chats in the group, please.`;
+  return `${first}\n\nGloam admins never DM first and will never ask for your seed phrase, private key or funds.`;
+}
+
 /** What the owner is told an account was removed for. */
 const BAN_WHY: Record<string, string> = {
   secret_request: "asking for a seed phrase or key",
   dm_support: "offering help or a deal in DMs",
+  dm_lure: "pulling people into DMs",
   wallet_fix: "a fake wallet fix",
   phishing_link: "a scam link",
   promo_spam: "paid promotion spam",
   migration_airdrop: "a fake CA migration and airdrop",
   role_impostor: "posing as the team",
+  role_pitch: "a pitch under a team-sounding name",
   impostor: "a name posing as Gloam or the team",
 };
 
@@ -397,13 +408,13 @@ const BAN_NOTES_PER_MIN = 6;
 async function noteBan(c: BotConfig, who: TgUser, why: string, text: string, topic: number | null): Promise<void> {
   if (!(await hitRateLimit("tg:ban-notes", "tg-ban-notes", BAN_NOTES_PER_MIN)).allowed) return;
   const name = cleanName(who.first_name, "an account");
-  const what = memoryText(text);
+  const what = defanged(text);
   const where = topic === null ? "as they joined" : `in ${topicName(topic)}`;
   for (const o of await ownerChats().catch(() => [])) {
     await sendMessage(
       o.chatId,
       `I removed ${name}${who.username ? ` (@${who.username})` : ""} from the group ${where}, for ${BAN_WHY[why] ?? why}.` +
-        `${what ? `\n"${what.slice(0, 160)}"` : ""}\n\nIf that was a mistake, send /unban ${who.id} here and they can join again.`,
+        `${what ? `\n"${what}"` : ""}\n\nIf that was a mistake, send /unban ${who.id} here and they can join again.`,
     );
   }
 }
@@ -677,16 +688,23 @@ async function onReport(msg: TgMessage, from: TgUser, target: TgMessage | null, 
     return;
   }
   const targetText = scanCodes(messageText(target)).masked;
-  const why = impersonates(who) ? "impostor" : (scamReason(targetText) ?? roleScam(who, targetText));
+  const why = impersonates(who) ? "impostor" : memberScam(who, targetText);
   // the reported message was itself someone calling a scam out: never a removal on that
   const pointing =
     why !== "impostor" &&
     (target.forward_origin?.type === "user" || target.forward_origin?.type === "hidden_user" || Boolean(target.quote) || pointsAtScam(targetText));
   if (why && !pointing) {
     const deleted = await deleteMessage(chatId, target.message_id);
-    const banned = await banMember(chatId, who.id);
+    // words members say too ("everyone DM me") come down, the account stays
+    const banned = why !== "impostor" && WARN_ONLY.has(why) ? false : await banMember(chatId, who.id);
     if (deleted) await count("scams");
-    await say(deleted || banned ? `Thanks ${name}. That was a scam, so it's gone, and so is the account.` : `Thanks ${name}. That's a scam, but Telegram didn't let me remove it, so I've sent it to the admins.`);
+    await say(
+      banned
+        ? `Thanks ${name}. That was a scam, so it's gone, and so is the account.`
+        : deleted
+          ? `Thanks ${name}. That read like a scam, so it's gone.`
+          : `Thanks ${name}. That's a scam, but Telegram didn't let me remove it, so I've sent it to the admins.`,
+    );
     if (banned) await noteBan(c, who, why, targetText, topic);
     if (deleted || banned) return;
   } else if (secretLeak(targetText)) {
@@ -748,18 +766,20 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   // a call-channel post forwarded or quoted in from elsewhere ("80x move from our call")
   const outside = msg.forward_origin || msg.external_reply ? [text, msg.external_reply?.text, msg.external_reply?.caption, msg.quote?.text].filter(Boolean).join(" ") : "";
   const promo = Boolean(outside) && forwardedCall(outside);
-  const reason = trusted ? null : (scamReason(text) ?? roleScam(from, text));
+  const reason = trusted ? null : memberScam(from, text);
   if (!trusted && (promo || reason)) {
     // Repeating a scam to call it out (forwarding a person's message, quoting it,
     // warning about it) is reporting it: the words come down, the member stays.
     const fromPerson = msg.forward_origin?.type === "user" || msg.forward_origin?.type === "hidden_user";
     const pointing = !promo && (fromPerson || Boolean(msg.quote) || pointsAtScam(text));
+    const warnOnly = !promo && Boolean(reason && WARN_ONLY.has(reason));
     const removed = await deleteMessage(chatId, msg.message_id);
     // a scam post of their own costs the account its place in the group
-    const banned = removed && !pointing ? await banMember(chatId, from.id) : false;
+    const banned = removed && !pointing && !warnOnly ? await banMember(chatId, from.id) : false;
     await count(removed ? "scams" : "scamsMissed");
     if ((await hitRateLimit(`tg:${chatId}:${topic}`, "tg-warn", WARN_PER_MIN)).allowed) {
-      await sendMessage(chatId, pointing ? pointedWarning(name, removed) : scamWarning(removed, banned), {
+      const warning = pointing ? pointedWarning(name, removed) : warnOnly ? warnOnlyWarning(name, removed) : scamWarning(removed, banned);
+      await sendMessage(chatId, warning, {
         threadId,
         replyTo: removed ? undefined : msg.message_id,
       });
