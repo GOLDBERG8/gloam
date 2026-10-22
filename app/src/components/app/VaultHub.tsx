@@ -8,7 +8,8 @@ import { SendView } from "./SendView";
 import { MoveView } from "./MoveView";
 import { VaultSwapView } from "./VaultSwapView";
 import { useNetwork } from "./NetworkProvider";
-import { vaultSwapRouter } from "@/lib/vaultSwap";
+import { swapOpenTo, vaultSwapRouter } from "@/lib/vaultSwap";
+import { useAppAccount } from "@/lib/demo";
 
 /**
  * The Vault hub, one surface for every money move. A calm segmented track picks
@@ -68,7 +69,8 @@ export function VaultHub() {
   // so those tabs drop out elsewhere (same rule as Markets in the shell).
   const isTempo = hydrated && network.family === "tempo";
   const noStocks = hydrated && !network.stocks;
-  const swapLive = hydrated && vaultSwapRouter(network.chainId) !== null;
+  const { address } = useAppAccount();
+  const swapLive = hydrated && vaultSwapRouter(network.chainId) !== null && swapOpenTo(address);
   const tabs = TABS.filter(
     (t) =>
       !("robinhoodOnly" in t && t.robinhoodOnly && isTempo) &&

@@ -34,6 +34,18 @@ export const VAULT_SWAP_ROUTERS: Record<number, Address | null> = {
   4217: "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC",
 };
 
+/**
+ * While swaps are in a private preview, the Swap tab shows only for these
+ * wallets. Empty: open to everyone. The routers themselves are permissionless;
+ * this only decides who sees the tab.
+ */
+export const SWAP_PREVIEW_WALLETS: readonly string[] = ["0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8"];
+
+export function swapOpenTo(address: string | undefined): boolean {
+  if (SWAP_PREVIEW_WALLETS.length === 0) return true;
+  return Boolean(address) && SWAP_PREVIEW_WALLETS.some((w) => w.toLowerCase() === address!.toLowerCase());
+}
+
 export function vaultSwapRouter(chainId: number): Address | null {
   return VAULT_SWAP_ROUTERS[chainId] ?? null;
 }
