@@ -32,6 +32,9 @@ const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "inte
 export const SPLIT_MAYBE_SENT =
   "The first step may have gone out. Your money is safe in the vault and shows again once it lands. Then cash out from there.";
 
+export const SPLIT_REVERTED =
+  "The first step didn't go through on this try. Your money is safe in the vault: refresh, then try again.";
+
 /** Whether a failed send of the first step may still have gone out (then its notes are kept). */
 export function splitMaybeSent(e: unknown, relayOn: boolean): boolean {
   return relayOn ? e instanceof RelaySubmitError && RELAY_MAYBE_SENT.has(e.code) : !surelyNotSent(e);
@@ -210,9 +213,10 @@ export async function splitForCashOut(args: {
     throw new Error(SPLIT_MAYBE_SENT);
   }
   if (outcome === "reverted") {
-    // Final: the split did not happen, nothing moved.
-    dropBoth();
-    throw new Error("The first step didn't go through, so nothing moved. Refresh and try again.");
+    // Not proof that nothing moved: a copy of this transfer, or a resend of it,
+    // may have landed first, and its proof is public now and could still land
+    // later. Both notes stay saved, out of the balance; the sync settles them.
+    throw new Error(SPLIT_REVERTED);
   }
 
   // Landed: the original note is spent, the two new ones count from now on.

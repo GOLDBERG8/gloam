@@ -38,6 +38,9 @@ const MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "internal",
 export const SWAP_MAYBE_SENT =
   "The swap may have gone out. Your money is safe in the vault: refresh in a minute to see where it landed.";
 
+export const SWAP_REVERTED =
+  "The swap didn't go through on this try. Your money is safe in the vault: refresh in a minute, then get a new quote.";
+
 export const SWAP_REFUNDED =
   "The swap couldn't finish, so the money went back to your private balance, less the vault's cash-out fee.";
 
@@ -142,9 +145,10 @@ export async function runVaultSwap(args: {
     throw new Error(SWAP_MAYBE_SENT);
   }
   if (outcome === "reverted") {
-    // Final: nothing moved, the note is still in the balance.
-    dropBoth();
-    throw new Error("The swap didn't go through, so nothing moved. Get a new quote and try again.");
+    // Not proof that nothing moved: a copy or a resend of this call may have
+    // landed first, and its unshield proof (to this swap's escrow) is public now.
+    // Both notes stay saved, out of the balance; the sync settles them.
+    throw new Error(SWAP_REVERTED);
   }
 
   // Landed: the new note, or (if someone sent the unshield on its own first)

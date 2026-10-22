@@ -515,8 +515,10 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
     } catch (e) {
       if (e instanceof RelayError) throw e;
       const msg = e instanceof Error ? e.message : "";
-      // the kept nonce and the chain disagree: start again from the chain, once
-      if (attempt === 0 && usedLane && /nonce|replacement|underpriced|already known/i.test(msg)) {
+      // the kept nonce and the chain disagree: start again from the chain, once.
+      // Never on "already known": the node holds this very transaction, so it went
+      // out, and a second one would only revert and hide the first.
+      if (attempt === 0 && usedLane && !/already known/i.test(msg) && /nonce|replacement|underpriced/i.test(msg)) {
         await forgetNonce(usedLane);
         continue;
       }
