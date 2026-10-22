@@ -8,6 +8,7 @@ import {
   relayStatus,
   relayTransfer,
   relayUnshield,
+  relayVaultSwap,
 } from "@/lib/relay/server";
 
 export const runtime = "nodejs";
@@ -24,7 +25,7 @@ export async function GET() {
 
 /**
  * Submit an already-proven private action through the Gloam relay.
- * Body: { chainId, action: "transfer" | "unshield" | "memo", ...args }
+ * Body: { chainId, action: "transfer" | "unshield" | "memo" | "swap", ...args }
  * Returns { ok: true, hash } as soon as the transaction is sent; the client
  * waits for the receipt itself.
  */
@@ -46,6 +47,9 @@ export async function POST(req: Request) {
         break;
       case "memo":
         hash = await relayMemo(net, body, ip);
+        break;
+      case "swap":
+        hash = await relayVaultSwap(net, body);
         break;
       default:
         throw new RelayError("Unknown action.");

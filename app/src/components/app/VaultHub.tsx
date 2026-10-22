@@ -6,7 +6,9 @@ import { ShieldView } from "./ShieldView";
 import { TradeView } from "./TradeView";
 import { SendView } from "./SendView";
 import { MoveView } from "./MoveView";
+import { VaultSwapView } from "./VaultSwapView";
 import { useNetwork } from "./NetworkProvider";
+import { vaultSwapRouter } from "@/lib/vaultSwap";
 
 /**
  * The Vault hub, one surface for every money move. A calm segmented track picks
@@ -22,6 +24,13 @@ const TABS = [
     label: "Trade",
     hint: "Trade with the size kept private",
     stocksOnly: true,
+  },
+  {
+    id: "swap",
+    label: "Swap",
+    hint: "Swap inside your private balance",
+    // only where a vault swap router is deployed (lib/vaultSwap)
+    swapOnly: true,
   },
   {
     id: "send",
@@ -59,10 +68,12 @@ export function VaultHub() {
   // so those tabs drop out elsewhere (same rule as Markets in the shell).
   const isTempo = hydrated && network.family === "tempo";
   const noStocks = hydrated && !network.stocks;
+  const swapLive = hydrated && vaultSwapRouter(network.chainId) !== null;
   const tabs = TABS.filter(
     (t) =>
       !("robinhoodOnly" in t && t.robinhoodOnly && isTempo) &&
-      !("stocksOnly" in t && t.stocksOnly && noStocks)
+      !("stocksOnly" in t && t.stocksOnly && noStocks) &&
+      !("swapOnly" in t && t.swapOnly && !swapLive)
   );
 
   const raw = sp.get("tab");
@@ -119,6 +130,7 @@ export function VaultHub() {
             <>
               {tab === "shield" && <ShieldView />}
               {tab === "trade" && <TradeView />}
+              {tab === "swap" && <VaultSwapView />}
               {tab === "send" && <SendView />}
               {tab === "move" && <MoveView />}
             </>

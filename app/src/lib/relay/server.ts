@@ -48,6 +48,7 @@ import {
   TimeoutError,
   createPublicClient,
   createWalletClient,
+  keccak256,
   type Address,
   type Hex,
   type PublicClient,
@@ -65,6 +66,7 @@ import { screenAddresses } from "@/lib/screeningServer";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
 import { forgetNonce, inSendLanes, inflightKey, takeInflight } from "@/lib/relay/inflight";
 import { serverTransport } from "@/lib/serverRpc";
+import { isKnownRoute, isSwapAsset, vaultSwapAbi, vaultSwapRouter, encodeRoute, type PoolKey } from "@/lib/vaultSwap";
 
 const POOL_ERRORS = [
   "ZeroCommitment",
@@ -157,7 +159,21 @@ const REVERT_MESSAGES: Record<string, string> = {
   InvalidAmount: "That amount is not valid.",
   ZeroAddress: "Missing a destination address.",
   BadMemo: "The payment message is too large.",
+  OverInput: "The price moved since the quote. Get a new one and try again.",
+  ShortOutput: "The price moved since the quote. Get a new one and try again.",
+  OverDepositLimit: "The vault is not taking that much of this asset right now. Swap a smaller amount.",
+  PoolNotAllowed: "This swap route is not allowed.",
+  BadRoute: "This swap route is not allowed.",
+  FeeOnTransferNotSupported: "This token cannot be swapped into the vault.",
 };
+
+/** The router's call, with the vault's errors it can bubble up, for plain-language reverts. */
+const swapCallAbi = [
+  ...vaultSwapAbi,
+  ...POOL_ERRORS,
+  { type: "error" as const, name: "OverDepositLimit", inputs: [] },
+  { type: "error" as const, name: "FeeOnTransferNotSupported", inputs: [] },
+] as const;
 
 export class RelayError extends Error {
   constructor(
@@ -362,10 +378,14 @@ function padGas(est: bigint) {
   return padded > GAS_CAP ? GAS_CAP : padded;
 }
 
+type SwapSpend = { proof: Hex; root: Hex; nullifier: Hex; asset: Address; amount: bigint };
+type SwapDeposit = { proof: Hex; commitment: Hex; asset: Address; amount: bigint };
+
 export type Call =
   | { kind: "transfer"; args: readonly [Hex, Hex, Hex, readonly [Hex, Hex]] }
   | { kind: "unshield"; args: readonly [Hex, Hex, Hex, Address, Address, bigint] }
-  | { kind: "memo"; args: readonly [Hex, Hex] };
+  | { kind: "memo"; args: readonly [Hex, Hex] }
+  | { kind: "swap"; router: Address; args: readonly [SwapSpend, SwapDeposit, SwapDeposit, Hex] };
 
 /** Public addresses a call pays out to. Only a cash out has one. */
 function publicRecipients(call: Call): Address[] {
@@ -450,6 +470,8 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
         return pub.estimateContractGas({ address: pool, abi: relayPoolAbi, functionName: "unshield", args: call.args, account });
       case "memo":
         return pub.estimateContractGas({ address: net.payMemo!.address, abi: memoAbi, functionName: "postMemo", args: call.args, account });
+      case "swap":
+        return pub.estimateContractGas({ address: call.router, abi: swapCallAbi, functionName: "swap", args: call.args, account });
     }
   };
   const send = (gas: bigint, nonce: number, from: PrivateKeyAccount): Promise<Hex> => {
@@ -461,6 +483,8 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
         return wallet.writeContract({ address: pool, abi: relayPoolAbi, functionName: "unshield", args: call.args, gas, nonce, chain: net.chain, account: from });
       case "memo":
         return wallet.writeContract({ address: net.payMemo!.address, abi: memoAbi, functionName: "postMemo", args: call.args, gas, nonce, chain: net.chain, account: from });
+      case "swap":
+        return wallet.writeContract({ address: call.router, abi: swapCallAbi, functionName: "swap", args: call.args, gas, nonce, chain: net.chain, account: from });
     }
   };
 
@@ -513,14 +537,18 @@ export const RELAY_BUSY_MESSAGE = "The relay is busy right now. Try again in a m
  * dropped when nothing went out (a failed check, dry run or send), so the user
  * can retry at once; once a transaction is out it stays until it expires.
  */
-async function submitSpend(net: GloamNetwork, call: Extract<Call, { kind: "transfer" | "unshield" }>): Promise<Hex> {
-  const root = call.args[1];
-  const nullifier = call.args[2];
+async function submitSpend(
+  net: GloamNetwork,
+  call: Extract<Call, { kind: "transfer" | "unshield" | "swap" }>,
+  precheck?: () => Promise<void>
+): Promise<Hex> {
+  const root = call.kind === "swap" ? call.args[0].root : call.args[1];
+  const nullifier = call.kind === "swap" ? call.args[0].nullifier : call.args[2];
   const lock = await takeInflight(inflightKey(net.chainId, nullifier));
   if (!lock) throw new RelayError(IN_FLIGHT_MESSAGE, 409, "in_flight");
   let keep = false;
   try {
-    await precheckSpend(net, root, nullifier);
+    await (precheck ? precheck() : precheckSpend(net, root, nullifier));
     const hash = await submit(net, call, () => {
       keep = true;
     });
@@ -601,6 +629,101 @@ export async function readSpendState(net: GloamNetwork, root: Hex, nullifier: He
     pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "isKnownRoot", args: [root], blockNumber }),
   ]);
   return { spent: Boolean(spent), knownRoot: Boolean(knownRoot) };
+}
+
+function asRoute(v: unknown): PoolKey[] {
+  if (v == null) return [];
+  if (!Array.isArray(v) || v.length > 2) throw new RelayError("Invalid swap route.");
+  return v.map((k) => {
+    const r = (k ?? {}) as Record<string, unknown>;
+    const fee = Number(r.fee);
+    const tickSpacing = Number(r.tickSpacing);
+    if (!Number.isInteger(fee) || fee < 0 || fee > 16_777_215) throw new RelayError("Invalid swap route.");
+    if (!Number.isInteger(tickSpacing) || Math.abs(tickSpacing) > 8_388_607) throw new RelayError("Invalid swap route.");
+    return {
+      currency0: asAddress(r.currency0, "swap route"),
+      currency1: asAddress(r.currency1, "swap route"),
+      fee,
+      tickSpacing,
+      hooks: asAddress(r.hooks, "swap route"),
+    };
+  });
+}
+
+function asSwapDeposit(v: unknown): SwapDeposit {
+  const d = (v ?? {}) as Record<string, unknown>;
+  return {
+    proof: asProof(d.proof),
+    commitment: asBytes32(d.commitment, "commitment"),
+    asset: asAddress(d.asset, "asset"),
+    amount: asAmount(d.amount),
+  };
+}
+
+const erc20BalanceAbi = [
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+] as const;
+
+/**
+ * A private swap through the vault (lib/vaultSwap). The note's unshield proof
+ * names the swap's escrow as `to`, an address the router derives from the new
+ * note, the refund note and the route, so the relay (or anyone who copies the
+ * call) cannot change where the money goes or what lands. Only the chain's
+ * router, only the vault's own assets, only a route the app builds, and the
+ * same lock, root check and dry run as any spend. A note already spent is
+ * refused, unless its money is waiting at this swap's escrow: then the call
+ * puts it back as the refund note.
+ */
+export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unknown>) {
+  const router = vaultSwapRouter(net.chainId);
+  if (!router) throw new RelayError("Private swaps are not live on this network yet.", 400, "no_swap");
+  const s = (body.spend ?? {}) as Record<string, unknown>;
+  const spend: SwapSpend = {
+    proof: asProof(s.proof),
+    root: asBytes32(s.root, "root"),
+    nullifier: asBytes32(s.nullifier, "nullifier"),
+    asset: asAddress(s.asset, "asset"),
+    amount: asAmount(s.amount),
+  };
+  const deposit = asSwapDeposit(body.deposit);
+  const refund = asSwapDeposit(body.refund);
+  if (spend.asset.toLowerCase() === deposit.asset.toLowerCase()) throw new RelayError("Pick two different assets.");
+  if (!isSwapAsset(net.chainId, spend.asset) || !isSwapAsset(net.chainId, deposit.asset)) {
+    throw new RelayError("This asset cannot be swapped here.", 400, "swap_asset");
+  }
+  if (refund.asset.toLowerCase() !== spend.asset.toLowerCase() || refund.amount > spend.amount) {
+    throw new RelayError("Invalid refund note.");
+  }
+  const route = asRoute(body.route);
+  if (!isKnownRoute(net.chainId, spend.asset, deposit.asset, route)) {
+    throw new RelayError(REVERT_MESSAGES.BadRoute, 400, "BadRoute");
+  }
+  const routeBytes = encodeRoute(route);
+  const pub = relayPublicClient(net);
+  // A new note that is already in the vault would revert after the proof checks.
+  const seen = await pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "commitmentSeen", args: [deposit.commitment] });
+  if (seen) throw new RelayError(REVERT_MESSAGES.DuplicateCommitment, 409, "DuplicateCommitment");
+
+  const precheck = async () => {
+    const [spent, known] = await Promise.all([
+      pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "spent", args: [spend.nullifier] }),
+      pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "isKnownRoot", args: [spend.root] }),
+    ]);
+    if (!spent) {
+      if (!known) throw new RelayError(REVERT_MESSAGES.UnknownRoot, 409, "UnknownRoot");
+      return;
+    }
+    // spent: only worth a send if this swap's money is waiting at its escrow (the refund)
+    const escrow = await pub.readContract({
+      address: router,
+      abi: vaultSwapAbi,
+      functionName: "escrowFor",
+      args: [spend.asset, deposit.commitment, deposit.asset, deposit.amount, refund.commitment, refund.amount, keccak256(routeBytes)],
+    });
+    const waiting = await pub.readContract({ address: spend.asset, abi: erc20BalanceAbi, functionName: "balanceOf", args: [escrow] });
+    if (waiting < refund.amount) throw new RelayError(REVERT_MESSAGES.AlreadySpent, 409, "AlreadySpent");
+  };
+  return submitSpend(net, { kind: "swap", router, args: [spend, deposit, refund, routeBytes] }, precheck);
 }
 
 /** `requester` is who asks (an IP, or `key:<id>` for the API), for the per-sender message limit. */

@@ -6,6 +6,7 @@ import type { Address, Hex } from "viem";
 import { getRhPublicClient } from "@/lib/rhClient";
 import { readDemo } from "@/lib/demoFlag";
 import { demoRelay, demoRelayStatus } from "@/lib/demo/chain";
+import type { PoolKey } from "@/lib/vaultSwap";
 
 export type RelayNetworkStatus = {
   chainId: number;
@@ -105,6 +106,17 @@ export function relayUnshield(p: {
   amount: bigint;
 }): Promise<Hex> {
   return post({ action: "unshield", ...p });
+}
+
+/** A private swap through the vault (lib/vaultSwap). Only the relay ever submits one. */
+export function relayVaultSwap(p: {
+  chainId: number;
+  spend: { proof: Hex; root: Hex; nullifier: Hex; asset: Address; amount: bigint };
+  deposit: { proof: Hex; commitment: Hex; asset: Address; amount: bigint };
+  refund: { proof: Hex; commitment: Hex; asset: Address; amount: bigint };
+  route: readonly PoolKey[];
+}): Promise<Hex> {
+  return post({ action: "swap", ...p });
 }
 
 export function relayMemo(p: { chainId: number; paymentCommitment: Hex; memo: Hex }): Promise<Hex> {
