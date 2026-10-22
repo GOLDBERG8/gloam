@@ -516,7 +516,10 @@ export async function relayTransfer(net: GloamNetwork, body: Record<string, unkn
   return submitSpend(net, { kind: "transfer", args: [proof, root, nullifier, [c0, c1]] });
 }
 
-export async function relayUnshield(net: GloamNetwork, body: Record<string, unknown>) {
+type UnshieldCall = Extract<Call, { kind: "unshield" }>;
+
+/** A cash out from a request body, with its recipient checked and screened. */
+async function unshieldCall(net: GloamNetwork, body: Record<string, unknown>): Promise<UnshieldCall> {
   const proof = asProof(body.proof);
   const root = asBytes32(body.root, "root");
   const nullifier = asBytes32(body.nullifier, "nullifier");
@@ -528,7 +531,44 @@ export async function relayUnshield(net: GloamNetwork, body: Record<string, unkn
   // relay cannot change where the money goes.
   const call = { kind: "unshield", args: [proof, root, nullifier, asset, to, amount] } as const;
   await screenCall(call, net);
-  return submitSpend(net, call);
+  return call;
+}
+
+export async function relayUnshield(net: GloamNetwork, body: Record<string, unknown>) {
+  return submitSpend(net, await unshieldCall(net, body));
+}
+
+/**
+ * A cash out to send later (lib/relay/scheduled): everything relayUnshield
+ * checks, plus the dry run, but nothing is sent. Refuses now what would fail
+ * later: a spent note, a stale root, a bad proof, a blocked recipient.
+ */
+export async function checkUnshieldForLater(net: GloamNetwork, body: Record<string, unknown>): Promise<UnshieldCall> {
+  const call = await unshieldCall(net, body);
+  await precheckSpend(net, call.args[1], call.args[2]);
+  const account = relayerAccount();
+  if (!account) throw new RelayError("Cashing out later needs the Gloam relay, which is off right now.", 503, "relay_off");
+  try {
+    await relayPublicClient(net).estimateContractGas({ address: net.pool!, abi: relayPoolAbi, functionName: "unshield", args: call.args, account });
+  } catch (e) {
+    throw explain(e, "Could not check this cash out. Try again.");
+  }
+  return call;
+}
+
+/** Sends a scheduled cash out now, through the same checks and lock as any relayed one. */
+export async function sendUnshieldNow(net: GloamNetwork, body: Record<string, unknown>): Promise<Hex> {
+  return submitSpend(net, await unshieldCall(net, body));
+}
+
+/** Reads what a scheduled cash out needs at send time: is the note spent, is the root still kept. */
+export async function readSpendState(net: GloamNetwork, root: Hex, nullifier: Hex): Promise<{ spent: boolean; knownRoot: boolean }> {
+  const pub = relayPublicClient(net);
+  const [spent, knownRoot] = await Promise.all([
+    pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "spent", args: [nullifier] }),
+    pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "isKnownRoot", args: [root] }),
+  ]);
+  return { spent: Boolean(spent), knownRoot: Boolean(knownRoot) };
 }
 
 /** `requester` is who asks (an IP, or `key:<id>` for the API), for the per-sender message limit. */
