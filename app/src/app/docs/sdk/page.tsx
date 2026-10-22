@@ -362,7 +362,7 @@ const link = buildPaymentRequestLink({
 // With a payment-message board: scan for payments to your key.
 const { payments, scannedTo } = await scanIncomingPayments({ client, network: net, receiveKey: key });
 
-// Without one (mainnet today): check the sealed code the payer hands over.
+// Or check a sealed code a payer hands over directly.
 const check = await openIncomingPayment({ client, network: net, receiveKey: key, sealedTicket: code });
 
 for (const p of payments) {
@@ -377,14 +377,12 @@ for (const p of payments) {
 }`}</code>
       </pre>
       <p>
-        <strong>Mainnet today:</strong> Robinhood Chain and Tempo mainnet have
-        no payment-message board yet, so a payment to a Gloam address is not
-        posted on chain there. After paying, the payer&apos;s app shows a sealed
-        code (<code>gloam2t.…</code>). Take that code from the payer, for example
-        through a paste box or your API, and check it with{" "}
-        <code>openIncomingPayment</code>. It says whether the payment is ready,
-        has not landed yet, or was already spent. The testnets have boards, so{" "}
-        <code>scanIncomingPayments</code> works there now. A complete, runnable
+        Every network has a payment-message board, Robinhood Chain and Tempo
+        mainnet included, so <code>scanIncomingPayments</code> finds payments to
+        your key on its own. A payer can also hand you the sealed code{" "}
+        (<code>gloam2t.…</code>) their app shows after paying: check it with{" "}
+        <code>openIncomingPayment</code>, which says whether the payment is
+        ready, has not landed yet, or was already spent. A complete, runnable
         version is in <code>packages/sdk/examples/receive-and-credit.ts</code>.
       </p>
 

@@ -16,11 +16,9 @@
  *   npm install @gloamtrade/sdk viem snarkjs
  *   npx tsx receive-and-credit.ts
  *
- * Mainnet today: Robinhood Chain and Tempo mainnet have no payment-message
- * board yet, so a payment to a Gloam address is not posted on chain there.
- * After paying, the payer's app shows a sealed code (gloam2t.…). Take that code
- * from the user (a paste box, or your API) and pass it to handleCode() below.
- * Where a board exists, watch() finds payments on its own.
+ * Robinhood Chain and Tempo mainnet both have a payment-message board, so
+ * watch() finds payments to your Gloam address on its own. handleCode() is the
+ * fallback for a sealed code (gloam2t.…) a payer hands over directly.
  */
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -146,7 +144,7 @@ async function watch(key: ReceiveKey) {
   }
 }
 
-// ── 3b. Mainnet today: a sealed code the payer hands over ───────────────────────
+// ── 3b. Fallback: a sealed code the payer hands over directly ──────────────────
 export async function handleCode(key: ReceiveKey, sealedCode: string) {
   const check = await openIncomingPayment({ client, network, receiveKey: key, sealedTicket: sealedCode });
   if (check.status === "already_spent") return "This payment was already claimed.";
@@ -164,7 +162,7 @@ console.log("Top-up link for agent 42:", topUpLink(key, "42", "25"));
 if (payMemoBoardFor(network.chainId)) {
   await watch(key);
 } else {
-  console.log(`${network.label} has no payment-message board yet: pass the codes payers hand over to handleCode().`);
+  console.log(`${network.label} has no payment-message board: pass the codes payers hand over to handleCode().`);
   const code = process.argv[2]; // npx tsx receive-and-credit.ts gloam2t.…
   if (code) console.log(await handleCode(key, code));
 }

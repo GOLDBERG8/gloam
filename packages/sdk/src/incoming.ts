@@ -70,7 +70,7 @@ export function payMemoBoardFor(chainId: number): PayMemoBoard | null {
 export class NoPayMemoBoardError extends Error {
   constructor(chainId: number) {
     super(
-      `${networkName(chainId)} has no payment-message board yet, so payments to a Gloam address are not posted on chain there. Ask the payer for the sealed code (gloam2t.…) and check it with openIncomingPayment.`
+      `${networkName(chainId)} has no payment-message board, so payments to a Gloam address are not posted on chain there. Ask the payer for the sealed code (gloam2t.…) and check it with openIncomingPayment.`
     );
     this.name = "NoPayMemoBoardError";
   }
@@ -206,8 +206,7 @@ async function stateAt(client: PublicClient, pool: Address, commitment: Hex, nul
 
 /**
  * Scan the network's payment-message board for payments sealed to your key.
- * Throws NoPayMemoBoardError where the network has no board (Robinhood Chain
- * and Tempo mainnet today), and passes a failed chain read on rather than skip
+ * Throws NoPayMemoBoardError where the network has no board, and passes a failed chain read on rather than skip
  * a payment, so a server can retry the same range later.
  */
 export async function scanIncomingPayments(params: ScanIncomingParams): Promise<ScanIncomingResult> {

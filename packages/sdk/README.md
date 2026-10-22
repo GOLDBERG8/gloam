@@ -48,7 +48,7 @@ The Gloam vault app is the reference implementation, not a special case. The sam
 ## What you can build
 
 - **Shielded balances.** Deposit stablecoins (USDG on Robinhood Chain; USDC.e, pathUSD, USDT0 or OUSD on Tempo) or $GLOAM into a private balance only the holder can see or spend. On testnet you can also practice with test ETH and stock tokens.
-- **Private payments.** Send inside the vault to a receive tag, with on-chain encrypted discovery where the network has a payment-message board (the testnets today; on mainnet the payer hands over a sealed code). No public transfer, no visible amount.
+- **Private payments.** Send inside the vault to a receive tag, with on-chain encrypted discovery through the payment-message board on every network, mainnet included. No public transfer, no visible amount.
 - **Cash out.** Unshield back to a public balance with a browser- or node-generated Groth16 proof.
 - **Selective disclosure.** Let a holder prove one balance to a chosen party, an auditor or a counterparty, revealing nothing else. Provable, not a dark pool.
 - **Private agents.** The same core runs server-side, so an autonomous agent can hold and move value under policy with its size and strategy hidden.
@@ -388,7 +388,7 @@ const link = buildPaymentRequestLink({
 // With a payment-message board: scan for payments to your key.
 const { payments, scannedTo } = await scanIncomingPayments({ client, network: net, receiveKey: key });
 
-// Without one (mainnet today): check the sealed code the payer hands over.
+// Or check a sealed code a payer hands over directly.
 const check = await openIncomingPayment({ client, network: net, receiveKey: key, sealedTicket: code });
 
 for (const p of payments) {
@@ -403,7 +403,7 @@ for (const p of payments) {
 }
 ```
 
-**Mainnet today:** Robinhood Chain and Tempo mainnet have no payment-message board yet, so a payment to a Gloam address is not posted on chain there, and `scanIncomingPayments` throws `NoPayMemoBoardError`. After paying, the payer's app shows a sealed code (`gloam2t.…`). Take it from the payer (a paste box, your API) and check it with `openIncomingPayment`, which says whether it is ready, has not landed yet, or was already spent. The testnets have boards, so scanning works there now. The full runnable version is [`examples/receive-and-credit.ts`](https://github.com/cryptoduke01/gloam/tree/main/packages/sdk/examples/receive-and-credit.ts).
+**Every network has a board,** Robinhood Chain and Tempo mainnet included (since October 2026), so `scanIncomingPayments` finds payments to your key on its own. A payer can also hand you the sealed code (`gloam2t.…`) their app shows after paying; check it with `openIncomingPayment`, which says whether it is ready, has not landed yet, or was already spent. The full runnable version is [`examples/receive-and-credit.ts`](https://github.com/cryptoduke01/gloam/tree/main/packages/sdk/examples/receive-and-credit.ts).
 
 ## API reference
 

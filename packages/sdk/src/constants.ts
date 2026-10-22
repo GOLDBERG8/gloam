@@ -286,8 +286,8 @@ function buildMainnet(family: GloamChainFamily): GloamNetwork | null {
     chainId,
     pool: p.pool,
     deployBlock: p.deployBlock,
-    // No payment-message board on mainnet at launch.
-    payMemo: null,
+    // Payment-message boards, deployed 2026-10-23 (no owner, never logs the poster).
+    payMemo: rh ? "0x01B3172d9900Cb26d57E986429b9b23854c74598" : "0x342E3745967FDB4223902E196Ceb792c15d8C1c4",
     nativeShield: false,
     family,
     testnet: false,
