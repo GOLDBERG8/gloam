@@ -109,6 +109,34 @@ export default function DocsPrivacyPage() {
         assume more privacy than you have.
       </p>
 
+      <h2>Making a cash out harder to link</h2>
+      <p>
+        A cash out is public, so the easiest way to link one to you is its
+        size, its timing and where it goes. The cash out screen lets you change
+        all three:
+      </p>
+      <ul>
+        <li>
+          <strong>A different amount.</strong> Cash out part of a balance, not
+          the exact sum that came in. The app first sets that part aside in its
+          own private note, then cashes it out, and warns when the amount sits
+          within 1% of money that arrived in the last day.
+        </li>
+        <li>
+          <strong>Later.</strong> Within an hour or within 6 hours, at a random
+          time inside the window. The proof is made in your browser at once and
+          the relay sends it then. The proof binds the amount and the recipient,
+          so the relay can only send it as it is or not at all. If the vault
+          stops accepting the proof before it goes out, nothing moves and the
+          money shows in your balance again.
+        </li>
+        <li>
+          <strong>Another address.</strong> A fresh wallet that never deposited
+          is best. The app warns when the address is the connected wallet or
+          one that deposited.
+        </li>
+      </ul>
+
       <h2>What we will not promise</h2>
       <ul>
         <li>Invisibility from law, courts, or a subpoena</li>
@@ -309,7 +337,9 @@ export default function DocsPrivacyPage() {
         The relay submits only the vault&apos;s private send and cash out and the
         payment message board. It dry-runs every payment first, cannot change a
         cash out&apos;s recipient or amount (both are bound in the proof), and
-        rate limits each device and each network.
+        rate limits each device and each network. A cash out scheduled for
+        later is kept as the proof and its public inputs, never a secret, and
+        is dropped once it is sent, cancelled or expired.
       </p>
 
       <h2>Before you put real money in</h2>
