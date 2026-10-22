@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Logo } from "@/components/Logo";
 import { WalletMenu } from "./WalletMenu";
+import { AutoSwitchNetwork } from "./AutoSwitchNetwork";
 import { WelcomeModal } from "./WelcomeModal";
 import { PasskeyGate } from "./PasskeyGate";
 import { NetworkSelector } from "./NetworkSelector";
@@ -183,6 +184,7 @@ export function AppShell({
     <div className="gloam-app relative flex min-h-full flex-col bg-background">
       <WelcomeModal />
       <PasskeyGate />
+      <AutoSwitchNetwork />
 
       {/* desktop sidebar */}
       <aside
