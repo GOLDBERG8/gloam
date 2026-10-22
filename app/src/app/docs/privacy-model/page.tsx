@@ -126,9 +126,11 @@ export default function DocsPrivacyPage() {
           <strong>Later.</strong> Within an hour or within 6 hours, at a random
           time inside the window. The proof is made in your browser at once and
           the relay sends it then. The proof binds the amount and the recipient,
-          so the relay can only send it as it is or not at all. If the vault
-          stops accepting the proof before it goes out, nothing moves and the
-          money shows in your balance again.
+          so the relay can only send it as it is or not at all. The vault
+          accepts the proof however long it waits. If the relay can&apos;t send
+          it, nothing moves and the money shows in your balance again. Once it
+          starts going out it can&apos;t be cancelled, and it shows as on its
+          way until the network settles it.
         </li>
         <li>
           <strong>Another address.</strong> A fresh wallet that never deposited
@@ -339,7 +341,7 @@ export default function DocsPrivacyPage() {
         cash out&apos;s recipient or amount (both are bound in the proof), and
         rate limits each device and each network. A cash out scheduled for
         later is kept as the proof and its public inputs, never a secret, and
-        is dropped once it is sent, cancelled or expired.
+        is dropped once it is sent, cancelled or can no longer go out.
       </p>
 
       <h2>Before you put real money in</h2>

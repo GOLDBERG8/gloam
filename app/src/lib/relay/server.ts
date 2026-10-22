@@ -339,14 +339,19 @@ function revertName(err: unknown): string | null {
   return null;
 }
 
-function explain(err: unknown, fallback: string): RelayError {
+/**
+ * A failed call, in plain words. `code` is for anything else: "check_failed"
+ * when the dry run failed (nothing was sent), "rpc" when the node refused the
+ * send itself (it may still have been taken, so callers treat it as maybe sent).
+ */
+function explain(err: unknown, fallback: string, code: "rpc" | "check_failed" = "rpc"): RelayError {
   const name = revertName(err);
   if (name && REVERT_MESSAGES[name]) return new RelayError(REVERT_MESSAGES[name], 422, name);
   const msg = err instanceof Error ? err.message : String(err);
   if (/insufficient funds|gas required exceeds/i.test(msg)) {
     return new RelayError("The relay is out of gas. Send from your wallet for now.", 503, "relay_empty");
   }
-  return new RelayError(fallback, 502, "rpc");
+  return new RelayError(fallback, 502, code);
 }
 
 // Tempo caps a tx at 30M gas; keep headroom and pad estimates for Tempo's
@@ -390,6 +395,8 @@ export async function screenCall(call: Call, net?: GloamNetwork): Promise<void> 
   }
 }
 
+export const MAYBE_SENT_MESSAGE = "This may have gone out already. Wait a minute and refresh before trying again.";
+
 /** A timeout or a dropped connection on the send can come after the node took the transaction. */
 function mayHaveSent(err: unknown): boolean {
   if (err instanceof BaseError && err.walk((e) => e instanceof TimeoutError || e instanceof HttpRequestError)) {
@@ -398,21 +405,39 @@ function mayHaveSent(err: unknown): boolean {
   return /already known|timed? ?out/i.test(err instanceof Error ? err.message : String(err));
 }
 
-/** `onMaybeSent` runs when the send failed in a way that may still have put the transaction out. */
-async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): Promise<Hex> {
-  // Screen before anything else: a blocked call never reaches the chain.
-  await screenCall(call, net);
+/**
+ * What a failed send means: "maybe_sent" when the node may have taken it (a
+ * timeout, a dropped connection), so the caller must not call it unsent;
+ * otherwise the node's refusal, explained.
+ */
+export function sendFailure(err: unknown): RelayError {
+  if (mayHaveSent(err)) return new RelayError(MAYBE_SENT_MESSAGE, 502, "maybe_sent");
+  return explain(err, "The relay could not submit this payment. Try again or send from your wallet.");
+}
+
+/** The relay accounts that can still pay for a send on `net`, first one first. */
+export async function fundedRelayAccounts(
+  net: GloamNetwork,
+  offMessage = "The relay is off. Send from your wallet.",
+  isEmpty: (net: GloamNetwork, a: PrivateKeyAccount) => Promise<boolean> = relayEmpty
+): Promise<PrivateKeyAccount[]> {
   const all = relayerAccounts();
-  if (!all.length) {
-    throw new RelayError("The relay is off. Send from your wallet.", 503, "relay_off");
-  }
-  // only accounts that can still pay for a send take part
-  const accounts = (await Promise.all(all.map(async (a) => ((await relayEmpty(net, a)) ? null : a)))).filter(
+  if (!all.length) throw new RelayError(offMessage, 503, "relay_off");
+  const accounts = (await Promise.all(all.map(async (a) => ((await isEmpty(net, a)) ? null : a)))).filter(
     (a): a is PrivateKeyAccount => a !== null
   );
   if (!accounts.length) {
     throw new RelayError("The relay is out of gas. Send from your wallet for now.", 503, "relay_empty");
   }
+  return accounts;
+}
+
+/** `onMaybeSent` runs when the send failed in a way that may still have put the transaction out. */
+async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): Promise<Hex> {
+  // Screen before anything else: a blocked call never reaches the chain.
+  await screenCall(call, net);
+  // only accounts that can still pay for a send take part
+  const accounts = await fundedRelayAccounts(net);
   const account = accounts[0]!;
   const pub = relayPublicClient(net);
   const pool = net.pool!;
@@ -444,7 +469,7 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
     // Dry run: reverts here (bad proof, spent note, stale root) cost nothing.
     gas = await estimate();
   } catch (e) {
-    throw explain(e, "Could not check this payment. Try again.");
+    throw explain(e, "Could not check this payment. Try again.", "check_failed");
   }
   await takeNetworkSlot(net);
 
@@ -471,8 +496,9 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
         await forgetNonce(usedLane);
         continue;
       }
-      if (mayHaveSent(e)) onMaybeSent?.();
-      throw explain(e, "The relay could not submit this payment. Try again or send from your wallet.");
+      const failure = sendFailure(e);
+      if (failure.code === "maybe_sent") onMaybeSent?.();
+      throw failure;
     }
   }
   throw new RelayError("The relay could not submit this payment.", 502, "rpc");
@@ -546,12 +572,12 @@ export async function relayUnshield(net: GloamNetwork, body: Record<string, unkn
 export async function checkUnshieldForLater(net: GloamNetwork, body: Record<string, unknown>): Promise<UnshieldCall> {
   const call = await unshieldCall(net, body);
   await precheckSpend(net, call.args[1], call.args[2]);
-  const account = relayerAccount();
-  if (!account) throw new RelayError("Cashing out later needs the Gloam relay, which is off right now.", 503, "relay_off");
+  // The dry run from an account that can send it, as the send itself will be (one empty key is skipped).
+  const [account] = await fundedRelayAccounts(net, "Cashing out later needs the Gloam relay, which is off right now.");
   try {
     await relayPublicClient(net).estimateContractGas({ address: net.pool!, abi: relayPoolAbi, functionName: "unshield", args: call.args, account });
   } catch (e) {
-    throw explain(e, "Could not check this cash out. Try again.");
+    throw explain(e, "Could not check this cash out. Try again.", "check_failed");
   }
   return call;
 }
@@ -561,12 +587,18 @@ export async function sendUnshieldNow(net: GloamNetwork, body: Record<string, un
   return submitSpend(net, await unshieldCall(net, body));
 }
 
-/** Reads what a scheduled cash out needs at send time: is the note spent, is the root still kept. */
+/**
+ * Reads what a scheduled cash out needs at send time: is the note spent, does
+ * the vault know the root. Both at one block, so answers from two nodes a
+ * block apart can't call a cash out that landed unsent. Throws when either
+ * can't be read (a node without that block yet too): the job counts as unread.
+ */
 export async function readSpendState(net: GloamNetwork, root: Hex, nullifier: Hex): Promise<{ spent: boolean; knownRoot: boolean }> {
   const pub = relayPublicClient(net);
+  const blockNumber = await pub.getBlockNumber({ cacheTime: 0 });
   const [spent, knownRoot] = await Promise.all([
-    pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "spent", args: [nullifier] }),
-    pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "isKnownRoot", args: [root] }),
+    pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "spent", args: [nullifier], blockNumber }),
+    pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "isKnownRoot", args: [root], blockNumber }),
   ]);
   return { spent: Boolean(spent), knownRoot: Boolean(knownRoot) };
 }

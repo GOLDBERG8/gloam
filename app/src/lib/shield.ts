@@ -441,7 +441,7 @@ export type LocalNote = {
    * (lib/claimSweep). The claimed note itself is spent by that move.
    */
   secured?: boolean;
-  /** On the fresh note from securing a claim: the claimed note it came from. */
+  /** On the fresh note from securing a claim, or a cash-out split: the note it came from (settled together). */
   sweptFrom?: { id: string; nullifier: Hex };
   /**
    * The move into this note was sent (or may have been) but has not been seen
@@ -451,8 +451,9 @@ export type LocalNote = {
   sweepPending?: boolean;
   /**
    * A cash out of this note scheduled with the relay ("cash out later",
-   * lib/cashOutLater). While it waits or is sent it is out of the balance; when
-   * it comes back unsent (expired, failed, cancelled) the note is spendable again.
+   * lib/cashOutLater). While it waits or is on its way it is out of the balance;
+   * when it comes back unsent (expired, failed, cancelled, with the chain showing
+   * the note unspent) the note is spendable again.
    */
   cashOut?: CashOutMark;
 };

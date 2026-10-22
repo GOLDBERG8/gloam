@@ -5,7 +5,10 @@ import {
   DELAY_WINDOWS,
   cancelJob,
   drawSendAfter,
+  isLive,
   jobView,
+  sameCashOut,
+  scheduleJob,
   type CashOutJob,
   type DelayWindow,
 } from "@/lib/relay/scheduled";
@@ -25,6 +28,27 @@ const STATUS_PER_MINUTE = 60;
 const NO_STORE = { "Cache-Control": "no-store" };
 
 const ID = /^[0-9a-f-]{36}$/;
+const LATER_OFF = "Cashing out later is off right now. Cash out now instead.";
+
+/** Without the shared store, an unknown job is not "gone": say the service is off, never "not found". */
+function assertStoreReady() {
+  if (!scheduledStoreReady()) throw new RelayError(LATER_OFF, 503, "later_off");
+}
+
+/** A job for its owner, with where it pays (the app shows that, not what it asked for). */
+function owned(job: CashOutJob) {
+  return { ...jobView(job), to: job.to };
+}
+
+/** The live job for this spend answered: the same cash out comes back, another one is refused. */
+function answerExisting(job: CashOutJob, same: boolean) {
+  if (same) return NextResponse.json({ ok: true, ...owned(job) }, { headers: NO_STORE });
+  const error =
+    job.status === "scheduled" && !job.attempts
+      ? "Already scheduled to another address. Cancel it first."
+      : "Already going out to another address.";
+  return NextResponse.json({ ok: false, error, code: "already_scheduled", job: owned(job) }, { status: 409, headers: NO_STORE });
+}
 
 function fail(e: unknown) {
   if (e instanceof RelayError) {
@@ -41,11 +65,13 @@ function fail(e: unknown) {
  * Schedule a cash out the relay sends later: the same body as a relayed cash
  * out ({ chainId, proof, root, nullifier, asset, to, amount }) plus
  * { window: "hour" | "6h" }. It is checked and dry-run now; the send time is
- * drawn at random inside the window. Returns { id, sendAfter }.
+ * drawn at random inside the window. Returns { id, sendAfter, to }. Asking
+ * again for the same spend returns the job already waiting; asking with
+ * another address (or amount) is a 409 already_scheduled with that job.
  */
 export async function POST(req: Request) {
   try {
-    if (!scheduledStoreReady()) throw new RelayError("Cashing out later is off right now. Cash out now instead.", 503, "later_off");
+    assertStoreReady();
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body || typeof body !== "object") throw new RelayError("Invalid request.");
     const window = body.window as DelayWindow;
@@ -62,12 +88,12 @@ export async function POST(req: Request) {
     const store = scheduledStore();
     const call = await checkUnshieldForLater(net, body);
     const [proof, root, nullifier, asset, to, amount] = call.args;
-    // One live job per spend: asking again returns the one already waiting.
-    const existing = await store.byNullifier(net.chainId, nullifier);
-    if (existing) {
-      const job = await store.get(existing);
-      if (job) return NextResponse.json({ ok: true, ...jobView(job) }, { headers: NO_STORE });
-    }
+    const want = { to, asset, amount: amount.toString() };
+    // One live job per spend: asking again for the same cash out returns the one
+    // already waiting; one to another address (or amount) is refused.
+    const existingId = await store.byNullifier(net.chainId, nullifier);
+    const existing = existingId ? await store.get(existingId) : null;
+    if (existing && isLive(existing.status)) return answerExisting(existing, sameCashOut(existing, want));
     const now = Date.now();
     if (!(await hitRateLimit(nullifier, "cashout-later-nf", SCHEDULE_PER_SPEND, now, 3600)).allowed) {
       throw new RelayError("This cash out was scheduled too many times. Wait a while.", 429, "rate_limit");
@@ -87,8 +113,10 @@ export async function POST(req: Request) {
       attempts: 0,
       updatedAt: now,
     };
-    await store.put(job);
-    return NextResponse.json({ ok: true, ...jobView(job) }, { headers: NO_STORE });
+    // Saved in one step; a request for the same spend at the same moment gets this one back.
+    const saved = await scheduleJob(store, job);
+    if (saved.outcome !== "created") return answerExisting(saved.job, saved.outcome === "existing");
+    return NextResponse.json({ ok: true, ...owned(job) }, { headers: NO_STORE });
   } catch (e) {
     return fail(e);
   }
@@ -97,6 +125,7 @@ export async function POST(req: Request) {
 /** Where a scheduled cash out stands: ?id=<job id>. No proof or inputs come back. */
 export async function GET(req: Request) {
   try {
+    assertStoreReady();
     const ip = clientIp(req);
     if (!(await hitRateLimit(ip, "cashout-later-status", STATUS_PER_MINUTE, Date.now(), 60)).allowed) {
       throw new RelayError("Too many checks. Wait a minute.", 429, "rate_limit");
@@ -111,9 +140,14 @@ export async function GET(req: Request) {
   }
 }
 
-/** Cancel a scheduled cash out that has not gone out: ?id=<job id>. The money stays in the vault. */
+/**
+ * Cancel a scheduled cash out that has not gone out: ?id=<job id>. The money
+ * stays in the vault. Refused ({ ok: false, status: "sending" }) once a run
+ * has reached the send.
+ */
 export async function DELETE(req: Request) {
   try {
+    assertStoreReady();
     const ip = clientIp(req);
     if (!(await hitRateLimit(ip, "cashout-later-status", STATUS_PER_MINUTE, Date.now(), 60)).allowed) {
       throw new RelayError("Too many requests. Wait a minute.", 429, "rate_limit");

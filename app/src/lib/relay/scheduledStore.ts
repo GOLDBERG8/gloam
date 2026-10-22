@@ -3,10 +3,14 @@
  * locks use (lib/relay/inflight, Upstash REST). A job outlives a redeploy and
  * is seen by every instance, so the cron finds it whichever one runs.
  *
- *   gloam:cashout:job:<id>                 the job, JSON, kept JOB_TTL_SEC
- *   gloam:cashout:due                      sorted set of live job ids by send time
+ *   gloam:cashout:job:<id>                 the job, JSON, kept JOB_TTL_SEC while live, JOB_DONE_TTL_SEC after
+ *   gloam:cashout:due                      sorted set of live job ids by when the runner next looks (dueAt)
  *   gloam:cashout:nf:<chainId>:<nullifier> the job scheduled for that spend
  *   gloam:cashout:lock:<id>                a short lock while one run works on it
+ *
+ * A new job is written in one step (CREATE_SCRIPT): the spend's pointer is
+ * taken only while no other job holds it, so two requests for one spend can't
+ * both be saved.
  *
  * Without Redis there is nowhere shared to keep a job, so scheduling is refused
  * (scheduledStoreReady) rather than kept in one instance's memory, except on a
@@ -15,7 +19,7 @@
 import { randomUUID } from "crypto";
 import type { Hex } from "viem";
 import { redisConfigured } from "@/lib/tractionStore";
-import { JOB_TTL_SEC, isLive, memoryJobStore, type CashOutJob, type JobStore } from "./scheduled";
+import { JOB_DONE_TTL_SEC, JOB_TTL_SEC, dueAt, isLive, memoryJobStore, type CashOutJob, type JobStore } from "./scheduled";
 
 const PREFIX = "gloam:cashout:";
 const DUE = `${PREFIX}due`;
@@ -39,6 +43,20 @@ async function redis(args: (string | number)[]): Promise<unknown> {
 
 const RELEASE_SCRIPT = 'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end';
 
+/**
+ * KEYS: the spend's pointer, the job, the due queue. ARGV: id, job JSON, ttl,
+ * due score, the id it may take over ("" for none). Returns the id that holds
+ * the spend: ARGV[1] when written, else the other job's (nothing written).
+ */
+export const CREATE_SCRIPT = [
+  'local cur = redis.call("GET", KEYS[1])',
+  "if cur and cur ~= ARGV[1] and cur ~= ARGV[5] then return cur end",
+  'redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])',
+  'redis.call("ZADD", KEYS[3], ARGV[4], ARGV[1])',
+  'redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[3])',
+  "return ARGV[1]",
+].join("\n");
+
 function nfKey(chainId: number, nullifier: Hex) {
   return `${PREFIX}nf:${chainId}:${nullifier.toLowerCase()}`;
 }
@@ -55,13 +73,31 @@ function redisJobStore(): JobStore {
       }
     },
     async put(job) {
-      await redis(["SET", `${PREFIX}job:${job.id}`, JSON.stringify(job), "EX", JOB_TTL_SEC]);
-      if (isLive(job.status)) {
-        await redis(["ZADD", DUE, job.sendAfter, job.id]);
+      const live = isLive(job.status);
+      await redis(["SET", `${PREFIX}job:${job.id}`, JSON.stringify(job), "EX", live ? JOB_TTL_SEC : JOB_DONE_TTL_SEC]);
+      if (live) {
+        await redis(["ZADD", DUE, dueAt(job), job.id]);
         await redis(["SET", nfKey(job.chainId, job.nullifier), job.id, "EX", JOB_TTL_SEC]);
       } else {
         await redis(["ZREM", DUE, job.id]);
       }
+    },
+    async create(job, replace) {
+      const holder = await redis([
+        "EVAL",
+        CREATE_SCRIPT,
+        3,
+        nfKey(job.chainId, job.nullifier),
+        `${PREFIX}job:${job.id}`,
+        DUE,
+        job.id,
+        JSON.stringify(job),
+        JOB_TTL_SEC,
+        dueAt(job),
+        replace ?? "",
+      ]);
+      if (typeof holder !== "string") throw new Error("redis: create gave no holder");
+      return holder;
     },
     async due(now, limit) {
       const ids = await redis(["ZRANGEBYSCORE", DUE, "-inf", now, "LIMIT", 0, limit]);

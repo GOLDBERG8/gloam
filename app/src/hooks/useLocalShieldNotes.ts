@@ -90,10 +90,8 @@ export function useLocalShieldNotes(address?: string | null) {
     }
     setSyncing(true);
     try {
-      // Secured claims whose move landed (or never can) since last time.
+      // Secured claims and cash-out splits whose move landed (or never can) since last time.
       if (await reconcileClaims().catch(() => false)) setLocal(loadLocalNotes(address));
-      // Scheduled cash outs: one that came back unsent makes its note spendable again.
-      if (await reconcileCashOuts().catch(() => false)) setLocal(loadLocalNotes(address));
       const publicClient = getRhPublicClient();
       const rows = await fetchChainShieldNotes(
         publicClient,
@@ -102,6 +100,9 @@ export function useLocalShieldNotes(address?: string | null) {
       setChain(rows);
       const merged = mergeNotes(loadLocalNotes(address), rows);
       await reconcileSpent(merged);
+      // Scheduled cash outs, after spent notes are retired: one that came back
+      // unsent (and is unspent on its chain) makes its note spendable again.
+      if (await reconcileCashOuts().catch(() => false)) setLocal(loadLocalNotes(address));
       // Ghost-note cleanup: only wipe local ETH if pool ETH inventory is zero
       try {
         const ethInPool = (await publicClient.readContract({

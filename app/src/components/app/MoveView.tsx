@@ -105,8 +105,12 @@ import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
 import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
 import { surelyNotSent } from "@/lib/walletErrors";
 import {
+  CashOutLaterError,
   cancelCashOut,
   dismissReturnedCashOut,
+  markFor,
+  reconcileCashOuts,
+  releaseGoneCashOut,
   returnedCashOutNotes,
   scheduleCashOut,
   scheduledCashOutNotes,
@@ -132,7 +136,7 @@ type PayStyle = "direct" | "bearer";
 const TESTNET_CHAIN_IDS = new Set<number>([46630, 42431]);
 
 /** Relay failures after which the payment may still have gone out (a timeout, a lost reply). */
-const RELAY_MAYBE_SENT = new Set(["rpc", "network", "error", "internal", "in_flight"]);
+const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "internal", "in_flight"]);
 
 export function MoveView() {
   const shieldLive = isShieldDeployed();
@@ -829,9 +833,17 @@ export function MoveView() {
       };
       if (later) {
         setStatus("Scheduling with the Gloam relay…");
-        const job = await scheduleCashOut({ ...call, window: cashOutWhen as CashOutWindow });
-        // Out of the balance while it waits; the chain settles it once it goes out.
-        updateLocalNote(target.id, { cashOut: { job: job.id, at: job.sendAfter, to, state: "scheduled" } });
+        let job;
+        try {
+          job = await scheduleCashOut({ ...call, window: cashOutWhen as CashOutWindow });
+        } catch (e) {
+          // This money already has a cash out waiting: show that one, with the address it really pays.
+          if (e instanceof CashOutLaterError && e.job) updateLocalNote(target.id, { cashOut: markFor(e.job) });
+          throw e;
+        }
+        // Out of the balance while it waits; the chain settles it once it goes out. The
+        // address shown is the one the relay holds, not the one asked for.
+        updateLocalNote(target.id, { cashOut: markFor(job) });
         spentNoteId.current = null;
         setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(target.amountWei, target.asset) });
         setCashOutInput("");
@@ -878,13 +890,24 @@ export function MoveView() {
 
   async function cancelScheduled(note: LocalNote) {
     if (!note.cashOut) return;
-    const ok = await cancelCashOut(note.cashOut.job);
-    if (ok) {
+    setError(null);
+    const result = await cancelCashOut(note.cashOut.job);
+    if (result === "cancelled") {
       updateLocalNote(note.id, { cashOut: undefined });
-      refreshNotes();
+    } else if (result === "over") {
+      // It already ended without going out: back in the balance once the chain agrees.
+      await reconcileCashOuts().catch(() => false);
+    } else if (result === "going") {
+      updateLocalNote(note.id, { cashOut: { ...note.cashOut, state: "sent" } });
+      setError("It is already going out, so it can't be cancelled. It shows as cashed out once it lands.");
+    } else if (result === "gone") {
+      if (!(await releaseGoneCashOut(note).catch(() => false))) {
+        setError("The relay no longer holds this cash out, and the network could not confirm it is unspent. Refresh in a moment.");
+      }
     } else {
-      setError("It is going out right now, or the relay could not be reached. It shows as cashed out once it lands; if not, try Cancel again.");
+      setError("The relay could not be reached. Try Cancel again in a moment.");
     }
+    refreshNotes();
   }
 
   async function onPrivateSend() {
@@ -2078,7 +2101,7 @@ export function MoveView() {
                   {returnedRows.map((n) => (
                     <div key={n.id} className="rounded-[16px] bg-surface px-4 py-3.5 text-[13px] leading-relaxed">
                       <p className="text-foreground">
-                        {`Your cash out of ${formatAssetLabel(n.amountWei, n.asset)} didn't go out in time, so nothing moved. It's back in your private balance: cash out again.`}
+                        {`Your cash out of ${formatAssetLabel(n.amountWei, n.asset)} didn't go out, so nothing moved. It's back in your private balance: cash out again.`}
                       </p>
                       <button
                         type="button"
@@ -2279,7 +2302,7 @@ export function MoveView() {
                         ? relayAvailable
                           ? "Later sends it at a random time in that window, so it can't be matched to a payment by timing."
                           : "Cashing out later needs the Gloam relay, which is off right now."
-                        : "Your proof is made now and the Gloam relay sends it at a random time in that window. It can't change the amount or where it goes. If it can't go out in time, nothing moves and it stays in your private balance."}
+                        : "Your proof is made now and the Gloam relay sends it at a random time in that window. It can't change the amount or where it goes. If it can't go out, nothing moves and it comes back to your private balance."}
                     </p>
                   </div>
 

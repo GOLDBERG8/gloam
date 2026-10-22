@@ -3,23 +3,48 @@
  *
  * Cash out later (lib/relay/scheduled): the cron's job runner against the
  * in-memory store and a fake chain. Covers a due job, one not due yet, a root
- * the vault forgot, a note already spent, a re-run after a send (never twice),
- * a send whose reply was lost, a relay holding the spend in flight, a refusal
- * that can never succeed, a passing failure and the give-up after it, an
- * unreadable node, another run holding the lock, cancelling, and that a job
- * done with drops its proof. Then the browser side: what each job status
- * means for the note (nextMark), and that a waiting cash out is out of the
- * balance while one that came back is spendable again.
+ * the vault does not know, a note already spent, a re-run after a send (never
+ * twice), a send whose reply was lost, a relay holding the spend in flight, a
+ * refusal that can never succeed, a passing failure and the give-up after it,
+ * an unreadable node, another run holding the lock, cancelling, and that a
+ * job done with drops its proof.
  *
- * A different amount (lib/cashOutSplit): the recent-amount match, Round it,
- * and the rule for keeping the split's notes when the first step may have
- * gone out.
+ * The review of 2026-10-22, one block per finding:
+ *  1. one job per spend, saved in one step; a retry to another address is a
+ *     conflict that carries the address the job really pays
+ *  2. a send that may have gone out stays "sending" (never failed, cancelled
+ *     or put back), however late, until the chain settles it
+ *  3. the relay reads spent and the root at one pinned block
+ *  4. (routes) without the shared store: 503, never "not found"
+ *  5. the app puts a note back only on its own chain's word
+ *  6. a split's two notes name the note they spend, so it is counted once
+ *  7. scheduling dry-runs from a funded relay key, skipping an empty one
+ *  8. the vault keeps every root, so a long wait does not expire a job
+ *
+ * Then the browser side: what each job status means for the note (nextMark),
+ * and that a waiting cash out is out of the balance while one that came back
+ * is spendable again. A different amount (lib/cashOutSplit): the recent-amount
+ * match, Round it, and the rule for keeping the split's notes when the first
+ * step may have gone out.
+ *
+ * fetch is stubbed for the relay's chain calls (an in-process fake node);
+ * anything else fails. Relay keys are throwaways made here.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-cashout-later.mts
  */
 import assert from "node:assert/strict";
 import "./browser-shim.mjs";
-import type { Address, Hex } from "viem";
+import { toFunctionSelector, toHex, type Address, type Hex } from "viem";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+
+delete process.env.UPSTASH_REDIS_REST_URL;
+delete process.env.UPSTASH_REDIS_REST_TOKEN;
+delete process.env.CHAINALYSIS_API_KEY;
+// Two relay keys: the first one empty, the second funded (finding 7).
+const EMPTY_KEY = generatePrivateKey();
+const FUNDED_KEY = generatePrivateKey();
+process.env.GLOAM_RELAYER_PRIVATE_KEY = EMPTY_KEY;
+process.env.GLOAM_RELAYER_PRIVATE_KEYS = FUNDED_KEY;
 
 const {
   DELAY_WINDOWS,
@@ -32,16 +57,31 @@ const {
   jobView,
   memoryJobStore,
   runDueJobs,
+  scheduleJob,
 } = await import("../src/lib/relay/scheduled");
-const { nextMark } = await import("../src/lib/cashOutLater");
-const { matchesRecentIncoming, roundDownToWhole, splitMaybeSent } = await import("../src/lib/cashOutSplit");
+const { markFor, nextMark, reconcileCashOuts, releaseGoneCashOut } = await import("../src/lib/cashOutLater");
+const { matchesRecentIncoming, roundDownToWhole, splitMaybeSent, splitNotes } = await import("../src/lib/cashOutSplit");
 const { activeSpendableNotes, cashOutPending, saveLocalNote } = await import("../src/lib/shield");
-const { getActiveNetwork } = await import("../src/lib/networks");
+const { getActiveNetwork, getNetwork } = await import("../src/lib/networks");
 const { getAllNotes } = await import("../src/lib/noteVault");
 const { RelaySubmitError } = await import("../src/lib/relay/client");
+const { isSecuredClaim, reconcileClaims } = await import("../src/lib/claimSweep");
+const {
+  MAYBE_SENT_MESSAGE,
+  RelayError,
+  checkUnshieldForLater,
+  fundedRelayAccounts,
+  readSpendState,
+  relayUnshield,
+  sendFailure,
+  sendUnshieldNow,
+} = await import("../src/lib/relay/server");
+const { CREATE_SCRIPT, scheduledStore } = await import("../src/lib/relay/scheduledStore");
 type CashOutJob = import("../src/lib/relay/scheduled").CashOutJob;
 type ChainView = import("../src/lib/relay/scheduled").ChainView;
 type LocalNote = import("../src/lib/shield").LocalNote;
+type CashOutEnv = import("../src/lib/cashOutLater").CashOutEnv;
+type ClaimEnv = import("../src/lib/claimSweep").ClaimEnv;
 
 let passed = 0;
 async function test(name: string, fn: () => Promise<void> | void) {
@@ -183,7 +223,7 @@ await test("a job not due yet is left alone", async () => {
   assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
 });
 
-await test("a root the vault forgot expires the job and sends nothing", async () => {
+await test("a root the vault does not know expires the job and sends nothing", async () => {
   const j = job();
   const { store, chain } = await setup(j);
   chain.known.delete(j.root);
@@ -214,16 +254,18 @@ await test("re-running after a send never sends again", async () => {
   assert.equal(chain.sends.length, 1, "the chain read found it spent: no second send");
 });
 
-await test("a send that went out but lost its reply settles as sent from the chain", async () => {
+await test("a send that went out but lost its reply stays 'sending', then settles as sent from the chain", async () => {
   const j = job();
   const { store, chain } = await setup(j);
   chain.failNextSend((x) => {
     chain.spent.add(x.nullifier); // it landed
-    throw new SendError("timeout", "rpc");
+    throw new SendError("timeout", "maybe_sent");
   });
-  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "scheduled" }]);
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sending" }]);
   chain.now = T0 + 60_000;
-  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "spent" }]);
+  assert.deepEqual(await runDueJobs(store, chain.deps), [], "read again only once the send is stale");
+  chain.now = T0 + SENDING_STALE_MS + 1;
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
   assert.equal(chain.sends.length, 1);
 });
 
@@ -232,7 +274,7 @@ await test("a crash mid-send is read back from the chain, not sent twice", async
   const j = job({ status: "sending", attempts: 1, updatedAt: T0 - 1_000 });
   const { store, chain } = await setup(j);
   chain.spent.add(j.nullifier);
-  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "skipped" }], "fresh 'sending' is left to its run");
+  assert.deepEqual(await runDueJobs(store, chain.deps), [], "fresh 'sending' is left to its run");
   chain.now = T0 + SENDING_STALE_MS + 1;
   assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
   assert.equal(chain.sends.length, 0);
@@ -254,7 +296,7 @@ await test("a spend the relay holds in flight stays 'sending' and is read again 
   });
   assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sending" }]);
   chain.now = T0 + 60_000;
-  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "skipped" }]);
+  assert.deepEqual(await runDueJobs(store, chain.deps), []);
   chain.now = T0 + SENDING_STALE_MS + 60_000;
   assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
   assert.equal(chain.sends.length, 2);
@@ -399,17 +441,21 @@ const view = (status: string, over: object = {}) =>
 await test("nextMark: each job status for the note", () => {
   assert.equal(nextMark(mark, view("scheduled")), null);
   assert.deepEqual(nextMark(mark, view("scheduled", { sendAfter: T0 + 5_000 })), { ...mark, at: T0 + 5_000 });
-  assert.equal(nextMark(mark, view("sending")), null);
+  // going out (or may be): on its way, no Cancel, never back to waiting
+  assert.deepEqual(nextMark(mark, view("sending")), { ...mark, state: "sent" });
+  const sentMark = { ...mark, state: "sent" as const };
+  assert.equal(nextMark(sentMark, view("sending")), null);
+  assert.equal(nextMark(sentMark, view("scheduled")), null);
   assert.deepEqual(nextMark(mark, view("sent")), { ...mark, state: "sent" });
   assert.deepEqual(nextMark(mark, view("spent")), { ...mark, state: "sent" });
   assert.deepEqual(nextMark(mark, view("expired")), { ...mark, state: "expired" });
   assert.deepEqual(nextMark(mark, view("failed")), { ...mark, state: "failed" });
   assert.deepEqual(nextMark(mark, view("cancelled")), { ...mark, state: "cancelled" });
-  assert.deepEqual(nextMark(mark, "gone"), { ...mark, state: "failed" });
-  // sent but the chain never showed the spend: back to the balance after a grace period
-  const sentMark = { ...mark, state: "sent" as const };
-  assert.equal(nextMark(sentMark, view("sent"), T0 + 60_000), null);
-  assert.deepEqual(nextMark(sentMark, view("sent"), T0 + 31 * 60_000), { ...mark, state: "failed" });
+  // the relay no longer holds it: says nothing (the chain settles a spend)
+  assert.equal(nextMark(mark, "gone"), null);
+  assert.equal(nextMark(sentMark, "gone"), null);
+  // sent and old: no longer put back on time alone (reconcileCashOuts checks the receipt)
+  assert.equal(nextMark(sentMark, view("sent", { updatedAt: T0 - 24 * 3_600_000 })), null);
 });
 
 await test("a waiting cash out is out of the balance; one that came back is spendable", () => {
@@ -478,10 +524,10 @@ await test("an amount within 1% of money that came in the last day is flagged", 
 
 await test("the split keeps its notes unless the first step surely never went out", () => {
   // through the relay: only a clear refusal means nothing went out
-  for (const code of ["rpc", "network", "error", "internal", "in_flight"]) {
+  for (const code of ["maybe_sent", "rpc", "network", "error", "internal", "in_flight"]) {
     assert.equal(splitMaybeSent(new RelaySubmitError("x", code), true), true, code);
   }
-  for (const code of ["AlreadySpent", "UnknownRoot", "busy", "rate_limit", "relay_off", "screened"]) {
+  for (const code of ["AlreadySpent", "UnknownRoot", "busy", "rate_limit", "relay_off", "screened", "check_failed"]) {
     assert.equal(splitMaybeSent(new RelaySubmitError("x", code), true), false, code);
   }
   assert.equal(splitMaybeSent(new Error("odd"), true), false, "not a relay answer: thrown before the relay was asked");
@@ -493,6 +539,571 @@ await test("the split keeps its notes unless the first step surely never went ou
   assert.equal(splitMaybeSent(reverted, false), false);
   assert.equal(splitMaybeSent(timeout, false), true);
   assert.equal(splitMaybeSent(new Error("lost"), false), true);
+});
+
+// ---------------------------------------------------------------- review 2026-10-22
+
+const OTHER = "0x2222222222222222222222222222222222222222" as Address;
+
+// 1. A retry pays the old address while the app shows the new one.
+
+await test("1. one job per spend: the same cash out comes back, another address is a conflict with the real one", async () => {
+  const store = memoryJobStore();
+  const a = job();
+  assert.deepEqual(await scheduleJob(store, a), { job: a, outcome: "created" });
+  // the same money, asked again with a fresh proof to the same address
+  const again = await scheduleJob(store, { ...job(), nullifier: a.nullifier, root: a.root, proof: "0x1234" });
+  assert.equal(again.outcome, "existing");
+  assert.equal(again.job.id, a.id);
+  // the same money to another address: refused, and what comes back pays the old one
+  const moved = await scheduleJob(store, { ...job(), nullifier: a.nullifier, to: OTHER });
+  assert.equal(moved.outcome, "conflict");
+  assert.equal(moved.job.id, a.id);
+  assert.equal(moved.job.to, TO);
+  assert.deepEqual(markFor({ ...jobView(moved.job), to: moved.job.to }), { job: a.id, at: a.sendAfter, to: TO, state: "scheduled" });
+  // another amount or asset is a conflict too
+  assert.equal((await scheduleJob(store, { ...job(), nullifier: a.nullifier, amount: "1" })).outcome, "conflict");
+  assert.equal((await scheduleJob(store, { ...job(), nullifier: a.nullifier, asset: OTHER })).outcome, "conflict");
+  assert.equal(await store.byNullifier(4663, a.nullifier), a.id);
+  // a job already going out shows as on its way
+  await store.put({ ...a, status: "sending" });
+  assert.equal(markFor({ ...jobView({ ...a, status: "sending" }), to: TO }).state, "sent");
+});
+
+await test("1. two requests for one spend at the same moment: exactly one is saved", async () => {
+  const store = memoryJobStore();
+  const x = job();
+  const y = { ...job(), nullifier: x.nullifier, to: OTHER };
+  const [rx, ry] = await Promise.all([scheduleJob(store, x), scheduleJob(store, y)]);
+  assert.deepEqual([rx.outcome, ry.outcome].sort(), ["conflict", "created"]);
+  const winner = rx.outcome === "created" ? x : y;
+  assert.equal(await store.byNullifier(4663, x.nullifier), winner.id);
+  assert.equal((await store.due(T0, 20)).length, 1);
+});
+
+await test("1. a spend whose job is over (or gone) can be scheduled again", async () => {
+  const store = memoryJobStore();
+  const a = job();
+  await scheduleJob(store, a);
+  await store.put({ ...a, status: "expired", proof: "0x" });
+  const b = { ...job(), nullifier: a.nullifier, to: OTHER };
+  assert.equal((await scheduleJob(store, b)).outcome, "created");
+  assert.equal(await store.byNullifier(4663, a.nullifier), b.id);
+  // the pointer names a job whose record is gone
+  await store.forget(b.id);
+  const c = { ...job(), nullifier: a.nullifier };
+  assert.equal((await scheduleJob(store, c)).outcome, "created");
+  assert.equal(await store.byNullifier(4663, a.nullifier), c.id);
+});
+
+await test("1. in Redis a new job is one EVAL: pointer, record and queue together", async () => {
+  const realFetch = globalThis.fetch;
+  const sent: unknown[] = [];
+  process.env.UPSTASH_REDIS_REST_URL = "https://redis.selftest.invalid";
+  process.env.UPSTASH_REDIS_REST_TOKEN = "selftest";
+  globalThis.fetch = (async (_u: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as unknown[];
+    sent.push(body);
+    return new Response(JSON.stringify({ result: body[6] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const j = job();
+    assert.equal(await scheduledStore().create(j), j.id);
+    assert.equal(sent.length, 1, "one round trip");
+    const [cmd, script, nkeys, nf, rec, due, id, json, ttl, score, replace] = sent[0] as unknown[];
+    assert.equal(cmd, "EVAL");
+    assert.equal(script, CREATE_SCRIPT);
+    assert.equal(nkeys, 3);
+    assert.equal(nf, `gloam:cashout:nf:4663:${j.nullifier}`);
+    assert.equal(rec, `gloam:cashout:job:${j.id}`);
+    assert.equal(due, "gloam:cashout:due");
+    assert.equal(id, j.id);
+    assert.equal(JSON.parse(String(json)).to, TO);
+    assert.ok(Number(ttl) > 0);
+    assert.equal(score, j.sendAfter);
+    assert.equal(replace, "");
+    // the script refuses to write over another job's pointer
+    assert.match(CREATE_SCRIPT, /if cur and cur ~= ARGV\[1\] and cur ~= ARGV\[5\] then return cur end/);
+    assert.ok(CREATE_SCRIPT.indexOf("return cur") < CREATE_SCRIPT.indexOf('"SET", KEYS[2]'), "checks before it writes");
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  }
+});
+
+// 2. A maybe-sent cash out can be cancelled or failed, and the app says "nothing moved".
+
+/** A relay that times out after the node took the transaction. */
+function timesOutAfterSend(chain: ReturnType<typeof fakeChain>, code = "maybe_sent") {
+  return (x: CashOutJob): Hex => {
+    void x;
+    throw new SendError("This may have gone out already.", code);
+  };
+}
+
+await test("2. a send that may have gone out stays 'sending': cancel refused, the app never puts it back", async () => {
+  for (const code of ["maybe_sent", "rpc", "error", "internal"]) {
+    const j = job();
+    const { store, chain } = await setup(j);
+    chain.failNextSend(timesOutAfterSend(chain, code));
+    assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sending" }], code);
+    const after = (await store.get(j.id))!;
+    assert.equal(after.status, "sending");
+    assert.equal(after.maybeSent, true);
+    assert.equal(after.proof, j.proof, "the proof is kept: it can still be read back or sent");
+    assert.equal(await cancelJob(store, j.id, chain.now), "sending");
+    assert.equal((await store.get(j.id))!.status, "sending");
+    // the app: on its way, out of the balance
+    const next = nextMark({ job: j.id, at: j.sendAfter, to: TO, state: "scheduled" }, jobView(after));
+    assert.equal(next?.state, "sent");
+    assert.equal(cashOutPending({ cashOut: next! }), true);
+    // the transaction lands: the chain settles it as sent
+    chain.spent.add(j.nullifier);
+    chain.now = T0 + SENDING_STALE_MS + 1;
+    assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
+  }
+});
+
+await test("2. long overdue and maybe sent: never failed, the proof kept", async () => {
+  const j = job({ sendAfter: T0 - GIVE_UP_AFTER_MS - 1 });
+  const { store, chain } = await setup(j);
+  chain.failNextSend(timesOutAfterSend(chain));
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sending" }]);
+  // later passes keep failing in passing ways: still not "failed"
+  for (let i = 1; i <= 3; i++) {
+    chain.now = T0 + i * (SENDING_STALE_MS + 1);
+    chain.failNextSend(() => {
+      throw new SendError("busy", "busy");
+    });
+    assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sending" }]);
+  }
+  const after = (await store.get(j.id))!;
+  assert.equal(after.status, "sending");
+  assert.equal(after.proof, j.proof);
+  // the relay's dry run finds it spent (the first try landed): sent, not "spent elsewhere"
+  chain.now += SENDING_STALE_MS + 1;
+  chain.failNextSend(() => {
+    throw new SendError("spent", "AlreadySpent");
+  });
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
+});
+
+await test("2. a stale 'sending' job and an unreadable node: stays 'sending', cancel refused", async () => {
+  const j = job({ status: "sending", attempts: 1, updatedAt: T0 - SENDING_STALE_MS - 1 });
+  const { store, chain } = await setup(j);
+  chain.readFails = true;
+  chain.now = T0 + GIVE_UP_AFTER_MS + 1;
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sending" }]);
+  assert.equal((await store.get(j.id))!.status, "sending");
+  assert.equal(await cancelJob(store, j.id, chain.now), "sending");
+  assert.equal(chain.sends.length, 0);
+});
+
+await test("2. once a run reached the send, cancel is refused even if it waits again", async () => {
+  const j = job();
+  const { store, chain } = await setup(j);
+  chain.failNextSend(() => {
+    throw new SendError("busy", "busy");
+  });
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "scheduled" }]);
+  assert.equal(await cancelJob(store, j.id, chain.now), "sending");
+  assert.equal((await store.get(j.id))!.status, "scheduled", "left to go out on the next pass");
+});
+
+await test("2. the chain is the only way out unsent: root unknown with the note unspent", async () => {
+  const j = job({ status: "sending", attempts: 1, maybeSent: true, updatedAt: T0 - SENDING_STALE_MS - 1 });
+  const { store, chain } = await setup(j);
+  chain.known.delete(j.root);
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "expired" }]);
+  assert.equal(chain.sends.length, 0);
+  // a refusal raised before the node only ends a job that never may have gone out
+  const k = job({ status: "scheduled", attempts: 1, maybeSent: true });
+  const s2 = await setup(k);
+  s2.chain.failNextSend(() => {
+    throw new SendError("refused", "screened");
+  });
+  assert.deepEqual(await runDueJobs(s2.store, s2.chain.deps), [{ id: k.id, status: "sending" }]);
+});
+
+await test("2. stuck 'sending' jobs never crowd a due one out of a run", async () => {
+  const stuck = Array.from({ length: 25 }, () => job({ status: "sending", maybeSent: true, sendAfter: T0 - 600_000, updatedAt: T0 - 1_000 }));
+  const fresh = job();
+  const { store, chain } = await setup(...stuck, fresh);
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: fresh.id, status: "sent" }]);
+});
+
+// 2 + 3 + 7: the relay itself, against a fake node.
+
+const net = getNetwork("robinhood");
+assert.ok(net.pool);
+const RPC = net.chain.rpcUrls.default.http[0];
+const SEL = { spent: toFunctionSelector("spent(bytes32)"), isKnownRoot: toFunctionSelector("isKnownRoot(bytes32)") };
+const node = {
+  block: 7n,
+  spent: false,
+  known: true,
+  drop: false,
+  lagging: false,
+  calls: [] as { method: string; params: unknown[] }[],
+};
+const emptyAddr = privateKeyToAccount(EMPTY_KEY).address.toLowerCase();
+const fundedAddr = privateKeyToAccount(FUNDED_KEY).address;
+const word = (b: boolean) => "0x" + (b ? "1" : "0").padStart(64, "0");
+const Z32 = "0x" + "00".repeat(32);
+const BLOCK = {
+  number: "0x7",
+  hash: "0x" + "12".repeat(32),
+  parentHash: Z32,
+  nonce: "0x0000000000000000",
+  sha3Uncles: Z32,
+  logsBloom: "0x" + "00".repeat(256),
+  transactionsRoot: Z32,
+  stateRoot: Z32,
+  receiptsRoot: Z32,
+  miner: "0x" + "00".repeat(20),
+  difficulty: "0x0",
+  totalDifficulty: "0x0",
+  extraData: "0x",
+  size: "0x1",
+  gasLimit: "0x1c9c380",
+  gasUsed: "0x0",
+  timestamp: "0x1",
+  baseFeePerGas: "0x1",
+  transactions: [],
+  uncles: [],
+};
+const TX_HASH = ("0x" + "ab".repeat(32)) as Hex;
+type RpcReq = { id: number; method: string; params?: unknown[] };
+function answer(r: RpcReq): { result?: unknown; error?: { code: number; message: string } } {
+  const params = r.params ?? [];
+  switch (r.method) {
+    case "eth_chainId":
+      return { result: toHex(net.chainId) };
+    case "eth_blockNumber":
+      return { result: toHex(node.block) };
+    case "eth_getBlockByNumber":
+      return { result: BLOCK };
+    case "eth_getTransactionCount":
+      return { result: "0x0" };
+    case "eth_gasPrice":
+    case "eth_maxPriorityFeePerGas":
+      return { result: "0x1" };
+    case "eth_getBalance":
+      return { result: String(params[0]).toLowerCase() === emptyAddr ? "0x0" : toHex(10n ** 18n) };
+    case "eth_estimateGas":
+      return { result: "0x1b7740" };
+    case "eth_call": {
+      const tag = params[1];
+      if (node.lagging && tag !== "latest") return { error: { code: -32000, message: "header not found" } };
+      const sel = String((params[0] as { data?: string }).data).slice(0, 10);
+      if (sel === SEL.spent) return { result: word(node.spent) };
+      if (sel === SEL.isKnownRoot) return { result: word(node.known) };
+      return { error: { code: -32000, message: `fake node: unknown call ${sel}` } };
+    }
+    case "eth_sendRawTransaction":
+      return { result: TX_HASH };
+    default:
+      return { error: { code: -32601, message: `fake node: ${r.method} not handled` } };
+  }
+}
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (url.replace(/\/$/, "") !== RPC.replace(/\/$/, "")) throw new Error(`selftest: no network (${url})`);
+  const body = JSON.parse(String(init?.body)) as RpcReq | RpcReq[];
+  const list = Array.isArray(body) ? body : [body];
+  for (const r of list) node.calls.push({ method: r.method, params: r.params ?? [] });
+  // A dropped connection on the send: the node may or may not have the transaction.
+  if (node.drop && list.some((r) => r.method === "eth_sendRawTransaction")) throw new TypeError("fetch failed");
+  const out = list.map((r) => ({ jsonrpc: "2.0", id: r.id, ...answer(r) }));
+  return new Response(JSON.stringify(Array.isArray(body) ? out : out[0]), { status: 200, headers: { "Content-Type": "application/json" } });
+}) as typeof fetch;
+
+function resetNode(over: Partial<typeof node> = {}) {
+  Object.assign(node, { spent: false, known: true, drop: false, lagging: false }, over);
+  node.calls.length = 0;
+}
+const PROOF = ("0x" + "22".repeat(256)) as Hex;
+let nfSeq = 0x5000;
+const body = (over: Record<string, unknown> = {}) => ({
+  chainId: net.chainId,
+  proof: PROOF,
+  root: hex32(0x77),
+  nullifier: hex32(++nfSeq),
+  asset: ASSET,
+  to: TO,
+  amount: "5000000",
+  ...over,
+});
+
+await test("2. the relay answers maybe_sent when the node may have taken the send; a refusal is not that", async () => {
+  resetNode({ drop: true });
+  await assert.rejects(relayUnshield(net, body()), (e: unknown) => {
+    assert.ok(e instanceof RelayError);
+    assert.equal(e.code, "maybe_sent");
+    assert.equal(e.message, MAYBE_SENT_MESSAGE);
+    return true;
+  });
+  assert.ok(node.calls.some((c) => c.method === "eth_sendRawTransaction"));
+  assert.equal(sendFailure(new Error("The request timed out.")).code, "maybe_sent");
+  assert.equal(sendFailure(new Error("already known")).code, "maybe_sent");
+  assert.equal(sendFailure(new Error("insufficient funds for gas * price + value")).code, "relay_empty");
+  assert.equal(sendFailure(new Error("nonce too low")).code, "rpc");
+});
+
+await test("2. end to end: a dropped send through the relay keeps the job 'sending' until the chain shows it", async () => {
+  resetNode({ drop: true });
+  const b = body();
+  const j = job({ nullifier: b.nullifier as Hex, root: b.root as Hex, proof: PROOF });
+  const store = memoryJobStore();
+  await store.put(j);
+  let clock = T0;
+  const deps = {
+    now: () => clock,
+    readChain: (x: CashOutJob) => readSpendState(net, x.root, x.nullifier),
+    send: (x: CashOutJob) => sendUnshieldNow(net, { proof: x.proof, root: x.root, nullifier: x.nullifier, asset: x.asset, to: x.to, amount: x.amount }),
+  };
+  assert.deepEqual(await runDueJobs(store, deps), [{ id: j.id, status: "sending" }]);
+  assert.equal((await store.get(j.id))!.maybeSent, true);
+  assert.equal(await cancelJob(store, j.id, clock), "sending");
+  // stale: read again; the relay still holds the spend in flight, so it stays "sending"
+  resetNode();
+  clock += SENDING_STALE_MS + 1;
+  assert.deepEqual(await runDueJobs(store, deps), [{ id: j.id, status: "sending" }]);
+  assert.ok(!node.calls.some((c) => c.method === "eth_sendRawTransaction"), "no second send while in flight");
+  // it landed
+  resetNode({ spent: true });
+  clock += SENDING_STALE_MS + 1;
+  assert.deepEqual(await runDueJobs(store, deps), [{ id: j.id, status: "sent" }]);
+});
+
+// 3. Expiry reads can disagree.
+
+await test("3. spent and the root are read at one pinned block; a node without it counts as unread", async () => {
+  resetNode();
+  node.block = 0x2a_1234n;
+  assert.deepEqual(await readSpendState(net, hex32(1), hex32(2)), { spent: false, knownRoot: true });
+  const calls = node.calls.filter((c) => c.method === "eth_call");
+  assert.equal(calls.length, 2);
+  for (const c of calls) assert.equal(c.params[1], toHex(node.block), "both reads at the block just read");
+  assert.ok(node.calls.findIndex((c) => c.method === "eth_blockNumber") < node.calls.findIndex((c) => c.method === "eth_call"));
+  resetNode({ lagging: true });
+  await assert.rejects(readSpendState(net, hex32(1), hex32(2)));
+  node.block = 7n;
+});
+
+// 7. One empty relay key blocks scheduling.
+
+await test("7. scheduling dry-runs from a funded key, skipping an empty first one", async () => {
+  resetNode();
+  const accounts = await fundedRelayAccounts(net);
+  assert.deepEqual(accounts.map((a) => a.address), [fundedAddr]);
+  await checkUnshieldForLater(net, body());
+  const est = node.calls.find((c) => c.method === "eth_estimateGas");
+  assert.ok(est);
+  assert.equal(String((est.params[0] as { from?: string }).from).toLowerCase(), fundedAddr.toLowerCase());
+  // every key empty: refused as the relay being out of gas, like a send now
+  await assert.rejects(
+    fundedRelayAccounts(net, undefined, async () => true),
+    (e: unknown) => e instanceof RelayError && e.code === "relay_empty"
+  );
+});
+
+// 5. A sent cash out shows as returned on another network.
+
+const active = getActiveNetwork();
+let markSeq = 0;
+function marked(state: "scheduled" | "sent", over: Partial<LocalNote> = {}): LocalNote {
+  markSeq++;
+  const n: LocalNote = {
+    id: `r5-${markSeq}`,
+    chainId: active.chainId,
+    pool: active.pool!,
+    asset: ASSET,
+    amountWei: "5000000",
+    commitment: hex32(0x9000 + markSeq),
+    secret: hex32(0xa000 + markSeq),
+    nullifier: hex32(0xb000 + markSeq),
+    createdAt: T0,
+    bound: true,
+    scheme: "poseidon",
+    status: "open",
+    source: "local",
+    cashOut: { job: `job-r5-${markSeq}`, at: T0, to: TO, state },
+    ...over,
+  };
+  saveLocalNote(n);
+  return n;
+}
+const noteById = (id: string) => getAllNotes().find((n) => n.id === id)!;
+
+function cashEnv(over: {
+  views?: Record<string, unknown>;
+  spent?: Record<string, boolean | null>;
+  receipts?: Record<string, "success" | "reverted" | null>;
+  now?: number;
+}): CashOutEnv {
+  return {
+    chainId: active.chainId,
+    pool: active.pool!,
+    now: () => over.now ?? T0,
+    status: async (id) => (over.views?.[id] as never) ?? null,
+    isSpent: async (nf) => (over.spent && nf in over.spent ? over.spent[nf]! : null),
+    receipt: async (h) => over.receipts?.[h] ?? null,
+  };
+}
+const v = (id: string, status: string, extra: object = {}) => ({ id, chainId: active.chainId, sendAfter: T0, status, updatedAt: T0, ...extra });
+
+await test("5. a note goes back only when its own chain shows it unspent", async () => {
+  const spentNote = marked("scheduled");
+  const unread = marked("scheduled");
+  const unspent = marked("scheduled");
+  const elsewhere = marked("scheduled", { chainId: active.chainId + 1 });
+  const env = cashEnv({
+    views: {
+      [spentNote.cashOut!.job]: v(spentNote.cashOut!.job, "failed"),
+      [unread.cashOut!.job]: v(unread.cashOut!.job, "failed"),
+      [unspent.cashOut!.job]: v(unspent.cashOut!.job, "failed"),
+      [elsewhere.cashOut!.job]: v(elsewhere.cashOut!.job, "failed"),
+    },
+    spent: { [spentNote.nullifier!]: true, [unread.nullifier!]: null, [unspent.nullifier!]: false, [elsewhere.nullifier!]: false },
+  });
+  assert.equal(await reconcileCashOuts(env), true);
+  assert.equal(noteById(spentNote.id).cashOut!.state, "sent", "spent after all: on its way, the chain retires it");
+  assert.equal(noteById(unread.id).cashOut!.state, "scheduled", "chain unread: left as it is");
+  assert.equal(noteById(unspent.id).cashOut!.state, "failed", "relay and chain agree: back in the balance");
+  assert.equal(noteById(elsewhere.id).cashOut!.state, "scheduled", "another network's note is not read on this one");
+  const spendable = new Set(activeSpendableNotes(getAllNotes()).map((n) => n.id));
+  assert.deepEqual([spentNote, unread, unspent, elsewhere].map((n) => spendable.has(n.id)), [false, false, true, false]);
+});
+
+await test("5. sent but not landed: back only on a reverted receipt with the note unspent", async () => {
+  const reverted = marked("sent");
+  const pending = marked("sent");
+  const early = marked("sent");
+  const hashOf = (n: LocalNote) => hex32(0xc000 + Number(n.id.slice(3)));
+  const views: Record<string, unknown> = {};
+  for (const n of [reverted, pending]) views[n.cashOut!.job] = v(n.cashOut!.job, "sent", { hash: hashOf(n), updatedAt: T0 - 31 * 60_000 });
+  views[early.cashOut!.job] = v(early.cashOut!.job, "sent", { hash: hashOf(early), updatedAt: T0 - 60_000 });
+  const env = cashEnv({
+    views,
+    spent: { [reverted.nullifier!]: false, [pending.nullifier!]: false, [early.nullifier!]: false },
+    receipts: { [hashOf(reverted)]: "reverted", [hashOf(pending)]: null, [hashOf(early)]: "reverted" },
+  });
+  await reconcileCashOuts(env);
+  assert.equal(noteById(reverted.id).cashOut!.state, "failed");
+  assert.equal(noteById(pending.id).cashOut!.state, "sent", "no receipt yet: still on its way");
+  assert.equal(noteById(early.id).cashOut!.state, "sent", "inside the grace period: not checked");
+});
+
+await test("5. a relay that forgot the job, or can't be read, never puts a note back on its own", async () => {
+  const gone = marked("scheduled");
+  const down = marked("sent");
+  const env = cashEnv({ views: { [gone.cashOut!.job]: "gone" }, spent: { [gone.nullifier!]: false, [down.nullifier!]: false } });
+  assert.equal(await reconcileCashOuts(env), false);
+  assert.equal(noteById(gone.id).cashOut!.state, "scheduled");
+  assert.equal(noteById(down.id).cashOut!.state, "sent");
+  // Cancel on a job the relay no longer holds: back only when the chain shows it unspent
+  const goneSpent = marked("scheduled");
+  assert.equal(await releaseGoneCashOut(goneSpent, cashEnv({ spent: { [goneSpent.nullifier!]: true } })), false);
+  assert.equal(await releaseGoneCashOut(goneSpent, cashEnv({ spent: { [goneSpent.nullifier!]: null } })), false);
+  assert.equal(noteById(goneSpent.id).cashOut!.state, "scheduled");
+  assert.equal(await releaseGoneCashOut(gone, env), true);
+  assert.equal(noteById(gone.id).cashOut, undefined);
+});
+
+// 6. A split can be counted twice.
+
+await test("6. a split's notes name the note they spend, and landing retires it: counted once", async () => {
+  const original: LocalNote = {
+    id: "dep-split-1",
+    chainId: active.chainId,
+    pool: active.pool!,
+    asset: ASSET,
+    amountWei: "10000000",
+    commitment: hex32(0xd001),
+    secret: hex32(0xd002),
+    nullifier: hex32(0xd003),
+    createdAt: T0,
+    bound: true,
+    scheme: "poseidon",
+    status: "open",
+    source: "local",
+  };
+  const out = (i: number, amountWei: string) => ({ amountWei, commitment: hex32(0xe000 + i), secret: hex32(0xe100 + i), nullifier: hex32(0xe200 + i) });
+  const w = { paymentNote: out(1, "4000000"), changeNote: out(2, "6000000") } as never;
+  const { part, change } = splitNotes(original, w, original.nullifier!, TO, T0);
+  assert.ok(change);
+  for (const n of [part, change]) {
+    assert.deepEqual(n.sweptFrom, { id: original.id, nullifier: original.nullifier });
+    assert.equal(isSecuredClaim(n), false, "a split is not a received payment");
+  }
+  assert.equal(isSecuredClaim({ ...part, sweptFrom: { id: "imp-1", nullifier: hex32(1) } }), true);
+  assert.equal(splitNotes(original, { paymentNote: out(3, "10000000"), changeNote: out(4, "0") } as never, original.nullifier!, TO, T0 + 1).change, null);
+
+  // the transfer may have gone out: both kept as pending, the original still open
+  saveLocalNote(original);
+  saveLocalNote({ ...part, sweepPending: true });
+  saveLocalNote({ ...change, sweepPending: true });
+  const ids = [original.id, part.id, change.id];
+  const counted = () =>
+    activeSpendableNotes(getAllNotes())
+      .filter((n) => ids.includes(n.id))
+      .reduce((t, n) => t + BigInt(n.amountWei), 0n);
+  assert.equal(counted(), 10_000_000n, "before it lands: only the original counts");
+  // it landed: the sync counts the new notes and, in the same step, retires the original
+  const env = {
+    chainId: active.chainId,
+    pool: active.pool!,
+    stateAt: async () => ({ spent: true, seen: true }),
+    leafIndexOf: async () => 3,
+  } as unknown as ClaimEnv;
+  assert.equal(await reconcileClaims(env), true);
+  assert.equal(noteById(original.id).status, "recovered");
+  assert.equal(counted(), 10_000_000n, "after: the two new notes, never the original as well");
+});
+
+await test("6. a split that can never land (the original spent another way) leaves the balance", async () => {
+  const original: LocalNote = {
+    id: "dep-split-2",
+    chainId: active.chainId,
+    pool: active.pool!,
+    asset: ASSET,
+    amountWei: "8000000",
+    commitment: hex32(0xd101),
+    secret: hex32(0xd102),
+    nullifier: hex32(0xd103),
+    createdAt: T0,
+    bound: true,
+    scheme: "poseidon",
+    status: "open",
+    source: "local",
+  };
+  const out = (i: number, amountWei: string) => ({ amountWei, commitment: hex32(0xf000 + i), secret: hex32(0xf100 + i), nullifier: hex32(0xf200 + i) });
+  const { part, change } = splitNotes(original, { paymentNote: out(1, "3000000"), changeNote: out(2, "5000000") } as never, original.nullifier!, TO, T0 + 7);
+  saveLocalNote({ ...part, sweepPending: true });
+  saveLocalNote({ ...change!, sweepPending: true });
+  const env = {
+    chainId: active.chainId,
+    pool: active.pool!,
+    stateAt: async () => ({ spent: true, seen: false }),
+    leafIndexOf: async () => undefined,
+  } as unknown as ClaimEnv;
+  await reconcileClaims(env);
+  assert.equal(noteById(part.id).status, "recovered");
+  assert.equal(noteById(change!.id).status, "recovered");
+});
+
+// 8. Long windows will often expire.
+
+await test("8. a job that waited its whole window still goes out: the vault keeps every root", async () => {
+  // The pool's isKnownRoot reads knownRoots (every root it ever had), not its
+  // 100-entry history (contracts/src/lib/IncrementalMerkleTreePoseidon.sol).
+  // On Robinhood mainnet, the empty tree's root is still known after 232 leaves.
+  const j = job({ createdAt: T0 - MAX_DELAY_MS, sendAfter: T0 - 1 });
+  const { store, chain } = await setup(j);
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
+  assert.deepEqual(Object.keys(DELAY_WINDOWS), ["hour", "6h"]);
 });
 
 console.log(`\n${passed} passed`);

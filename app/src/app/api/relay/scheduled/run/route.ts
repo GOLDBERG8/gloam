@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { webhookSecretOk } from "@/lib/telegramBot/rules";
 import { runDueJobs } from "@/lib/relay/scheduled";
-import { scheduledStore } from "@/lib/relay/scheduledStore";
+import { scheduledStore, scheduledStoreReady } from "@/lib/relay/scheduledStore";
 import { networkForChain, readSpendState, sendUnshieldNow } from "@/lib/relay/server";
 
 export const runtime = "nodejs";
@@ -18,6 +18,8 @@ export async function GET(req: Request) {
   if (!secret || !webhookSecretOk(req.headers.get("authorization"), `Bearer ${secret}`)) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
+  // Without the shared store there is nothing to run: never treat that as "no jobs".
+  if (!scheduledStoreReady()) return NextResponse.json({ ok: false, code: "later_off" }, { status: 503 });
   const results = await runDueJobs(scheduledStore(), {
     now: () => Date.now(),
     readChain: (job) => readSpendState(networkForChain(job.chainId), job.root, job.nullifier),

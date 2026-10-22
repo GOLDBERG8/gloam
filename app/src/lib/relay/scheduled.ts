@@ -9,15 +9,24 @@
  *
  * A job holds no secret: the proof and its public inputs. The proof binds the
  * amount and the recipient, so whoever holds the job can only send it as it is
- * or not at all. Before sending, the chain is read: a root the vault no longer
- * keeps (it remembers its last 100) means the proof can't land, so the job
- * expires and nothing moved; a spent nullifier means the money already moved.
+ * or not at all. Before sending, the chain is read at one block: a spent
+ * nullifier means the money already moved. The vault accepts every root it
+ * ever had (knownRoots, not only its recent history), so a proof does not go
+ * stale while it waits; a root it does not know at all means the proof can
+ * never land, so the job expires and nothing moved.
  *
  * Sending is idempotent. A job is taken under a short lock, marked "sending"
  * before the relay is called, and the chain is read first on every pass, so a
  * job that was sent but not recorded (a crash, a lost reply) settles as sent
  * instead of going out twice. The relay itself refuses a second copy of a
  * spend while one is in flight (lib/relay/inflight).
+ *
+ * Once the relay may have handed a job to the node (a timeout, a lost reply,
+ * any answer that is not a clear refusal), the job stays "sending" until the
+ * chain settles it: it is never cancelled, failed or said to be unsent on a
+ * guess. Only the chain (spent, or a root it does not know with the note
+ * unspent, read at one block) or a refusal raised before anything reached
+ * the node ends it.
  *
  * This file is the logic and an in-memory store (for tests and local runs);
  * lib/relay/scheduledStore.ts keeps jobs in Redis in production.
@@ -35,19 +44,21 @@ export const MIN_DELAY_MS = 2 * 60 * 1000;
 export const GIVE_UP_AFTER_MS = 2 * 60 * 60 * 1000;
 /** A job marked "sending" longer than this is read again: the send may have died with its instance. */
 export const SENDING_STALE_MS = 5 * 60 * 1000;
-/** How long a job record is kept, so the app can still read what happened. */
+/** How long a live job record is kept (refreshed on every save). */
 export const JOB_TTL_SEC = 3 * 24 * 60 * 60;
+/** How long a finished job is kept, without its proof, so the app can still read what happened. */
+export const JOB_DONE_TTL_SEC = 30 * 24 * 60 * 60;
 
 export type JobStatus =
   | "scheduled"
   | "sending"
   /** The relay sent it (hash set). The chain settles it. */
   | "sent"
-  /** The vault no longer keeps the proof's root: nothing moved, cash out again. */
+  /** The vault does not know the proof's root and the note is unspent: it can never land, nothing moved. */
   | "expired"
   /** The note was already spent when the job came due (this cash out, or another spend). */
   | "spent"
-  /** It could not go out (refused, or kept failing). Nothing moved. */
+  /** It could not go out (refused before reaching the node, or reverted). Nothing moved. */
   | "failed"
   | "cancelled";
 
@@ -67,6 +78,8 @@ export type CashOutJob = {
   attempts: number;
   updatedAt: number;
   hash?: Hex;
+  /** A send may have reached the node: from now on only the chain settles the job. */
+  maybeSent?: boolean;
   /** A short, public reason when it failed (never a secret). */
   reason?: string;
 };
@@ -96,19 +109,39 @@ export function isLive(status: JobStatus): boolean {
   return status === "scheduled" || status === "sending";
 }
 
+/** When the runner next looks at a live job: its send time, or for one going out, once that send is stale. */
+export function dueAt(job: CashOutJob): number {
+  return job.status === "sending" ? job.updatedAt + SENDING_STALE_MS : job.sendAfter;
+}
+
+/** Whether a new request is the same cash out as a waiting job: same recipient, amount and asset. */
+export function sameCashOut(job: CashOutJob, want: { to: string; amount: string; asset: string }): boolean {
+  return (
+    job.to.toLowerCase() === want.to.toLowerCase() &&
+    job.amount === want.amount &&
+    job.asset.toLowerCase() === want.asset.toLowerCase()
+  );
+}
+
 // ---------------------------------------------------------------- store
 
 export interface JobStore {
   get(id: string): Promise<CashOutJob | null>;
-  /** Saves the job, and keeps it in the due queue while it is live. */
+  /** Saves the job, and keeps it in the due queue (by dueAt) while it is live. */
   put(job: CashOutJob): Promise<void>;
+  /**
+   * Saves a new job as the one for its spend, in one step: the spend's pointer,
+   * the job and its place in the queue. When the pointer already names another
+   * job (other than `replace`), nothing is written and that job's id comes back.
+   */
+  create(job: CashOutJob, replace?: string): Promise<string>;
   /** Ids due by `now`, oldest first. */
   due(now: number, limit: number): Promise<string[]>;
   /** The live job already scheduled for this spend, if any. */
   byNullifier(chainId: number, nullifier: Hex): Promise<string | null>;
   /** A short lock on one job; returns its release, or null while another run holds it. */
   lock(id: string, ttlSec: number): Promise<(() => Promise<void>) | null>;
-  /** Takes an id whose job record is gone out of the due queue. */
+  /** Takes an id out of the due queue (its record is gone or over). */
   forget(id: string): Promise<void>;
 }
 
@@ -116,6 +149,9 @@ export interface JobStore {
 export function memoryJobStore(): JobStore {
   const jobs = new Map<string, CashOutJob>();
   const locks = new Map<string, number>();
+  /** The job named for each spend, like the Redis store's pointer. */
+  const spends = new Map<string, string>();
+  const spendKey = (chainId: number, nullifier: Hex) => `${chainId}:${nullifier.toLowerCase()}`;
   return {
     async get(id) {
       const j = jobs.get(id);
@@ -123,18 +159,27 @@ export function memoryJobStore(): JobStore {
     },
     async put(job) {
       jobs.set(job.id, { ...job });
+      if (isLive(job.status)) spends.set(spendKey(job.chainId, job.nullifier), job.id);
+    },
+    async create(job, replace) {
+      const key = spendKey(job.chainId, job.nullifier);
+      const held = spends.get(key);
+      if (held && held !== job.id && held !== replace) return held;
+      jobs.set(job.id, { ...job });
+      spends.set(key, job.id);
+      return job.id;
     },
     async due(now, limit) {
       return [...jobs.values()]
-        .filter((j) => isLive(j.status) && j.sendAfter <= now)
-        .sort((a, b) => a.sendAfter - b.sendAfter)
+        .filter((j) => isLive(j.status) && dueAt(j) <= now)
+        .sort((a, b) => dueAt(a) - dueAt(b))
         .slice(0, limit)
         .map((j) => j.id);
     },
     async byNullifier(chainId, nullifier) {
-      const n = nullifier.toLowerCase();
-      const hit = [...jobs.values()].find((j) => j.chainId === chainId && j.nullifier.toLowerCase() === n && isLive(j.status));
-      return hit?.id ?? null;
+      const id = spends.get(spendKey(chainId, nullifier));
+      const j = id ? jobs.get(id) : undefined;
+      return j && isLive(j.status) ? j.id : null;
     },
     async lock(id, ttlSec) {
       const now = Date.now();
@@ -156,7 +201,7 @@ export function memoryJobStore(): JobStore {
 /** The chain at send time: is the note spent, and does the vault still keep the proof's root. */
 export type ChainView = { spent: boolean; knownRoot: boolean };
 
-/** An error from a send: its relay code, and whether it can never succeed. */
+/** An error from a send: its relay code (lib/relay/server RelayError). */
 export type SendFailure = { code: string; message: string };
 
 export type RunDeps = {
@@ -167,8 +212,30 @@ export type RunDeps = {
   send: (job: CashOutJob) => Promise<Hex>;
 };
 
-/** Relay codes that mean this cash out can never go out as it is. */
-const PERMANENT = new Set(["screened", "asset_policy", "vault_recipient", "InvalidProof", "InvalidAmount", "ZeroAddress", "network", "bad_request"]);
+/**
+ * Relay codes raised before anything reaches the node (lib/relay/server): the
+ * request was refused, so nothing went out on that try.
+ */
+const REFUSED = new Set([
+  "screened",
+  "asset_policy",
+  "vault_recipient",
+  "bad_request",
+  "network",
+  "relay_off",
+  "relay_empty",
+  "busy",
+  "rate_limit",
+  "check_failed",
+]);
+/** Of those, the ones that mean this cash out can never go out as it is. */
+const PERMANENT = new Set(["screened", "asset_policy", "vault_recipient", "bad_request", "network"]);
+/** The relay's dry run reverted with these: the call reverts, so it was not sent. */
+const REVERTED = new Set(["InvalidProof", "InvalidAmount", "ZeroAddress", "VerifierNotSet", "DuplicateCommitment", "InsufficientPoolBalance"]);
+/** A dry-run revert that can pass (the vault fills up again): try again later. */
+const REVERTED_PASSING = new Set(["InsufficientPoolBalance"]);
+
+const EXPIRED_REASON = "The vault does not know this proof's root, so it can never go out.";
 
 export type RunResult = { id: string; status: JobStatus | "skipped" };
 
@@ -214,54 +281,98 @@ async function runOne(store: JobStore, deps: RunDeps, id: string): Promise<JobSt
     return "skipped";
   }
   const now = deps.now();
-  if (!isLive(job.status)) return job.status;
+  if (!isLive(job.status)) {
+    await store.forget(id);
+    return job.status;
+  }
   if (job.sendAfter > now) return "skipped";
   // Another run is sending it right now (its lock may have lapsed mid-send).
   if (job.status === "sending" && now - job.updatedAt < SENDING_STALE_MS) return "skipped";
+  // A "sending" job found here may have gone out (the run died, or the node's answer was lost).
+  const mayBeOut = job.status === "sending" || job.maybeSent === true;
 
   let chain: ChainView;
   try {
     chain = await deps.readChain(job);
   } catch {
-    // The node did not answer: try again on the next pass, unless it is long overdue.
+    // The node did not answer. One that may be out stays "sending" and is read again later;
+    // one that never reached the node tries again next pass, or gives up when long overdue.
+    if (mayBeOut) return settle(store, job, "sending", now, { maybeSent: true });
     if (now - job.sendAfter > GIVE_UP_AFTER_MS) return settle(store, job, "failed", now, { reason: "The network could not be read in time." });
     return settle(store, job, "scheduled", now);
   }
   // Spent: by this job on an earlier pass whose result was lost, or elsewhere.
-  if (chain.spent) return settle(store, job, job.hash || job.status === "sending" ? "sent" : "spent", now);
-  if (!chain.knownRoot) return settle(store, job, "expired", now, { reason: "It waited longer than the vault keeps its proof." });
+  if (chain.spent) return settle(store, job, job.hash || mayBeOut ? "sent" : "spent", now);
+  // Read at one block with the note unspent: no copy of this proof can ever land.
+  if (!chain.knownRoot) return settle(store, job, "expired", now, { reason: EXPIRED_REASON });
 
   // Marked before the send, so a crash after the send is read back from the chain, not sent again.
-  await store.put({ ...job, status: "sending", attempts: job.attempts + 1, updatedAt: now });
+  const sending: CashOutJob = { ...job, status: "sending", attempts: job.attempts + 1, updatedAt: now };
+  await store.put(sending);
   try {
     const hash = await deps.send(job);
-    return settle(store, { ...job, attempts: job.attempts + 1 }, "sent", deps.now(), { hash });
+    return settle(store, sending, "sent", deps.now(), { hash });
   } catch (e) {
     const code = (e as { code?: string })?.code ?? "error";
-    const message = e instanceof Error ? e.message : "The relay could not send it.";
-    const sent = { ...job, attempts: job.attempts + 1 };
-    if (code === "AlreadySpent") return settle(store, sent, "spent", deps.now());
-    if (code === "UnknownRoot") return settle(store, sent, "expired", deps.now(), { reason: "It waited longer than the vault keeps its proof." });
-    // Another request holds this spend: it may be going out. Read the chain next pass.
-    if (code === "in_flight") return settle(store, sent, "sending", deps.now());
-    if (PERMANENT.has(code)) return settle(store, sent, "failed", deps.now(), { reason: message.slice(0, 160) });
-    if (deps.now() - job.sendAfter > GIVE_UP_AFTER_MS) return settle(store, sent, "failed", deps.now(), { reason: message.slice(0, 160) });
-    // A passing failure (busy, out of gas for a moment, a slow node): again next pass.
-    return settle(store, sent, "scheduled", deps.now(), { reason: message.slice(0, 160) });
+    const reason = (e instanceof Error ? e.message : "The relay could not send it.").slice(0, 160);
+    const t = deps.now();
+    // Spent by now: by an earlier try of this job, or by another spend.
+    if (code === "AlreadySpent") return settle(store, sending, mayBeOut ? "sent" : "spent", t);
+    // Anything but a clear refusal may have reached the node (a timeout, a lost
+    // reply, another request holding this spend): only the chain settles it now.
+    // So does any refusal once an earlier try may have gone out.
+    const refused = REFUSED.has(code) || REVERTED.has(code) || code === "UnknownRoot";
+    if (!refused || mayBeOut) return settle(store, sending, "sending", t, { maybeSent: true, reason });
+    if (code === "UnknownRoot") return settle(store, sending, "expired", t, { reason: EXPIRED_REASON });
+    if (PERMANENT.has(code) || (REVERTED.has(code) && !REVERTED_PASSING.has(code))) {
+      return settle(store, sending, "failed", t, { reason });
+    }
+    if (t - job.sendAfter > GIVE_UP_AFTER_MS) return settle(store, sending, "failed", t, { reason });
+    // A passing refusal (busy, out of gas for a moment, the vault short for now): again next pass.
+    return settle(store, sending, "scheduled", t, { reason });
   }
 }
 
-/** Cancels a job that has not gone out. Returns its status after the call. */
+/**
+ * Cancels a job that has not gone out. Returns its status after the call:
+ * "sending" once a run has reached the send (it may be on its way, so only
+ * the chain can settle it), whatever its status says.
+ */
 export async function cancelJob(store: JobStore, id: string, now: number): Promise<JobStatus | null> {
   const release = await store.lock(id, 30);
   if (!release) return "sending";
   try {
     const job = await store.get(id);
     if (!job) return null;
+    if (job.status === "scheduled" && (job.attempts > 0 || job.maybeSent)) return "sending";
     if (job.status !== "scheduled") return job.status;
     await store.put(retire({ ...job, status: "cancelled", updatedAt: now }, "cancelled"));
     return "cancelled";
   } finally {
     await release();
   }
+}
+
+export type ScheduleOutcome = {
+  job: CashOutJob;
+  /** created: saved now. existing: the same cash out was already waiting. conflict: another one is. */
+  outcome: "created" | "existing" | "conflict";
+};
+
+/**
+ * Saves `job` as the one live job for its spend. Another live job for the same
+ * spend comes back instead: "existing" when it is the same cash out, "conflict"
+ * when it pays another address (or amount). A spend whose last job is over is
+ * taken over once; two requests at the same moment can't both be saved.
+ */
+export async function scheduleJob(store: JobStore, job: CashOutJob): Promise<ScheduleOutcome> {
+  let replace: string | undefined;
+  for (let i = 0; i < 2; i++) {
+    const holder = await store.create(job, replace);
+    if (holder === job.id) return { job, outcome: "created" };
+    const other = await store.get(holder);
+    if (other && isLive(other.status)) return { job: other, outcome: sameCashOut(other, job) ? "existing" : "conflict" };
+    replace = holder;
+  }
+  throw new Error("cash out later: the spend is being scheduled by another request");
 }

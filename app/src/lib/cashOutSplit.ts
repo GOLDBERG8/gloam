@@ -11,10 +11,13 @@
  * the chain shows them (sweepPending, the same rule as every send). A note is
  * dropped only when the transfer surely never went out (lib/walletErrors); a
  * send that may have gone out keeps them, and the next sync settles them
- * (lib/claimSweep reconcileClaims).
+ * (lib/claimSweep reconcileClaims). Each names the note it came from
+ * (sweptFrom), so the sync that counts them also retires that note: the money
+ * is never counted twice, and if that note is spent some other way the two
+ * that can never land leave the balance.
  */
 import type { Address, Hex } from "viem";
-import { buildTransferWitness } from "./proverTransfer";
+import { buildTransferWitness, type TransferWitness } from "./proverTransfer";
 import { fieldToBytes32, proveTransferInBrowser } from "./proveClient";
 import type { PoseidonMerklePath } from "./merklePoseidon";
 import { relayTransfer, RelaySubmitError, waitForTx } from "./relay/client";
@@ -24,7 +27,7 @@ import { syncShieldTree } from "./treeSync";
 import { surelyNotSent } from "./walletErrors";
 
 /** Relay codes after which the transfer may still have gone out. */
-const RELAY_MAYBE_SENT = new Set(["rpc", "network", "error", "internal", "in_flight"]);
+const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "internal", "in_flight"]);
 
 export const SPLIT_MAYBE_SENT =
   "The first step may have gone out. Your money is safe in the vault and shows again once it lands. Then cash out from there.";
@@ -80,6 +83,53 @@ export async function freshPath(commitment: Hex): Promise<{ leafIndex: number; p
   return null;
 }
 
+/**
+ * The two notes a split makes (the amount, and the change when there is any),
+ * both the owner's. Each names the note the transfer spends (`spentNullifier`
+ * is its nullifier), so they are settled with it.
+ */
+export function splitNotes(
+  note: LocalNote,
+  w: Pick<TransferWitness, "paymentNote" | "changeNote">,
+  spentNullifier: Hex,
+  owner: Address,
+  now: number
+): { part: LocalNote; change: LocalNote | null } {
+  const base = {
+    chainId: note.chainId,
+    pool: note.pool,
+    asset: note.asset,
+    bound: true,
+    scheme: "poseidon" as const,
+    from: owner,
+    createdAt: now,
+    status: "open" as const,
+    source: "local" as const,
+    // the note this transfer spends: settled together (lib/claimSweep settlePending)
+    sweptFrom: { id: note.id, nullifier: spentNullifier },
+  };
+  const part: LocalNote = {
+    ...base,
+    id: `co-${now}`,
+    amountWei: w.paymentNote.amountWei,
+    commitment: w.paymentNote.commitment,
+    secret: w.paymentNote.secret,
+    nullifier: w.paymentNote.nullifier,
+  };
+  const change: LocalNote | null =
+    BigInt(w.changeNote.amountWei) > BigInt(0)
+      ? {
+          ...base,
+          id: `chg-${now}`,
+          amountWei: w.changeNote.amountWei,
+          commitment: w.changeNote.commitment,
+          secret: w.changeNote.secret,
+          nullifier: w.changeNote.nullifier,
+        }
+      : null;
+  return { part, change };
+}
+
 async function seen(pool: Address, commitment: Hex): Promise<boolean> {
   return (await getRhPublicClient().readContract({
     address: pool,
@@ -119,37 +169,8 @@ export async function splitForCashOut(args: {
   if (w.blocker) throw new Error(w.blocker);
   const { proofBytes } = await proveTransferInBrowser(w.circomInput);
 
-  const now = Date.now();
-  const base = {
-    chainId: note.chainId,
-    pool: note.pool,
-    asset: note.asset,
-    bound: true,
-    scheme: "poseidon" as const,
-    from: owner,
-    createdAt: now,
-    status: "open" as const,
-    source: "local" as const,
-  };
-  const part: LocalNote = {
-    ...base,
-    id: `co-${now}`,
-    amountWei: w.paymentNote.amountWei,
-    commitment: w.paymentNote.commitment,
-    secret: w.paymentNote.secret,
-    nullifier: w.paymentNote.nullifier,
-  };
-  const change: LocalNote | null =
-    BigInt(w.changeNote.amountWei) > BigInt(0)
-      ? {
-          ...base,
-          id: `chg-${now}`,
-          amountWei: w.changeNote.amountWei,
-          commitment: w.changeNote.commitment,
-          secret: w.changeNote.secret,
-          nullifier: w.changeNote.nullifier,
-        }
-      : null;
+  const nullifier = fieldToBytes32(w.publicInputs.nullifier);
+  const { part, change } = splitNotes(note, w, nullifier, owner, Date.now());
   // Both are money: kept before anything is sent, out of the balance until they land.
   saveLocalNote({ ...part, sweepPending: true });
   if (change) saveLocalNote({ ...change, sweepPending: true });
@@ -161,7 +182,7 @@ export async function splitForCashOut(args: {
   const t: TransferArgs = {
     proof: proofBytes,
     root: fieldToBytes32(w.publicInputs.root),
-    nullifier: fieldToBytes32(w.publicInputs.nullifier),
+    nullifier,
     commitments: [fieldToBytes32(w.publicInputs.newCommitment0), fieldToBytes32(w.publicInputs.newCommitment1)],
   };
 

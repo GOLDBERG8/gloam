@@ -66,9 +66,9 @@ export function isUnsecuredClaim(n: LocalNote): boolean {
   );
 }
 
-/** The fresh note a claim was secured into. */
+/** The fresh note a claim was secured into (a cash-out split also names the note it came from). */
 export function isSecuredClaim(n: LocalNote): boolean {
-  return Boolean(n.sweptFrom);
+  return Boolean(n.sweptFrom?.id.startsWith(CLAIM_PREFIX));
 }
 
 type Transfer = { chainId: number; proof: Hex; root: Hex; nullifier: Hex; commitments: readonly [Hex, Hex] };
