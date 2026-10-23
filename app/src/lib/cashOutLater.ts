@@ -15,6 +15,9 @@
  * holds the job. The chain settles those.
  */
 import { isAddress, type Address, type Hex } from "viem";
+import type { CashOutCall } from "./cashOutProof";
+import { readDemo } from "./demoFlag";
+import { demoCancelCashOut, demoCashOutStatus, demoScheduleCashOut } from "./demo/chain";
 import { getActiveNetwork } from "./networks";
 import { getAllNotes } from "./noteVault";
 import { noteNullifierPoseidon } from "./notePoseidon";
@@ -78,6 +81,12 @@ export async function scheduleCashOut(p: {
   amount: bigint;
   window: CashOutWindow;
 }): Promise<OwnedCashOutJob> {
+  // Recording demo: the pretend relay keeps the job (lib/demo/chain), by the same rules.
+  if (readDemo()) {
+    const r = await demoScheduleCashOut(p);
+    if (r.ok) return r.job;
+    throw new CashOutLaterError(r.error, r.code, r.job);
+  }
   let res: Response;
   try {
     res = await fetch("/api/relay/scheduled", {
@@ -108,6 +117,7 @@ export async function scheduleCashOut(p: {
  * could not be read (offline, a relay error, or cashing out later is off).
  */
 export async function cashOutJobStatus(id: string): Promise<CashOutJobView | "gone" | null> {
+  if (readDemo()) return demoCashOutStatus(id);
   try {
     const res = await fetch(`/api/relay/scheduled?id=${encodeURIComponent(id)}`, { cache: "no-store" });
     if (res.status === 404) return "gone";
@@ -127,6 +137,7 @@ export async function cashOutJobStatus(id: string): Promise<CashOutJobView | "go
 export type CancelResult = "cancelled" | "over" | "going" | "gone" | null;
 
 export async function cancelCashOut(id: string): Promise<CancelResult> {
+  if (readDemo()) return demoCancelCashOut(id);
   try {
     const res = await fetch(`/api/relay/scheduled?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (res.status === 404) return "gone";
@@ -139,6 +150,24 @@ export async function cancelCashOut(id: string): Promise<CancelResult> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Hands a proven cash out of `note` to the relay and marks the note with the
+ * job, out of the balance while it waits. The address shown is the one the
+ * relay holds, not the one asked for: when this money already has a cash out
+ * waiting to another address, the note is marked with that one and this throws.
+ */
+export async function scheduleNoteCashOut(note: LocalNote, call: CashOutCall, window: CashOutWindow): Promise<OwnedCashOutJob> {
+  let job: OwnedCashOutJob;
+  try {
+    job = await scheduleCashOut({ ...call, window });
+  } catch (e) {
+    if (e instanceof CashOutLaterError && e.job) updateLocalNote(note.id, { cashOut: markFor(e.job) });
+    throw e;
+  }
+  updateLocalNote(note.id, { cashOut: markFor(job) });
+  return job;
 }
 
 /** Notes with a cash out still waiting or on its way. */
@@ -296,7 +325,11 @@ export async function releaseGoneCashOut(n: LocalNote, env: CashOutEnv = appCash
   return true;
 }
 
-/** Clears the notice on a note whose cash out came back, once it was shown or it is spent again. */
+/**
+ * Clears the notice on a note whose cash out came back, once it was shown or
+ * it is spent again. A private cash out's piece stops being one too: it is
+ * plain money in the balance from here, not a piece still to schedule.
+ */
 export function dismissReturnedCashOut(noteId: string) {
-  updateLocalNote(noteId, { cashOut: undefined });
+  updateLocalNote(noteId, { cashOut: undefined, cashOutPlan: undefined });
 }

@@ -22,7 +22,10 @@ import { fieldToBytes32, proveTransferInBrowser } from "./proveClient";
 import type { PoseidonMerklePath } from "./merklePoseidon";
 import { relayTransfer, RelaySubmitError, waitForTx } from "./relay/client";
 import { getRhPublicClient } from "./rhClient";
-import { dropUnsentNote, saveLocalNote, shieldPoolAbi, updateLocalNote, type LocalNote } from "./shield";
+import { readDemo } from "./demoFlag";
+import { demoLeafIndex } from "./demo/store";
+import { getActiveNetwork } from "./networks";
+import { dropUnsentNote, saveLocalNote, shieldPoolAbi, updateLocalNote, type CashOutPlanTag, type LocalNote } from "./shield";
 import { syncShieldTree } from "./treeSync";
 import { surelyNotSent } from "./walletErrors";
 
@@ -31,6 +34,8 @@ const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "inte
 
 export const SPLIT_MAYBE_SENT =
   "The first step may have gone out. Your money is safe in the vault and shows again once it lands. Then cash out from there.";
+
+export const SPLIT_NO_PATH = "The amount is set aside in your private balance. Refresh, then cash it out.";
 
 export const SPLIT_REVERTED =
   "The first step didn't go through on this try. Your money is safe in the vault: refresh, then try again.";
@@ -134,6 +139,8 @@ export function splitNotes(
 }
 
 async function seen(pool: Address, commitment: Hex): Promise<boolean> {
+  // Recording demo: in the pretend vault once it has a leaf there.
+  if (readDemo()) return demoLeafIndex(getActiveNetwork().chainId, commitment) != null;
   return (await getRhPublicClient().readContract({
     address: pool,
     abi: shieldPoolAbi,
@@ -142,13 +149,7 @@ async function seen(pool: Address, commitment: Hex): Promise<boolean> {
   })) as boolean;
 }
 
-/**
- * Splits `note` into `amount` and the change, both the owner's, and returns the
- * amount note once it is in the vault (with its leaf index), ready to cash out.
- * `sendWithWallet` sends the transfer from the connected wallet when the relay
- * is off.
- */
-export async function splitForCashOut(args: {
+export type SplitArgs = {
   note: LocalNote;
   amount: bigint;
   path: PoseidonMerklePath;
@@ -156,7 +157,27 @@ export async function splitForCashOut(args: {
   relayOn: boolean;
   sendWithWallet: (t: TransferArgs) => Promise<Hex>;
   onStatus: (s: string) => void;
-}): Promise<LocalNote> {
+  /** A private cash out's piece tags (lib/cashOutPrivately), saved with the two new notes before anything is sent. */
+  partTag?: CashOutPlanTag;
+  changeTag?: CashOutPlanTag;
+};
+
+/**
+ * Splits `note` into `amount` and the change, both the owner's, and returns the
+ * amount note once it is in the vault (with its leaf index), ready to cash out.
+ * `sendWithWallet` sends the transfer from the connected wallet when the relay
+ * is off.
+ */
+export async function splitForCashOut(args: SplitArgs): Promise<LocalNote> {
+  return (await splitNote(args)).part;
+}
+
+/**
+ * splitForCashOut, also returning the change once it is in the vault (with its
+ * leaf index when the chain showed it), so a private cash out can split the
+ * next piece from it. Null change when the amount is the whole note.
+ */
+export async function splitNote(args: SplitArgs): Promise<{ part: LocalNote; change: LocalNote | null }> {
   const { note, amount, owner } = args;
   const total = BigInt(note.amountWei);
   if (amount <= BigInt(0) || amount >= total) throw new Error("Pick an amount below this balance.");
@@ -173,7 +194,10 @@ export async function splitForCashOut(args: {
   const { proofBytes } = await proveTransferInBrowser(w.circomInput);
 
   const nullifier = fieldToBytes32(w.publicInputs.nullifier);
-  const { part, change } = splitNotes(note, w, nullifier, owner, Date.now());
+  const made = splitNotes(note, w, nullifier, owner, Date.now());
+  const part: LocalNote = args.partTag ? { ...made.part, cashOutPlan: args.partTag } : made.part;
+  const change: LocalNote | null =
+    made.change && args.changeTag ? { ...made.change, cashOutPlan: args.changeTag } : made.change;
   // Both are money: kept before anything is sent, out of the balance until they land.
   saveLocalNote({ ...part, sweepPending: true });
   if (change) saveLocalNote({ ...change, sweepPending: true });
@@ -227,11 +251,14 @@ export async function splitForCashOut(args: {
   }
   const fresh = await freshPath(part.commitment);
   updateLocalNote(note.id, { status: "recovered", txHash: hash });
+  let landedChange: LocalNote | null = null;
   if (change) {
     const changeAt = await freshPath(change.commitment);
-    updateLocalNote(change.id, { sweepPending: false, txHash: hash, ...(changeAt ? { leafIndex: changeAt.leafIndex } : {}) });
+    const at = changeAt ? { leafIndex: changeAt.leafIndex } : {};
+    updateLocalNote(change.id, { sweepPending: false, txHash: hash, ...at });
+    landedChange = { ...change, sweepPending: false, txHash: hash, ...at };
   }
   updateLocalNote(part.id, { sweepPending: false, txHash: hash, ...(fresh ? { leafIndex: fresh.leafIndex } : {}) });
-  if (!fresh) throw new Error("The amount is set aside in your private balance. Refresh, then cash it out.");
-  return { ...part, txHash: hash, leafIndex: fresh.leafIndex, sweepPending: false };
+  if (!fresh) throw new Error(SPLIT_NO_PATH);
+  return { part: { ...part, txHash: hash, leafIndex: fresh.leafIndex, sweepPending: false }, change: landedChange };
 }
