@@ -41,6 +41,7 @@ const groups: {
       { href: "/blog/live-on-mainnet", label: "Live on mainnet" },
       { href: "/blog/live-on-tempo", label: "Live on Tempo" },
       { href: "/blog/privacy-without-an-operator", label: "Privacy without an operator" },
+      { href: "/blog/private-agent-payments", label: "Private agent payments" },
       { href: "/pitch", label: "Pitch" },
     ],
   },
