@@ -11,6 +11,12 @@
  *    what happened to a giveaway winner on 22 Oct 2026: the cash out landed
  *    and was gone 7 blocks (under a second) later.
  *
+ * Only transfers that move money count, in and out. A zero-value Transfer
+ * costs a stranger nothing (transfer(x, 0), and transferFrom(victim, y, 0)
+ * with no allowance, both succeed on USDG and GLOAM), so counting them would
+ * let anyone fake a sweep on a clean wallet, or bury a real one under empty
+ * arrivals.
+ *
  * Every read fails open: an RPC error means no warning, never a blocked cash out.
  */
 import { parseAbiItem, type Address, type Hex } from "viem";
@@ -33,7 +39,7 @@ const KNOWN_DELEGATES = new Set([
 /** Left within this many blocks of arriving: about 2 seconds on Robinhood Chain, 11 on Tempo. */
 const SWEEP_BLOCKS = BigInt(20);
 /** The most recent arrivals looked at. */
-const MAX_INBOUND = 3;
+const MAX_INBOUND = 10;
 
 /**
  * How far back to look for arrivals: one query of `chunk` blocks, or several
@@ -64,9 +70,14 @@ export type SweepReader = {
     args: { from?: Address; to?: Address };
     fromBlock: bigint;
     toBlock: bigint;
-  }): Promise<{ blockNumber: bigint | null; transactionHash: Hex | null }[]>;
+  }): Promise<{ blockNumber: bigint | null; transactionHash: Hex | null; args?: { value?: bigint } }[]>;
   getTransaction(args: { hash: Hex }): Promise<{ from: Address }>;
 };
+
+/** A Transfer log that moved money (zero-value ones are free for anyone to emit). */
+function movedMoney(l: { args?: { value?: bigint } }): boolean {
+  return (l.args?.value ?? BigInt(0)) > BigInt(0);
+}
 
 /** The contract an EIP-7702 account delegates to, or null for any other code. */
 export function delegateOf(code: Hex | undefined): Address | null {
@@ -104,7 +115,9 @@ async function sweptCheck(
         end
       );
       for (const l of logs) {
-        if (l.blockNumber != null && l.transactionHash) inbound.push({ blockNumber: l.blockNumber, transactionHash: l.transactionHash });
+        if (l.blockNumber != null && l.transactionHash && movedMoney(l)) {
+          inbound.push({ blockNumber: l.blockNumber, transactionHash: l.transactionHash });
+        }
       }
       end = start - BigInt(1);
     }
@@ -119,7 +132,7 @@ async function sweptCheck(
       });
       for (const l of out) {
         // the same transaction both paid in and out: a contract passing it on, not a sweep
-        if (!l.transactionHash || l.transactionHash === arrival.transactionHash) continue;
+        if (!l.transactionHash || l.transactionHash === arrival.transactionHash || !movedMoney(l)) continue;
         const tx = await client.getTransaction({ hash: l.transactionHash });
         if (tx.from.toLowerCase() !== address.toLowerCase()) return { evidenceTx: l.transactionHash };
       }

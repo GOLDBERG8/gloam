@@ -8,12 +8,13 @@
  *    later: delegated, not swept
  *  - a plain wallet that kept its cash out: clean
  *  - known smart-wallet delegates are not flagged
+ *  - zero-value transfers (free for anyone) can't fake a sweep or hide a real one
  *  - a node that fails every read: clean, never a blocked cash out
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-sweep-check.mts
  */
 import assert from "node:assert/strict";
-import { createPublicClient, http, type Hex } from "viem";
+import { createPublicClient, http, type Address, type Hex } from "viem";
 import { SWEEP_CLEAN, checkSweep, delegateOf, type SweepReader } from "../src/lib/sweepCheck";
 
 const RH = 4663;
@@ -50,6 +51,54 @@ const metamask: SweepReader = {
 };
 assert.deepEqual(await checkSweep(metamask, RH, "0x0000000000000000000000000000000000000002", USDG), SWEEP_CLEAN, "MetaMask's smart account is a known wallet");
 n += 4;
+
+// A made-up chain: only transfers that move money count. A stranger can emit a
+// zero-value Transfer to or from any wallet for free, so those are ignored.
+{
+  type Log = { from: string; to: string; block: bigint; tx: Hex; sender: string; value: bigint };
+  const VICTIM = "0x000000000000000000000000000000000000beef" as Address;
+  const STRANGER = "0x000000000000000000000000000000000000dead";
+  const SWEEPER = "0x00000000000000000000000000000000000bad00";
+  const PAYER = "0x0000000000000000000000000000000000000077";
+  const at = (i: number) => `0x${i.toString(16).padStart(64, "0")}` as Hex;
+  const chain = (logs: Log[]): SweepReader => ({
+    getCode: async () => "0x" as Hex,
+    getBlockNumber: async () => HEAD,
+    getLogs: async ({ args, fromBlock, toBlock }) =>
+      logs
+        .filter((l) => l.block >= fromBlock && l.block <= toBlock)
+        .filter((l) => (args.to ? l.to === args.to.toLowerCase() : l.from === args.from!.toLowerCase()))
+        .map((l) => ({ blockNumber: l.block, transactionHash: l.tx, args: { value: l.value } })),
+    getTransaction: async ({ hash }) => ({ from: logs.find((l) => l.tx === hash)!.sender as Address }),
+  });
+  const check = (logs: Log[]) => checkSweep(chain(logs), RH, VICTIM, USDG, { head: HEAD });
+
+  // transfer(victim, 0) then transferFrom(victim, stranger, 0): no balance or allowance needed.
+  const forged: Log[] = [
+    { from: STRANGER, to: VICTIM, block: HEAD - BigInt(100), tx: at(1), sender: STRANGER, value: BigInt(0) },
+    { from: VICTIM, to: STRANGER, block: HEAD - BigInt(99), tx: at(2), sender: STRANGER, value: BigInt(0) },
+  ];
+  assert.deepEqual(await check(forged), SWEEP_CLEAN, "a forged zero-value sweep doesn't warn");
+
+  const real: Log[] = [
+    { from: PAYER, to: VICTIM, block: HEAD - BigInt(5_000), tx: at(10), sender: PAYER, value: BigInt(500_000_000) },
+    { from: VICTIM, to: SWEEPER, block: HEAD - BigInt(4_993), tx: at(11), sender: SWEEPER, value: BigInt(500_000_000) },
+  ];
+  assert.equal((await check(real))?.swept?.evidenceTx, at(11), "a real sweep warns");
+  // A zero-value move out after a real arrival is no sweep either.
+  const emptyOut: Log[] = [real[0]!, { ...real[1]!, value: BigInt(0) }];
+  assert.equal((await check(emptyOut)).swept, null, "a zero-value move out is not a sweep");
+
+  // Empty arrivals after the real one, newer than it: they no longer push it out of view.
+  const empties = Array.from({ length: 12 }, (_, i) => ({
+    from: SWEEPER, to: VICTIM, block: HEAD - BigInt(10 * (i + 1)), tx: at(20 + i), sender: SWEEPER, value: BigInt(0),
+  }));
+  assert.equal((await check([...real, ...empties])).swept?.evidenceTx, at(11), "zero-value padding can't hide a sweep");
+  // Real (if tiny) arrivals do count, and up to ten are looked at.
+  const dust = empties.slice(0, 9).map((l) => ({ ...l, value: BigInt(1) }));
+  assert.equal((await check([...real, ...dust])).swept?.evidenceTx, at(11), "nine dust arrivals still leave the sweep in view");
+  n += 5;
+}
 
 // A node that fails everything: no warning, the cash out goes ahead.
 const down: SweepReader = {
