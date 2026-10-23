@@ -41,6 +41,7 @@ import { readCreatorFees, type CreatorFees } from "./creatorFees";
 import { MAINNET_LAUNCH_MS } from "./mainnet";
 import { errText, getLogsSafe } from "./logRange";
 import { VAULT_SWAP_ROUTERS } from "./vaultSwap";
+import { addChainPeople } from "./peopleStore";
 
 export type ActivityKind = "deposit" | "transfer" | "cashout" | "trade";
 
@@ -1066,6 +1067,21 @@ async function readAll(): Promise<OnchainMetrics> {
       })
     : Promise.resolve(undefined);
   const reads = await Promise.all(nets.map((n) => readNetwork(n, days, revenueDays)));
+  // People counts (lib/peopleStore): the public depositor and cash-out wallets, one-way. Never holds up the figures.
+  await withTimeout(
+    addChainPeople(
+      nets.map((n, i) => ({
+        network: n.key,
+        pool: n.pool ?? "",
+        testnet: n.testnet,
+        wallets: reads[i]!.state.events.flatMap((e) =>
+          e.w && (e.k === "deposit" || e.k === "cashout") ? [{ kind: e.k, wallet: e.w, ts: e.ts, block: e.b }] : []
+        ),
+      }))
+    ).catch((e: unknown) => console.warn("gloam_people_chain", errText(e).split("\n")[0].slice(0, 120))),
+    5_000,
+    undefined
+  );
   const prices = await pricing;
   const networks = reads.map((r) => r.metrics(prices));
   const creator = await creatorRead;
