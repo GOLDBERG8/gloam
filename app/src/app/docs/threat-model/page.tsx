@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
+import { VAULT_SWAP_V2_ROUTER } from "@/lib/vaultSwap";
+
+/** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the page follows the switch. */
+const V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
 
 export const metadata: Metadata = {
   title: "Threat model",
@@ -21,7 +25,9 @@ const ACTORS: { who: string; can: string; cannot: string }[] = [
   },
   {
     who: "The swap routers",
-    can: "Take one note out of the vault for a swap, trade it on their fixed venues, and send what the trade did not use to the treasury. They have no owner, no admin and no upgrade.",
+    can: V2
+      ? "Take one note out of the vault for a swap, trade it on their allowed venues, and send what the trade did not use to the treasury. They have no upgrade. On Robinhood Chain the router's owner can add a pool with 3 days of public notice and take one off at once, and nothing else."
+      : "Take one note out of the vault for a swap, trade it on their fixed venues, and send what the trade did not use to the treasury. They have no owner, no admin and no upgrade.",
     cannot: "Change a swap's new note, its refund note or its route, which the escrow address binds, or touch any other note in the vault.",
   },
   {
@@ -161,15 +167,29 @@ export default function DocsThreatModelPage() {
         the output goes back into the vault as a new note. The relay sends it, so no
         wallet shows. The tokens, the amounts and the timing are public.
       </p>
-      <p>
-        <strong>What a router trusts.</strong>{" "}
-        Each router is fixed at deploy, with no owner, admin or upgrade. On Robinhood Chain it trades only on three Uniswap v4
-        pools set at deploy: ETH and USDG, ETH and $GLOAM (the launch pool, whose hook
-        takes the creator fee), and USDG and $GLOAM. On Tempo it trades only on
-        Tempo&apos;s stablecoin exchange. These venues are outside code. The router checks
-        that it received the full output and paid no more than arrived from the vault,
-        so the worst a venue can do is make a swap fail.
-      </p>
+      {V2 ? (
+        <p>
+          <strong>What a router trusts.</strong>{" "}
+          No router can be upgraded, and none has a function that moves money. On Robinhood Chain the router trades only
+          on Uniswap v4 pools on its allowlist. Its owner can add one only by queueing it, usable 3 days later and public on
+          chain from the start, and can take one off at once; the owner can do nothing else. A swap names its route in its
+          escrow address, so no pool added later can enter it. ETH sits in the vault as WETH, and the router unwraps or
+          wraps exactly what a pool holding ETH trades. On Tempo it trades only on Tempo&apos;s stablecoin exchange. These
+          venues, and a pool&apos;s hook, are outside code. The router checks that it received the full output and paid no
+          more than arrived from the vault, so the worst a venue or hook can do is make a swap fail or keep its buffer,
+          the part that would go to the treasury.
+        </p>
+      ) : (
+        <p>
+          <strong>What a router trusts.</strong>{" "}
+          Each router is fixed at deploy, with no owner, admin or upgrade. On Robinhood Chain it trades only on three Uniswap v4
+          pools set at deploy: ETH and USDG, ETH and $GLOAM (the launch pool, whose hook
+          takes the creator fee), and USDG and $GLOAM. On Tempo it trades only on
+          Tempo&apos;s stablecoin exchange. These venues are outside code. The router checks
+          that it received the full output and paid no more than arrived from the vault,
+          so the worst a venue can do is make a swap fail.
+        </p>
+      )}
       <p>
         <strong>Price moves.</strong> The swap asks a little below the quote (0.5% on
         Robinhood Chain, 0.1% on Tempo). The app prices the swap again just before it goes
