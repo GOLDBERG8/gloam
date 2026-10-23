@@ -19,6 +19,7 @@ import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient } from "@/lib/rhClient";
 import { HASH_SCHEME, dropUnsentNote, gasFor, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
+  claimFunded,
   claimNoteId,
   isClaimedNote,
   isSecuredClaim,
@@ -1574,7 +1575,7 @@ export function MoveView() {
         });
       } else if (r.status === "not_settled") {
         setImportOk({
-          text: `${did}, but the payment has not reached the vault yet, so it cannot be secured. Secure it once it lands. ${stillOpen}`,
+          text: `${did}, but the payment has not reached the vault yet, so it is not in your balance and cannot be secured. It shows up once it lands; secure it then. ${stillOpen}`,
           note: claim?.note,
           tone: "warn",
         });
@@ -1691,6 +1692,9 @@ export function MoveView() {
 
     const tree = await syncShieldTree(getRhPublicClient()).catch(() => null);
     const idx = tree?.indexByCommitment.get(commitment.toLowerCase());
+    // Not in the vault yet (still on its way, or a code nobody paid): kept, but
+    // out of the balance until the vault shows it.
+    const unfunded = !demo && idx == null && !(await claimFunded(commitment));
 
     const local: LocalNote = known ?? {
       id: claimNoteId(),
@@ -1708,6 +1712,7 @@ export function MoveView() {
       status: "open",
       source: "local",
       leafIndex: idx ?? undefined,
+      ...(demo ? {} : { unfunded }),
       // The payer's private note, kept with the balance (encrypted at rest).
       ...(pack.note ? { note: pack.note } : {}),
       // Recording demo: the pretend payer cannot take anything back.

@@ -446,6 +446,14 @@ export type LocalNote = {
    * (lib/claimSweep). The claimed note itself is spent by that move.
    */
   secured?: boolean;
+  /**
+   * A claimed payment the vault has not shown yet (its commitment is not in the
+   * pool): someone may have made the code without paying it, or the payment is
+   * still on its way. Kept, out of the balance until the vault shows it;
+   * lib/claimSweep reconcileUnfunded checks again on every sync. False once
+   * the vault has shown it.
+   */
+  unfunded?: boolean;
   /** On the fresh note from securing a claim, or a cash-out split: the note it came from (settled together). */
   sweptFrom?: { id: string; nullifier: Hex };
   /**
@@ -521,11 +529,17 @@ export function confirmedNotes(notes: LocalNote[]): LocalNote[] {
  * Includes imports (no txHash yet) and confirmed shields/transfers.
  * Excludes recovered and chain-history-only rows without a secret.
  * Excludes historic sender payment rows (id pay-*), a secured claim's fresh
- * note until its move lands (the claimed note still counts until then), and a
- * note whose cash out is scheduled or on its way.
+ * note until its move lands (the claimed note still counts until then), a
+ * claimed payment the vault has not shown yet, and a note whose cash out is
+ * scheduled or on its way.
  */
 export function activeSpendableNotes(notes: LocalNote[]): LocalNote[] {
-  return notes.filter((n) => holdsSecret(n) && !n.sweepPending && !cashOutPending(n));
+  return notes.filter((n) => holdsSecret(n) && !n.sweepPending && !n.unfunded && !cashOutPending(n));
+}
+
+/** Claimed payments waiting for the vault to show them: listed, never counted. */
+export function unfundedClaims(notes: LocalNote[]): LocalNote[] {
+  return notes.filter((n) => n.unfunded && holdsSecret(n));
 }
 
 /** Not spent, and this browser has its secret (a pending secured claim too). */
@@ -693,7 +707,9 @@ export function saveLocalNote(note: LocalNote): Promise<void> {
 
 export function updateLocalNote(
   id: string,
-  patch: Partial<Pick<LocalNote, "leafIndex" | "txHash" | "status" | "secured" | "sweepPending" | "cashOut" | "cashOutPlan">>
+  patch: Partial<
+    Pick<LocalNote, "leafIndex" | "txHash" | "status" | "secured" | "sweepPending" | "unfunded" | "cashOut" | "cashOutPlan">
+  >
 ) {
   if (typeof window === "undefined") return;
   const next = getAllNotes().map((n) => (n.id === id ? { ...n, ...patch } : n));
