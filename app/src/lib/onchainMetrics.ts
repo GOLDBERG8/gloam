@@ -40,6 +40,7 @@ import { serverTransport } from "@/lib/serverRpc";
 import { readCreatorFees, type CreatorFees } from "./creatorFees";
 import { MAINNET_LAUNCH_MS } from "./mainnet";
 import { errText, getLogsSafe } from "./logRange";
+import { VAULT_SWAP_ROUTERS } from "./vaultSwap";
 
 export type ActivityKind = "deposit" | "transfer" | "cashout" | "trade";
 
@@ -364,12 +365,19 @@ async function gated<T>(chainId: number, call: () => Promise<T>): Promise<T> {
 /**
  * Relay's router makes every private-bridge deposit (lib/bridge
  * privateBridgeable), so its address is not a person's wallet: such a deposit
- * counts as money in, but not as a wallet or a depositor.
+ * counts as money in, but not as a wallet or a depositor. The same goes for a
+ * private swap (lib/vaultSwap): its router puts the new note in, and the note
+ * it spends goes out to a one-time escrow in the same transaction.
  */
 const RELAY_ROUTER = "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
+const SWAP_ROUTERS = new Set(
+  Object.values(VAULT_SWAP_ROUTERS)
+    .filter((a): a is Address => Boolean(a))
+    .map((a) => a.toLowerCase())
+);
 function depositor(from: string | undefined): string | undefined {
   const w = from?.toLowerCase();
-  return w === RELAY_ROUTER ? undefined : w;
+  return w === RELAY_ROUTER || (w && SWAP_ROUTERS.has(w)) ? undefined : w;
 }
 
 function ranges(from: bigint, to: bigint, step: bigint): [bigint, bigint][] {
@@ -595,6 +603,12 @@ async function scan(
     }
   }
 
+  // A private swap's transaction: its note goes out to a one-time escrow, not to anyone's wallet.
+  const swapTxs = new Set(
+    parsed
+      .filter((l) => l.eventName === "Shielded" && SWAP_ROUTERS.has(String(l.args.from).toLowerCase()))
+      .map((l) => l.transactionHash)
+  );
   const fresh: ChainEvent[] = [];
   for (const log of parsed) {
     const base = {
@@ -613,7 +627,7 @@ async function scan(
         fresh.push({
           ...base,
           k: "cashout",
-          w: log.args.to?.toLowerCase(),
+          w: swapTxs.has(log.transactionHash) ? undefined : log.args.to?.toLowerCase(),
           a: asset(log.args.asset),
           v: String(log.args.amount ?? 0n),
           ...(fee ? { f: String(fee) } : {}),
