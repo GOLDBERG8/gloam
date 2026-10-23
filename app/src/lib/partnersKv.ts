@@ -17,6 +17,7 @@
  * private sends, no amounts of private sends. See lib/partners.ts.
  */
 import { redisConfigured } from "./tractionStore";
+import { addToHll, countHll, decodeHll, encodeHll, isHll, mergeHll } from "./hll";
 
 export const KV_PREFIX = "gloam:partners:v1:";
 
@@ -208,6 +209,23 @@ function memCommand(cmd: KvCommand): unknown {
     case "SCARD": {
       const e = live(a[0]!);
       return e && isSet(e.v) ? e.v.size : 0;
+    }
+    case "PFADD": {
+      // a HyperLogLog kept as a string of registers (lib/hll); the items are never kept
+      const e = live(a[0]!);
+      if (e && (typeof e.v !== "string" || !isHll(e.v))) throw new Error("WRONGTYPE");
+      const regs = decodeHll(e ? (e.v as string) : null);
+      const changed = addToHll(regs, a.slice(1));
+      if (!e || changed) m.set(a[0]!, { v: encodeHll(regs), exp: e?.exp ?? null });
+      return changed || !e ? 1 : 0;
+    }
+    case "PFCOUNT": {
+      const sketches = a.map((key) => {
+        const e = live(key);
+        if (e && (typeof e.v !== "string" || !isHll(e.v))) throw new Error("WRONGTYPE");
+        return decodeHll(e ? (e.v as string) : null);
+      });
+      return countHll(mergeHll(sketches));
     }
     case "LPUSH": {
       const l = typed(a[0]!, () => [] as string[], isList);
