@@ -559,6 +559,12 @@ await test("mainnet live: Glim says so, still never another date, and its facts 
   assert.ok(!after.includes("The app itself is still on testnet"));
   assert.ok(after.includes("gloam.trade/app (the app: mainnet and testnet)"));
   assert.ok(after.includes("500 per deposit and 25,000 in total"));
+  // private swaps on mainnet: what shows, what it costs, and the old sealed trade retired
+  assert.ok(after.includes("PRIVATE SWAPS") && after.includes("Vault > Swap"));
+  assert.ok(after.includes("Public: the two tokens and the two amounts"), "swap amounts are public");
+  assert.ok(after.includes("0.5% on Robinhood Chain and 0.1% on Tempo"));
+  assert.ok(!after.includes("builds a new engine"), "no 'new engine underway' once swaps are live");
+  assert.ok(!/0x34AB06|0xfCa1887/i.test(after), "router addresses stay on the docs page");
   for (const text of [after, systemPrompt({ persona: "Glim", testingOpen: false, admins: [], mainnetLive: true })]) {
     assert.ok(!/[—\p{Extended_Pictographic}]/u.test(text), "no em dashes or emoji once live either");
   }
