@@ -35,7 +35,7 @@ const THREAD_TTL_SEC = 6 * 60 * 60;
 const PENDING = `${PREFIX}welcome:pending`;
 const COOLDOWN = `${PREFIX}welcome:cooldown`;
 /** At most one welcome this often. */
-export const WELCOME_EVERY_SEC = 10 * 60;
+export const WELCOME_EVERY_SEC = 60 * 60;
 const WELCOMED_TTL_SEC = 24 * 60 * 60;
 const PENDING_MAX = 200;
 const BUGS = `${PREFIX}bugs`;

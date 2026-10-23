@@ -26,7 +26,7 @@
  *  - payment codes and claim links are fine on testnet, so they stay; the
  *    person gets one friendly heads-up a day about sending them privately on
  *    mainnet. Gloam addresses and payment requests never get one
- *  - new members get one batched welcome at most every ten minutes
+ *  - new members get one short batched welcome at most once an hour
  *  - /help and /start give a short guide, /bug saves a report
  *  - it counts messages, joins, leaves and its own work for the report
  * Answers are rate limited per person and overall, and pictures to about 20

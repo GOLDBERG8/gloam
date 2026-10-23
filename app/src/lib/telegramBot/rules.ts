@@ -1334,9 +1334,8 @@ export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
   // A warm hello and where to start. No admin handles: they would ping the admins on every welcome, and the group shows who they are.
   return (
     `Welcome to Gloam, ${list}. Glad you're here.\n\n` +
-    `Gloam is live on mainnet, so you can send and receive money privately on Robinhood Chain and Tempo. The easiest way in is gloam.trade/app: add a little, then send it to someone.\n\n` +
-    `Questions go in Help, ideas in Feedback, and news lands in Announcements.${testing}\n\n` +
-    `One thing to know: admins never DM first.`
+    `Send and receive money privately on Robinhood Chain and Tempo at gloam.trade/app. Questions go in Help.${testing}\n\n` +
+    `Admins never DM first.`
   );
 }
 

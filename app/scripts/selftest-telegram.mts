@@ -766,10 +766,11 @@ await test("welcome: tags, mention links, escaping, the others count", () => {
   assert.ok(html.startsWith('Welcome to Gloam, @ada_lovelace, <a href="tg://user?id=12">'));
   assert.ok(html.includes("Bo &amp; Co</a> and "));
   assert.ok(!html.includes("<b>"));
-  assert.ok(html.includes("Gloam is live on mainnet, so you can send and receive money privately on Robinhood Chain and Tempo."));
-  assert.ok(html.includes("news lands in Announcements.\n\n"), "no testing line while the tester program is closed");
+  assert.ok(html.includes("Send and receive money privately on Robinhood Chain and Tempo at gloam.trade/app."));
+  assert.ok(html.includes("Questions go in Help.\n\n"), "no testing line while the tester program is closed");
   assert.ok(!/testing directions|soon/i.test(html), "nothing promised for later");
-  assert.ok(html.endsWith("One thing to know: admins never DM first."));
+  assert.ok(html.endsWith("Admins never DM first."));
+  assert.ok(html.split(/\s+/).length < 40, "short enough not to bury the chat");
   assert.ok(html.includes("gloam.trade/app"), "the welcome says where to start");
   assert.ok(!/@dukedotsol|@quinkardeeah|Kardeeah|assistant/.test(html), "the welcome never tags or names the admins");
   assert.ok(!/[\u2014\p{Extended_Pictographic}]/u.test(html));
@@ -1691,7 +1692,7 @@ await test("model calls stop at the daily caps; 0 turns a kind off", async () =>
   delete process.env.TELEGRAM_BOT_DAILY_CHECKS;
 });
 
-await test("welcomes: one per ten minutes, tagged, the rest wait for the next", async () => {
+await test("welcomes: one an hour, tagged, the rest wait for the next", async () => {
   reset();
   await handleUpdate(
     upd({ message_id: nextId++, chat, date: 0, from: user(40, "Quin"), new_chat_members: [user(40, "Quin", "quin_q"), { ...BOT, id: 41 }] }),
@@ -1724,7 +1725,7 @@ await test("welcomes: one per ten minutes, tagged, the rest wait for the next", 
       new_chat_member: { status: "member", user: user(42, "Rae") },
     },
   });
-  assert.equal(sends().length, 1, "inside the ten minutes nobody else is welcomed yet");
+  assert.equal(sends().length, 1, "inside the hour nobody else is welcomed yet");
 
   await kv([["DEL", "gloam:tg:v1:welcome:cooldown"]]);
   await handleUpdate(upd(inTopic(TOPIC.general, "nice to be here", user(44, "Tia"))));
