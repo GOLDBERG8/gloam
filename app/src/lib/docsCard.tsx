@@ -108,10 +108,13 @@ export async function docsCard({
   title,
   subtitle,
   art,
+  section = "Docs",
 }: {
   title: string;
   subtitle: string;
   art: ReactNode;
+  /** The word beside the wordmark: Docs, or the page's own section. */
+  section?: string;
 }) {
   const { light, medium, etching } = await loadAssets();
   const lines = titleLines(title);
@@ -174,7 +177,7 @@ export async function docsCard({
                 display: "flex",
               }}
             >
-              Docs
+              {section}
             </div>
           </div>
 

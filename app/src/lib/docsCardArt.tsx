@@ -730,3 +730,29 @@ export function PaperArt() {
     </svg>
   );
 }
+
+/** Transparency: a ledger of public totals, with the one row that stays private sealed in green. */
+export function LedgerArt() {
+  const rows = [
+    { label: 92, value: 128 },
+    { label: 70, value: 96 },
+    { label: 110, value: 74 },
+  ];
+  return (
+    <svg width={324} height={190} viewBox="0 0 324 190">
+      {rows.map((r, i) => {
+        const y = 14 + i * 44;
+        return (
+          <g key={i}>
+            <rect x={4} y={y} width={r.label} height={14} rx={7} fill={C.line} />
+            <rect x={320 - r.value} y={y} width={r.value} height={14} rx={7} fill={C.paper} />
+            <path d={`M4 ${y + 30} H320`} stroke={C.raised} strokeWidth={1.5} strokeDasharray="4 7" />
+          </g>
+        );
+      })}
+      <rect x={4} y={146} width={84} height={14} rx={7} fill={C.line} />
+      <rect x={180} y={140} width={140} height={26} rx={13} fill={C.tintSoft} stroke={C.tintLine} strokeWidth={1.5} />
+      <rect x={198} y={150} width={104} height={6} rx={3} fill={C.tint} />
+    </svg>
+  );
+}
