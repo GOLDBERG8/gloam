@@ -8,6 +8,8 @@ import { useConfig, useReadContract, useWriteContract } from "wagmi";
 import { writeContract as writeContractNow } from "wagmi/actions";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
+import { amountTextError } from "@/lib/amountText";
+import { AmountProblem } from "./AmountProblem";
 import { shortAddress } from "@/lib/chain";
 import { useAppAccount, useAppTxReceipt, useAppWriteContract, useDemo } from "@/lib/demo";
 import { knownTokens, shieldTokensFor } from "@/lib/tokens";
@@ -2300,9 +2302,7 @@ export function MoveView() {
                         inputMode="decimal"
                         autoComplete="off"
                         value={sendAmount}
-                        onChange={(e) =>
-                          setSendAmount(e.target.value.replace(/[^0-9.]/g, ""))
-                        }
+                        onChange={(e) => setSendAmount(e.target.value)}
                         placeholder="0"
                         className="tnum min-w-0 flex-1 bg-transparent text-[32px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-faint"
                       />
@@ -2319,6 +2319,7 @@ export function MoveView() {
                         Max
                       </button>
                     </div>
+                    <AmountProblem value={sendAmount} decimals={selected ? assetDecimals(selected.asset) : undefined} />
                     <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
                       The amount never shows up on the explorer. Anything left
                       over stays in your private balance.
@@ -2471,7 +2472,7 @@ export function MoveView() {
                           inputMode="decimal"
                           autoComplete="off"
                           value={cashOutInput}
-                          onChange={(e) => setCashOutInput(e.target.value.replace(/[^0-9.]/g, ""))}
+                          onChange={(e) => setCashOutInput(e.target.value)}
                           placeholder={maxEth}
                           aria-describedby="cashout-amt-help"
                           className="tnum min-w-0 flex-1 bg-transparent text-[32px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-foreground"
@@ -2493,7 +2494,8 @@ export function MoveView() {
                       </div>
                       <p id="cashout-amt-help" className={`mt-2 text-[12.5px] leading-relaxed ${cashOutAmountInvalid ? "text-warn" : "text-mute"}`}>
                         {cashOutAmountInvalid
-                          ? `Enter an amount up to ${formatAssetLabel(noteWei, selected.asset)}.`
+                          ? (amountTextError(cashOutInput, assetDecimals(selected.asset)) ??
+                            `Enter an amount up to ${formatAssetLabel(noteWei, selected.asset)}.`)
                           : cashOutPartial
                             ? planActive
                               ? `First this sets ${formatAssetLabel(cashOutAmount, selected.asset)} aside privately in pieces, then schedules each one. The rest stays in your private balance.`

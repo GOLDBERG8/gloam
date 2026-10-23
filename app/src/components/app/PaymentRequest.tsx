@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getNetwork, type NetworkKey } from "@/lib/networks";
+import { amountTextError } from "@/lib/amountText";
 import {
   REQUEST_NAME_MAX,
   REQUEST_NOTE_MAX,
@@ -80,6 +81,8 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
   }
 
   if (!asset) return null;
+  // shown as they type, so "1,25" or "-1" is caught before the link is made
+  const typedProblem = amountTextError(amount, asset.decimals);
 
   return (
     <div>
@@ -89,7 +92,7 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
             Amount <span className="text-faint">(optional)</span>
           </label>
           <div
-            data-invalid={Boolean(amountError)}
+            data-invalid={Boolean(amountError || typedProblem)}
             className="gl-inputcard mt-2 flex items-center gap-2 rounded-[16px] py-2 pl-4 pr-2"
           >
             <input
@@ -99,12 +102,12 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
               autoComplete="off"
               value={amount}
               onChange={(e) => {
-                setAmount(e.target.value.replace(/[^0-9.,]/g, ""));
+                setAmount(e.target.value);
                 setAmountError(null);
                 setCreated(null);
               }}
               placeholder="0"
-              aria-invalid={amountError ? true : undefined}
+              aria-invalid={amountError || typedProblem ? true : undefined}
               aria-describedby="req-amount-hint"
               className="tnum min-w-0 flex-1 bg-transparent text-[28px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-faint"
             />
@@ -118,9 +121,9 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
               }}
             />
           </div>
-          {amountError ? (
+          {amountError || typedProblem ? (
             <p id="req-amount-hint" role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
-              {amountError}
+              {amountError ?? typedProblem}
             </p>
           ) : (
             <p id="req-amount-hint" className="mt-2 text-[12.5px] leading-relaxed text-mute">

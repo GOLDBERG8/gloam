@@ -38,6 +38,7 @@ import { syncShieldTree, type SyncedTree } from "@/lib/treeSync";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
 import { buildNotePackage, decodeNotePackage, encodeNotePackage } from "@/lib/notePackage";
 import type { PayrollNote } from "@/lib/proofs";
+import { readAmountText } from "@/lib/amountText";
 import { encryptTicketForTag, isReceiveTag } from "@/lib/receiveTag";
 import { ticketToMemoBytes } from "@/lib/payMemo";
 import { cleanPaymentNote } from "@/lib/paymentNote";
@@ -47,7 +48,6 @@ import { countLinkCreated } from "@/lib/funnel";
 import {
   activeSpendableNotes,
   assetDecimals,
-  assetLabel,
   formatAssetAmount,
   loadLocalNotes,
   parseAssetAmount,
@@ -234,9 +234,11 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
         error = "Not a Gloam address (they start with gloamr1). Leave it blank to send a claim link.";
       }
     }
-    const amount = parseAssetAmount(amountInput, asset);
-    if (!error && amount === null && /^\d*\.\d+$/.test(amountInput.replace(/,/g, ""))) {
-      error = `Too many decimals, ${assetLabel(asset)} goes to ${assetDecimals(asset)} places.`;
+    // the same reader as every amount field: "1,25" or "-1" is a row error, never 125 or 1
+    const read = readAmountText(amountInput, assetDecimals(asset));
+    const amount = read.ok ? parseAssetAmount(amountInput, asset) : null;
+    if (!error && !read.ok) {
+      error = read.error;
     } else if (!error && (amount === null || amount <= 0n)) {
       error = "Enter an amount above zero.";
     }

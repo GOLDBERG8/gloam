@@ -18,6 +18,7 @@ import { zeroAddress, type Address } from "viem";
 import { getNetwork, isNetworkKey, type NetworkKey } from "./networks";
 import { PAYMENT_NOTE_MAX, cleanText } from "./paymentNote";
 import { RECEIVE_TAG_PREFIX } from "./receiveTag";
+import { readAmountText } from "./amountText";
 import { shieldTokensFor, supportsNativeShield } from "./tokens";
 
 /** Same cap as the private note the payment carries (lib/paymentNote). */
@@ -114,11 +115,10 @@ export function normalizeRequestAmount(
   input: string,
   asset: Pick<RequestAsset, "decimals" | "symbol">
 ): { value: string } | { error: string } {
-  const s = input.trim().replace(/,/g, "");
+  const read = readAmountText(input);
+  if (!read.ok) return { error: read.error };
+  const s = read.text;
   if (!s) return { value: "" };
-  if (!/^(\d+\.?\d*|\.\d+)$/.test(s)) {
-    return { error: "Use numbers and one dot, like 1250 or 12.50." };
-  }
   const [rawInt, rawFrac = ""] = s.split(".");
   if (rawFrac.length > asset.decimals) {
     return {

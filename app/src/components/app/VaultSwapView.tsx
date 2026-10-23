@@ -49,6 +49,7 @@ import {
   vaultSwapRouter,
   type SwapPlan,
 } from "@/lib/vaultSwap";
+import { amountTextError } from "@/lib/amountText";
 import { SWAP_REFUNDED, runVaultSwap } from "@/lib/vaultSwapRun";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
 import { countPerson } from "@/lib/people";
@@ -494,7 +495,7 @@ export function VaultSwapView() {
     : !amountInput.trim()
       ? { key: "empty", label: "Enter an amount", ready: false }
       : amountBad
-        ? { key: "bad", label: "Enter a valid amount", ready: false }
+        ? { key: "bad", label: amountTextError(amountInput, payAsset ? assetDecimals(payAsset) : undefined) ?? "Enter a valid amount", ready: false }
         : overTotal
           ? { key: "over", label: "Insufficient private balance", ready: false }
           : (overNote || refundBlocked) && held && payAsset
@@ -564,7 +565,7 @@ export function VaultSwapView() {
                   value={amountInput}
                   disabled={busy}
                   onChange={(e) => {
-                    setAmountInput(e.target.value.replace(/[^\d.,]/g, ""));
+                    setAmountInput(e.target.value);
                     setDone(null);
                   }}
                   size={1}

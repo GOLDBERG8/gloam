@@ -1,24 +1,23 @@
 import { parseEther, parseUnits } from "viem";
+import { readAmountText } from "./amountText";
 
-/** Safe decimal → wei; rejects sci notation / garbage. */
+/** Safe decimal → wei; refuses anything lib/amountText refuses (sci notation, "1,25", "-1"). */
 export function safeParseEther(raw: string): bigint | null {
-  const s = raw.trim();
-  if (!s || !/^\d*\.?\d+$/.test(s)) return null;
+  const read = readAmountText(raw, 18);
+  if (!read.ok || !read.text) return null;
   try {
-    return parseEther(s);
+    return parseEther(read.text);
   } catch {
     return null;
   }
 }
 
+/** Decimal → raw units. More decimals than the token has is refused, never clipped. */
 export function safeParseUnits(raw: string, decimals = 18): bigint | null {
-  const s = raw.trim();
-  if (!s || !/^\d*\.?\d+$/.test(s)) return null;
+  const read = readAmountText(raw, decimals);
+  if (!read.ok || !read.text) return null;
   try {
-    // clamp decimals to avoid "too many decimals"
-    const [a, b = ""] = s.split(".");
-    const clipped = b.length > decimals ? `${a}.${b.slice(0, decimals)}` : s;
-    return parseUnits(clipped, decimals);
+    return parseUnits(read.text, decimals);
   } catch {
     return null;
   }

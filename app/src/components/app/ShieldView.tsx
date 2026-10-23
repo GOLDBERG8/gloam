@@ -22,6 +22,7 @@ import {
 import { useNetwork } from "./NetworkProvider";
 import { MAINNET_ENABLED } from "@/lib/networks";
 import { safeParseEther, safeParseUnits } from "@/lib/amount";
+import { amountTextError } from "@/lib/amountText";
 import { erc20Abi } from "@/lib/dex";
 import { useEthPrice, useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
@@ -668,6 +669,8 @@ export function ShieldView() {
       : "0";
 
   const amtNum = Number(amount);
+  // "1,25" or "-1" is refused out loud, never quietly turned into 125 or 1
+  const amountProblem = amountTextError(amount, decimals);
   const usdHint =
     mark > 0 && Number.isFinite(amtNum) && amtNum > 0
       ? formatUsd(amtNum * mark)
@@ -828,7 +831,7 @@ export function ShieldView() {
                   autoComplete="off"
                   placeholder="0"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                  onChange={(e) => setAmount(e.target.value)}
                   className="tnum min-w-0 flex-1 bg-transparent text-[40px] font-light leading-[1.15] tracking-[-0.02em] text-foreground outline-none! placeholder:text-faint sm:text-[46px]"
                   aria-label="Amount to add"
                 />
@@ -858,8 +861,8 @@ export function ShieldView() {
                   </select>
                 </div>
               </div>
-              <p className="tnum mt-1 min-h-5 text-[13px] text-mute">
-                {usdHint ? `≈ ${usdHint}` : " "}
+              <p className={`tnum mt-1 min-h-5 text-[13px] ${amountProblem ? "text-danger" : "text-mute"}`} role={amountProblem ? "alert" : undefined}>
+                {amountProblem ?? (usdHint ? `≈ ${usdHint}` : " ")}
               </p>
             </div>
 
