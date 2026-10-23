@@ -29,6 +29,7 @@ import {
   openGloamPaymentNote,
   settleGloamPayment,
   sweepReceivedNote,
+  GloamRelayError,
   packGroth16Proof,
   transferCallArgs,
   GLOAM_NOT_FINAL,
@@ -229,6 +230,13 @@ const stranger = await generateReceiveKey();
   const down = await sweepReceivedNote({ ...base, submit: async () => { throw new Error("relay is down"); } });
   assert(down.status === "failed" && down.final === false && /relay is down/.test(down.reason), "a submit that fails moves nothing and says why");
   assert(down.freshNote === null, "nothing to keep when nothing was sent");
+
+  // The relay could not tell whether it sent it: it may still land, so the fresh note is kept.
+  const unsure = await sweepReceivedNote({ ...base, submit: async () => { throw new GloamRelayError("maybe sent", "maybe_sent"); } });
+  assert(unsure.status === "unconfirmed" && unsure.final === false && unsure.freshNote, "a relay maybe_sent is unconfirmed and keeps the fresh note, never 'nothing moved'");
+  // The relay refused it before sending: nothing moved.
+  const refused = await sweepReceivedNote({ ...base, submit: async () => { throw new GloamRelayError("slow down", "rate_limited"); } });
+  assert(refused.status === "failed" && refused.freshNote === null, "a relay refusal before sending moves nothing");
 
   // Sent and landed, but the receipt was lost: the chain says it landed.
   const lost = await sweepReceivedNote({
