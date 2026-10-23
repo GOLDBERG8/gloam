@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import { CSP_REPORT_ONLY } from "./csp.config.mjs";
 
 /**
  * When this package is the Vercel Root Directory (`app`), keep tracing
@@ -14,9 +15,11 @@ const nextConfig: NextConfig = {
     formats: ["image/avif", "image/webp"],
   },
   // Every response gets the basics. Framing is refused everywhere but the pitch
-  // deck (a static page that may be embedded). The CSP only covers framing,
-  // plugins, <base> and form targets: script and connect sources are left open
-  // so wallet connectors, the prover's WebAssembly and analytics keep working.
+  // deck (a static page that may be embedded). The enforced CSP only covers
+  // framing, plugins, <base> and form targets. The fuller policy (script and
+  // connect sources, csp.config.mjs) is sent Report-Only first: browsers log what
+  // it would block without blocking anything, so wallet connectors, the
+  // prover's WebAssembly and analytics keep working while it is checked.
   async headers() {
     return [
       {
@@ -42,6 +45,8 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'",
           },
+          // production only: dev builds evaluate code for hot reload and would flood the console
+          ...(process.env.NODE_ENV === "production" ? [{ key: "Content-Security-Policy-Report-Only", value: CSP_REPORT_ONLY }] : []),
         ],
       },
     ];
