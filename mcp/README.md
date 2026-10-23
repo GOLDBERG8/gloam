@@ -2,7 +2,7 @@
 
 Private stablecoin payments for AI agents on Tempo and Robinhood Chain, powered by [`@gloamtrade/sdk`](../packages/sdk). The agent pays x402 and MPP resources, holds a shielded balance and gets paid, within spending limits it cannot lift: off-chain limits this server checks, and on Tempo an access key whose cap the protocol enforces.
 
-Live on mainnet (beta, real money) on Tempo (`4217`) and Robinhood Chain (`4663`), and on testnet for free practice. Robinhood gives agents an MCP server for **public** trading. Gloam gives them one for **private** payments, so who an agent pays, and how much, stays off the public chain.
+Live on mainnet (beta, real money) on Tempo (`4217`) and Robinhood Chain (`4663`). Robinhood gives agents an MCP server for **public** trading. Gloam gives them one for **private** payments, so who an agent pays, and how much, stays off the public chain.
 
 ## Mainnet or testnet
 
@@ -22,7 +22,7 @@ On mainnet:
 - **Payments only, beta limits.** On the mainnet pools this server makes deposits, private payments and sweeps. It does not swap: private swaps are in the Gloam app (Vault > Swap) on both mainnets. A deposit is at most 500 of a stablecoin (25,000 GLOAM) during the beta, checked before anything is proved; private payments are never limited.
 - **Fees.** Deposits and private payments are free. Cashing out costs 0.25% (this server does not cash out; use the Gloam app or the SDK).
 - **Final keys.** Proofs for mainnet use the final keys of the 13-contributor trusted setup, downloaded from `https://www.gloam.trade/circuits/final` and checked against the SHA-256 the SDK pins. Testnet proofs use the dev keys. The two are cached apart.
-- **Beta software.** The contracts and circuits were reviewed internally before launch with no Critical or High findings open; an external audit is planned, not done. The mainnet pools are new, so the crowd of notes to hide among is small at first. Start with small amounts.
+- **Beta software.** The contracts and circuits were reviewed internally before launch with no Critical or High findings open, and an independent review on 23 October found no new exploitable contract flaw (its app fixes are being merged). An external audit is planned, not done. The mainnet pools are new, so the crowd of notes to hide among is small at first. Start with small amounts.
 - **Pools come with the version.** A mainnet appears here once the SDK this package ships with has its pool. If `GLOAM_NETWORK` names a mainnet this version lacks, the server stops at startup and says so.
 - **Your own RPC.** `GLOAM_RPC_URL_4217` and `GLOAM_RPC_URL_4663` point Tempo and Robinhood Chain mainnet at another RPC (any chain id works the same way).
 
@@ -385,7 +385,7 @@ Then the agent can shield into a private balance, pay for x402 and MPP resources
 
 ## Status
 
-- **Mainnet (beta, real money):** Tempo and Robinhood Chain, payments only, beta deposit limits, the trusted setup's final keys. Reviewed internally before launch; an external audit is planned, not done.
+- **Mainnet (beta, real money):** Tempo and Robinhood Chain, payments only, beta deposit limits, the trusted setup's final keys. Reviewed internally before launch and independently on 23 October; an external audit is planned, not done.
 - **Testnet (free practice):** Tempo Moderato and Robinhood Chain testnet, dev keys, test funds with no value.
 - **Circuit files** are fetched from `https://www.gloam.trade/circuits` (final keys under `/final`) on first use, checked against pinned SHA-256 and cached locally (`GLOAM_ARTIFACTS_DIR`).
 - **Swaps.** Private swaps are live in the Gloam app on both mainnets, with who swapped kept private and the amounts public ([docs](https://gloam.trade/docs/private-swaps)). This server does not swap: its market and trade tools only plan, for the retired sealed trade. See the [agent docs](https://gloam.trade/docs/agents).
