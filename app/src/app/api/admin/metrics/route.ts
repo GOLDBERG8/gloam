@@ -5,6 +5,7 @@ import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import { fetchRelayVolume } from "@/lib/relayVolume";
 import { readTractionSummary } from "@/lib/tractionStore";
 import { readFunnel } from "@/lib/funnelStore";
+import { readPeople } from "@/lib/peopleStore";
 import {
   isTestnetOpen,
   testnetOpensAtMs,
@@ -32,11 +33,12 @@ export async function GET(req: Request) {
   }
 
   const force = new URL(req.url).searchParams.get("fresh") === "1";
-  const [onchain, product, claimLinks, relay] = await Promise.all([
-    fetchOnchainMetrics({ force }).catch((e) => {
-      console.error("gloam_admin_metrics", e instanceof Error ? e.message : "unknown");
-      return { error: "Could not read the chains. The details are in the server logs." };
-    }),
+  const chainRead = fetchOnchainMetrics({ force }).catch((e) => {
+    console.error("gloam_admin_metrics", e instanceof Error ? e.message : "unknown");
+    return { error: "Could not read the chains. The details are in the server logs." };
+  });
+  const [onchain, product, claimLinks, relay, people] = await Promise.all([
+    chainRead,
     readTractionSummary().catch(() => ({
       backend: "memory" as const,
       totalEvents: 0,
@@ -50,6 +52,8 @@ export async function GET(req: Request) {
       console.error("gloam_admin_relay", e instanceof Error ? e.message : "unknown");
       return { error: "Could not read Relay. The details are in the server logs." };
     }),
+    // after the chain read, so the public wallets it just added are in the counts
+    chainRead.then(() => readPeople()),
   ]);
 
   return NextResponse.json({
@@ -65,6 +69,7 @@ export async function GET(req: Request) {
     product,
     claimLinks,
     relay,
+    people,
     revenueConfig: { bridgeFeeBps: bridgeFeeBps() },
   });
 }
