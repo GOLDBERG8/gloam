@@ -16,21 +16,28 @@ import { hexToField } from "@/lib/poseidon";
 import type { RelayNetworkStatus } from "@/lib/relay/client";
 import { TEMPO_STABLE_TOKENS } from "@/lib/tokens";
 import type { SyncedTree } from "@/lib/treeSync";
+import { drawSendAfter, type DelayWindow } from "@/lib/relay/scheduled";
 import {
   DEMO_MS,
   creditDemoWallet,
+  demoCashOutJob,
+  demoCashOutJobs,
   demoIncoming,
   demoLeafCount,
   demoLeafOpening,
   demoNotes,
   demoPoolDeposited,
   demoSentLeaves,
+  demoTxStatus,
   jitter,
+  putDemoCashOutJob,
   randomField,
   randomHex,
   setDemoIncomingTicket,
+  settleDueDemoCashOut,
   sleep,
   submitDemoTx,
+  type DemoCashOutJob,
 } from "./store";
 
 // ------------------------------------------------------------------ relay
@@ -55,9 +62,84 @@ export async function demoRelay(body: Record<string, unknown>): Promise<Hex> {
   // A cash out pays the wallet; sends and memos only touch the vault.
   const wallet: [Address, bigint][] =
     body.action === "unshield" ? [[body.asset as Address, BigInt(body.amount as bigint)]] : [];
-  // A private send's payment (commitments[0]) takes a leaf, so its claim link can be claimed.
-  const sent = body.action === "transfer" ? [(body.commitments as readonly Hex[])[0]] : [];
+  // A transfer's two notes take leaves, as the pool gives them: the payment's
+  // (so its claim link can be claimed) and the change (so a split's change can
+  // be split again before this tab saves its leaf).
+  const sent = body.action === "transfer" ? [...(body.commitments as readonly Hex[])] : [];
   return submitDemoTx(Number(body.chainId), { wallet, sent });
+}
+
+/** Waits for a pretend transaction to land, like the app's receipt wait. */
+export async function demoWaitForTx(hash: Hex, timeoutMs: number): Promise<"success"> {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    if (demoTxStatus(hash) === "confirmed") return "success";
+    await sleep(150);
+  }
+  throw new Error("demo: the transaction did not land in time");
+}
+
+// ------------------------------------------------------------------ cash out later
+
+type DemoOwnedJob = { id: string; chainId: number; sendAfter: number; status: DemoCashOutJob["status"]; updatedAt: number; hash?: Hex; to: Address };
+
+function owned(j: DemoCashOutJob): DemoOwnedJob {
+  return { id: j.id, chainId: j.chainId, sendAfter: j.sendAfter, status: j.status, updatedAt: j.updatedAt, to: j.to, ...(j.hash ? { hash: j.hash } : {}) };
+}
+
+/**
+ * The pretend relay taking a proven cash out for later, by the relay's own
+ * rules (lib/relay/scheduled): a random send time inside the window, and one
+ * live job per spend (the same cash out comes back, another address is refused).
+ */
+export async function demoScheduleCashOut(p: {
+  chainId: number;
+  nullifier: Hex;
+  asset: Address;
+  to: Address;
+  amount: bigint;
+  window: DelayWindow;
+}): Promise<{ ok: true; job: DemoOwnedJob } | { ok: false; code: string; error: string; job?: DemoOwnedJob }> {
+  await sleep(jitter(DEMO_MS.relay));
+  const live = demoCashOutJobs().find(
+    (j) => j.chainId === p.chainId && j.nullifier.toLowerCase() === p.nullifier.toLowerCase() && j.status === "scheduled"
+  );
+  if (live) {
+    const same = live.to.toLowerCase() === p.to.toLowerCase() && live.amount === p.amount.toString();
+    return same
+      ? { ok: true, job: owned(live) }
+      : { ok: false, code: "already_scheduled", error: "Already scheduled to another address. Cancel it first.", job: owned(live) };
+  }
+  const now = Date.now();
+  const job: DemoCashOutJob = {
+    id: crypto.randomUUID(),
+    chainId: p.chainId,
+    nullifier: p.nullifier,
+    asset: p.asset,
+    to: p.to,
+    amount: p.amount.toString(),
+    sendAfter: drawSendAfter(now, p.window),
+    status: "scheduled",
+    updatedAt: now,
+  };
+  putDemoCashOutJob(job);
+  return { ok: true, job: owned(job) };
+}
+
+/** Where a pretend job stands; one that is due goes out now. */
+export function demoCashOutStatus(id: string): DemoOwnedJob | "gone" {
+  const job = settleDueDemoCashOut(id) ?? demoCashOutJob(id);
+  return job ? owned(job) : "gone";
+}
+
+/** Cancels a pretend job that has not gone out. */
+export function demoCancelCashOut(id: string): "cancelled" | "going" | "over" | "gone" {
+  const job = demoCashOutJob(id);
+  if (!job) return "gone";
+  if (job.status === "sent") return "going";
+  if (job.status === "cancelled") return "over";
+  putDemoCashOutJob({ ...job, status: "cancelled", updatedAt: Date.now() });
+  return "cancelled";
 }
 
 // ------------------------------------------------------------------ vault

@@ -200,7 +200,22 @@ type ChainState = {
   sent?: Record<string, number>;
 };
 
-type DemoState = { notes: LocalNote[]; chains: Record<number, ChainState> };
+/** A cash out the pretend relay holds for later (lib/cashOutLater in a demo). */
+export type DemoCashOutJob = {
+  id: string;
+  chainId: number;
+  nullifier: Hex;
+  asset: Address;
+  to: Address;
+  /** Base units, as a decimal string. */
+  amount: string;
+  sendAfter: number;
+  status: "scheduled" | "sent" | "cancelled";
+  updatedAt: number;
+  hash?: Hex;
+};
+
+type DemoState = { notes: LocalNote[]; chains: Record<number, ChainState>; jobs?: Record<string, DemoCashOutJob> };
 
 function seed(): DemoState {
   const now = Date.now();
@@ -370,6 +385,10 @@ export function demoLeafOpening(
 ): { secret: Hex; amountWei: string; asset: Address } | null {
   const note = state().notes.find((n) => n.chainId === chainId && n.leafIndex === leafIndex);
   if (note) return note;
+  // A note of this wallet's that landed in a transfer and has not taken its leaf yet (a split's two notes).
+  const sent = Object.entries(chain(chainId)?.sent ?? {}).find(([, leaf]) => leaf === leafIndex)?.[0];
+  const own = sent ? state().notes.find((n) => n.chainId === chainId && n.commitment.toLowerCase() === sent) : undefined;
+  if (own) return own;
   const incoming = chain(chainId)?.incoming;
   return incoming?.leafIndex === leafIndex ? incoming : null;
 }
@@ -427,6 +446,39 @@ export function spendDemoNotes(chainId: number, asset: Address, amounts: bigint[
     }
   }
   changed();
+}
+
+// ------------------------------------------------------------------ cash out later
+
+export function demoCashOutJobs(): DemoCashOutJob[] {
+  return Object.values(state().jobs ?? {});
+}
+
+export function demoCashOutJob(id: string): DemoCashOutJob | null {
+  return state().jobs?.[id] ?? null;
+}
+
+export function putDemoCashOutJob(job: DemoCashOutJob) {
+  const s = state();
+  s.jobs = { ...s.jobs, [job.id]: job };
+  changed();
+}
+
+/**
+ * A due job goes out: the money leaves the vault as the chain would show it
+ * (the note it spends is spent, and a cash out to the pretend wallet lands
+ * there). Returns the job as it stands now.
+ */
+export function settleDueDemoCashOut(id: string, now = Date.now()): DemoCashOutJob | null {
+  const s = state();
+  const job = s.jobs?.[id];
+  if (!job || job.status !== "scheduled" || job.sendAfter > now) return job ?? null;
+  const sent: DemoCashOutJob = { ...job, status: "sent", updatedAt: now, hash: randomHex(32) };
+  s.jobs = { ...s.jobs, [id]: sent };
+  s.notes = s.notes.map((n) => (n.cashOut?.job === id ? { ...n, status: "recovered" as const } : n));
+  if (job.to.toLowerCase() === DEMO_ADDRESS.toLowerCase()) applyWallet(job.chainId, [[job.asset, BigInt(job.amount)]]);
+  changed();
+  return sent;
 }
 
 // ------------------------------------------------------------------ public side
