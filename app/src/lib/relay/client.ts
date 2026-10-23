@@ -142,6 +142,8 @@ export async function relayUnshield(p: {
 /** A private swap through the vault (lib/vaultSwap). Only the relay ever submits one. */
 export async function relayVaultSwap(p: {
   chainId: number;
+  /** The router: the swap's own, so a refund goes back through the router its swap used. */
+  router: Address;
   spend: { proof: Hex; root: Hex; nullifier: Hex; asset: Address; amount: bigint };
   deposit: { proof: Hex; commitment: Hex; asset: Address; amount: bigint };
   refund: { proof: Hex; commitment: Hex; asset: Address; amount: bigint };
