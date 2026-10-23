@@ -241,6 +241,15 @@ export default function DocsPrivateSwapsPage() {
         moved past the buffer, nothing moved and your money is safe in the
         vault. Refresh in a minute, then get a new quote.
       </p>
+      <p>
+        A swap that didn&apos;t go through isn&apos;t cancelled, though. Its
+        proofs stay valid, so anyone can send it again, and it lands if the
+        price comes back within the buffer. It can only land exactly as you
+        made it: the same output, into your new note. The app keeps that note
+        until the chain settles it and counts it the moment it lands. Spending
+        the same money on anything else, such as a new swap, a send or a
+        cash-out, ends the old swap for good.
+      </p>
 
       <h2 id="trust">What the router can and cannot do</h2>
       <ul>
