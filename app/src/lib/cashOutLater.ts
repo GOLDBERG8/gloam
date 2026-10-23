@@ -17,7 +17,7 @@
 import { isAddress, type Address, type Hex } from "viem";
 import type { CashOutCall } from "./cashOutProof";
 import { readDemo } from "./demoFlag";
-import { demoCancelCashOut, demoCashOutStatus, demoScheduleCashOut } from "./demo/chain";
+import { demoCancelCashOut, demoCashOutStatus, demoReplaceCashOutProof, demoScheduleCashOut } from "./demo/chain";
 import { getActiveNetwork } from "./networks";
 import { getAllNotes } from "./noteVault";
 import { noteNullifierPoseidon } from "./notePoseidon";
@@ -39,8 +39,12 @@ export type CashOutJobView = {
   reason?: string;
 };
 
-/** A job as its owner sees it when scheduling: with the address it really pays. */
-export type OwnedCashOutJob = CashOutJobView & { to: Address };
+/**
+ * A job as its owner sees it when scheduling: with the address it really
+ * pays. `existing` when the relay answered with the job already waiting for
+ * this money (its proof is the one it was scheduled with, not the one sent).
+ */
+export type OwnedCashOutJob = CashOutJobView & { to: Address; existing?: boolean };
 
 export class CashOutLaterError extends Error {
   constructor(
@@ -62,8 +66,14 @@ function isOwnedJob(v: unknown): v is OwnedCashOutJob {
 }
 
 /** The note's mark for a job the relay holds: where it really pays, and whether it still waits. */
-export function markFor(job: OwnedCashOutJob): CashOutMark {
-  return { job: job.id, at: job.sendAfter, to: job.to, state: job.status === "scheduled" ? "scheduled" : "sent" };
+export function markFor(job: OwnedCashOutJob, proof?: { root: Hex; at: number }): CashOutMark {
+  return {
+    job: job.id,
+    at: job.sendAfter,
+    to: job.to,
+    state: job.status === "scheduled" ? "scheduled" : "sent",
+    ...(proof ? { root: proof.root, provenAt: proof.at } : {}),
+  };
 }
 
 /**
@@ -166,8 +176,34 @@ export async function scheduleNoteCashOut(note: LocalNote, call: CashOutCall, wi
     if (e instanceof CashOutLaterError && e.job) updateLocalNote(note.id, { cashOut: markFor(e.job) });
     throw e;
   }
-  updateLocalNote(note.id, { cashOut: markFor(job) });
+  // The relay may hand back the job already waiting for this money: its proof's root is not this one.
+  updateLocalNote(note.id, { cashOut: markFor(job, job.existing ? undefined : { root: call.root, at: Date.now() }) });
   return job;
+}
+
+/**
+ * What handing in a newer proof did: "replaced" (the same job, its send time
+ * unchanged), "kept" (refused, with the relay's code: the old proof stays and
+ * the cash out goes out as scheduled), or null when the relay could not be
+ * asked. Either way nothing is lost: both proofs are of the same cash out.
+ */
+export type ReplaceProofResult = { status: "replaced"; job: OwnedCashOutJob } | { status: "kept"; code: string } | null;
+
+export async function replaceCashOutProof(id: string, call: CashOutCall): Promise<ReplaceProofResult> {
+  if (readDemo()) return demoReplaceCashOutProof(id, call);
+  let res: Response;
+  try {
+    res = await fetch(`/api/relay/scheduled?id=${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...call, amount: call.amount.toString() }),
+    });
+  } catch {
+    return null;
+  }
+  const json = (await res.json().catch(() => ({}))) as Partial<OwnedCashOutJob> & { ok?: boolean; code?: string };
+  if (res.ok && json.ok && isOwnedJob(json)) return { status: "replaced", job: json };
+  return json.code ? { status: "kept", code: json.code } : null;
 }
 
 /** Notes with a cash out still waiting or on its way. */

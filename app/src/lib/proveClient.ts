@@ -23,17 +23,27 @@ export type { Groth16Proof };
 // The network's key set decides the files, so read them at prove time (lib/circuitArtifacts).
 const files = () => activeCircuitArtifacts();
 
+let proving = 0;
+
+/** A proof is being made in this tab right now: background work (lib/cashOutReprove) waits its turn. */
+export function provingNow(): boolean {
+  return proving > 0;
+}
+
 async function fullProve(
   circomInput: Record<string, string | string[]>,
   wasm: string,
   zkey: string
 ): Promise<{ proofBytes: Hex; publicSignals: string[]; proof: Groth16Proof }> {
   const snarkjs = await import("snarkjs");
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-    circomInput,
-    wasm,
-    zkey
-  );
+  proving++;
+  let made: Awaited<ReturnType<typeof snarkjs.groth16.fullProve>>;
+  try {
+    made = await snarkjs.groth16.fullProve(circomInput, wasm, zkey);
+  } finally {
+    proving--;
+  }
+  const { proof, publicSignals } = made;
   return {
     proofBytes: packGroth16Proof(proof as Groth16Proof),
     publicSignals: publicSignals as string[],
