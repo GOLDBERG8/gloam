@@ -200,6 +200,27 @@ export default function DocsPrivacyPage() {
         <Link href="/docs/compare">how Gloam compares</Link>.
       </p>
 
+      <h2 id="counting-people">How we count people</h2>
+      <p>
+        To see how many people use Gloam, the app sends our server your
+        connected address and which kinds of thing you did, such as claiming a
+        payment or sending privately. Those go a few minutes after they happen,
+        together, so the request never lines up with a payment. The server
+        turns the address into a one-way code with a secret key (HMAC-SHA256)
+        and adds the code to a HyperLogLog: a counter that keeps registers, not
+        the codes it was given. It can say about how many different wallets it
+        has seen, and no list of them exists. No address is stored, and no
+        count is tied to a payment, an amount or a claim code.
+      </p>
+      <p>
+        Two honest limits. Our server sees the address while it makes the code,
+        as it does when it screens a deposit or a cash out. And someone holding
+        both the secret key and the counters could check whether a wallet they
+        already know is probably in them, in all, for one kind of action or on
+        one day. The key lives only on our server, and a day is the finest
+        grain kept.
+      </p>
+
       <h2 id="whats-new">What is new and what is not</h2>
       <p>
         Gloam is not new cryptography. It is a new building block for finance:
