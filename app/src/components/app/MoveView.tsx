@@ -861,7 +861,7 @@ export function MoveView() {
           ? "Paste an address for each piece. Fresh ones that never touched Gloam are best."
           : distinctTargets < planPieceList.length
             ? "Some pieces land at the same address, so they can be added up there."
-            : "Each piece lands at its own address, which makes them much harder to add up.";
+            : "Each piece lands at its own address, which makes them harder to add up.";
 
   // Does money sent to this address get swept out? Read in the background; a
   // failed read is no warning, never a blocked cash out.
