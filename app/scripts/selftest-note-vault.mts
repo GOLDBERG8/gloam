@@ -5,7 +5,9 @@
  *      deposit waiting on it is never sent; a write that doesn't read back the
  *      same counts as refused too.
  *   3. two tabs saving at once both keep their notes, with and without Web
- *      Locks, and a note one tab removed is not brought back by the other.
+ *      Locks; a note one tab removed is not brought back by the other, a note
+ *      one tab spent is not reopened by the other's stale copy, and a sync
+ *      from disk never drops a note still waiting to be written.
  * Each "tab" is its own copy of the module (its own memory) over one shared
  * localStorage and IndexedDB, like two tabs of one browser.
  *
@@ -138,6 +140,47 @@ await test("a note one tab removed is not brought back by another tab's save", a
   // saving it again on purpose brings it back
   await a.setAllNotes([...a.getAllNotes(), note("unsent")]);
   assert.ok(ids(await openTab()).includes("unsent"));
+  removeLocks();
+});
+
+await test("a note another tab marked spent is not reopened by this tab's stale copy", async () => {
+  installLocks();
+  const a = await openTab();
+  const b = await openTab();
+  await a.setAllNotes([note("x")]);
+  await b.setAllNotes([...b.getAllNotes(), note("b-1")]);
+  assert.equal(b.getAllNotes().find((n) => n.id === "x")?.status, "open", "b holds x as open");
+  // a spends x (payroll, a send): only a knows yet
+  await a.setAllNotes(a.getAllNotes().map((n) => (n.id === "x" ? { ...n, status: "recovered" as const } : n)));
+  await b.setAllNotes([...b.getAllNotes(), note("b-2")]);
+  const fresh = await openTab();
+  assert.equal(fresh.getAllNotes().find((n) => n.id === "x")?.status, "recovered", "still spent on disk");
+  assert.equal(b.getAllNotes().find((n) => n.id === "x")?.status, "recovered", "and b now knows");
+  // a change b makes itself still wins
+  await b.setAllNotes(b.getAllNotes().map((n) => (n.id === "b-1" ? { ...n, leafIndex: 7 } : n)));
+  assert.equal((await openTab()).getAllNotes().find((n) => n.id === "b-1")?.leafIndex, 7);
+  removeLocks();
+});
+
+await test("a sync from another tab while a save waits never drops the new note", async () => {
+  installLocks();
+  const a = await openTab();
+  const b = await openTab();
+  await b.setAllNotes([note("from-b")]);
+  // hold the write lock, so a's save waits while a re-reads the disk
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const held = (globalThis.navigator as unknown as { locks: { request: (n: string, f: () => Promise<void>) => Promise<void> } }).locks.request(
+    "gloam-notes-write",
+    () => gate
+  );
+  const saving = a.setAllNotes([...a.getAllNotes(), note("deposit")]);
+  await a.syncFromDisk(); // the storage event from b's write
+  assert.deepEqual(ids(a), ["deposit", "from-b"], "the unsaved note stays in memory");
+  release();
+  await held;
+  await saving;
+  assert.deepEqual(ids(await openTab()), ["deposit", "from-b"], "and reaches the disk");
   removeLocks();
 });
 

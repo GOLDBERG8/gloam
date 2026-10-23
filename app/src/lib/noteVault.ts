@@ -246,9 +246,15 @@ export class NoteSaveError extends Error {
   }
 }
 
-/** Removed ids not yet written, and ids this tab added back since (they win over an old removal). */
+/**
+ * What this tab changed and has not written yet: removed ids, ids it added
+ * (they win over an old removal), and every note it added or changed, by the
+ * copy it changed it to. Only those win over what is on disk: a note this tab
+ * merely holds never overwrites another tab's newer copy (spent, say).
+ */
 const pendingRemoved = new Set<string>();
 const pendingAdded = new Set<string>();
+const pendingChanged = new Map<string, LocalNote>();
 
 function readRemoved(): Map<string, number> {
   try {
@@ -290,6 +296,7 @@ async function writeBlob(): Promise<void> {
       const mine = cache;
       const gone = new Set(pendingRemoved);
       const back = new Set(pendingAdded);
+      const changed = new Map(pendingChanged);
       const raw = localStorage.getItem(NOTES_KEY);
       const disk = await readDiskNotes(raw);
       const removed = readRemoved();
@@ -299,8 +306,8 @@ async function writeBlob(): Promise<void> {
       if (disk) {
         const byId = new Map<string, LocalNote>();
         for (const n of disk) if (!removed.has(n.id)) byId.set(n.id, n);
-        // this tab's copy wins for the notes it holds
-        for (const n of mine) if (!removed.has(n.id)) byId.set(n.id, n);
+        // this tab's copy wins for the notes it changed, and is kept for any the disk lacks
+        for (const n of mine) if (!removed.has(n.id) && (changed.has(n.id) || !byId.has(n.id))) byId.set(n.id, n);
         merged = [...byId.values()];
       } else {
         merged = mine;
@@ -321,14 +328,30 @@ async function writeBlob(): Promise<void> {
       if (localStorage.getItem(NOTES_KEY) !== enc) throw new NoteSaveError();
       for (const id of gone) pendingRemoved.delete(id);
       for (const id of back) pendingAdded.delete(id);
+      for (const [id, n] of changed) if (pendingChanged.get(id) === n) pendingChanged.delete(id);
       // Pick up what other tabs saved or removed, keeping everything this tab changed since.
-      const have = new Set(cache.map((n) => n.id));
-      const fromOthers = merged.filter((n) => !have.has(n.id) && !pendingRemoved.has(n.id));
-      const keep = cache.filter((n) => !removed.has(n.id) || pendingAdded.has(n.id));
-      if (fromOthers.length || keep.length !== cache.length) cache = [...keep, ...fromOthers];
+      cache = foldIn(merged, removed);
       return;
     }
   });
+}
+
+/**
+ * Take what is on disk into the cache without losing anything this tab has
+ * not written yet. A note goes only when another tab removed it on purpose
+ * (its id is in `removed`), never because a copy on disk lacks it.
+ */
+function foldIn(disk: LocalNote[], removed: Map<string, number>): LocalNote[] {
+  const onDisk = new Map(disk.map((n) => [n.id, n]));
+  const next: LocalNote[] = [];
+  for (const n of cache) {
+    if (pendingChanged.has(n.id)) next.push(n);
+    else if (onDisk.has(n.id)) next.push(onDisk.get(n.id)!);
+    else if (!removed.has(n.id)) next.push(n);
+  }
+  const have = new Set(next.map((n) => n.id));
+  for (const n of disk) if (!have.has(n.id) && !pendingRemoved.has(n.id)) next.push(n);
+  return next.length === cache.length && next.every((n, i) => n === cache[i]) ? cache : next;
 }
 
 /** Queue work behind every earlier write (and behind the unlock). */
@@ -422,12 +445,12 @@ export async function syncFromDisk(): Promise<void> {
   const raw = localStorage.getItem(NOTES_KEY);
   if (raw && raw.startsWith(ENC_PREFIX)) {
     try {
-      cache = parseNotes(await decrypt(raw));
+      cache = foldIn(parseNotes(await decrypt(raw)), readRemoved());
     } catch {
       /* ignore */
     }
   } else if (raw) {
-    cache = parseNotes(raw);
+    cache = foldIn(parseNotes(raw), readRemoved());
   }
 }
 
@@ -450,15 +473,20 @@ export function setAllNotes(next: LocalNote[]): Promise<void> {
     setDemoNotes(next);
     return Promise.resolve();
   }
-  const before = new Set(cache.map((n) => n.id));
+  const before = new Map(cache.map((n) => [n.id, n]));
   const after = new Set(next.map((n) => n.id));
-  for (const id of before) if (!after.has(id)) {
+  for (const id of before.keys()) if (!after.has(id)) {
     pendingRemoved.add(id);
     pendingAdded.delete(id);
+    pendingChanged.delete(id);
   }
-  for (const id of after) if (!before.has(id)) {
-    pendingAdded.add(id);
-    pendingRemoved.delete(id);
+  for (const n of next) {
+    const was = before.get(n.id);
+    if (!was) {
+      pendingAdded.add(n.id);
+      pendingRemoved.delete(n.id);
+    }
+    if (was !== n) pendingChanged.set(n.id, n);
   }
   cache = next;
   if (typeof window === "undefined") return Promise.resolve();
