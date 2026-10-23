@@ -69,3 +69,5 @@ Defaults are hard-coded for the current Robinhood Chain testnet vault. You do no
 **Hygiene:** omit these envs entirely if the hard-coded defaults are fine. A superseded pool address or deploy block is remapped at runtime; for the pre-sealed `0xA488…` and block `90260331`, Settings → vault health also shows a remapped warning.
 
 Admin: `ADMIN_ACCESS_CODE` (server-only).
+
+People counts: `GLOAM_METRICS_SALT` (server-only), 32 or more random characters (`openssl rand -hex 32`). The server turns each wallet that uses the app into HMAC-SHA256 of this secret and the address, and adds that to Redis HyperLogLog counters (`app/src/lib/peopleStore.ts`), so /admin shows how many different people use Gloam without keeping any address. Unset or shorter, nothing is counted. Set it once and keep it: a new value counts everyone again. Keep it on Vercel only, never in Redis or behind `NEXT_PUBLIC_`.
