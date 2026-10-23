@@ -17,8 +17,13 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { createPublicClient, decodeAbiParameters, encodeAbiParameters, http, keccak256, type Address } from "viem";
 import {
+  MAX_QUOTED_ROUTES,
   QUOTE_TTL_MS,
   RH_SWAP_ASSETS_V2,
+  depositRoom,
+  maxSwapInForRefund,
+  priceImpactBps,
+  refundFits,
   RH_SWAP_POOLS,
   RH_SWAP_POOLS_V2,
   RH_WETH,
@@ -45,6 +50,7 @@ import {
 } from "../src/lib/vaultSwap";
 import { getNetwork } from "../src/lib/networks";
 import { RelayError, relayVaultSwap } from "../src/lib/relay/server";
+import { knownTokens } from "../src/lib/tokens";
 
 let n = 0;
 const USDG = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168" as Address;
@@ -68,12 +74,26 @@ const ids = RH_SWAP_POOLS.map((k) => keccak256(encodeAbiParameters([{ type: "tup
 assert.deepEqual(ids, ["0x3b0cbf06", "0xc5f37371", "0xe5b1e488"]);
 assert.deepEqual(RH_SWAP_POOLS.map((k) => poolId(k).slice(0, 10)), ids, "poolId is the v4 PoolId");
 n += 2;
-// v2's pools: v1's three, then the ones found live on 2026-10-23 (PoolManager Initialize logs)
-assert.deepEqual(
-  RH_SWAP_POOLS_V2.map((k) => poolId(k).slice(0, 10)),
-  ["0x3b0cbf06", "0xc5f37371", "0xe5b1e488", "0x24107d15", "0x387bf619", "0x84bd4e2d", "0x9200eb96"]
-);
-for (const k of RH_SWAP_POOLS_V2) assert.ok(BigInt(k.currency0) < BigInt(k.currency1), "v4 keys are sorted");
+// v2's pools are the deploy script's, in order: both pinned by the same fixture
+const fixture = JSON.parse(readFileSync(new URL("../../contracts/test/fixtures/vault-swap-v2-pools.json", import.meta.url), "utf8")) as {
+  poolIds: string[];
+};
+assert.deepEqual(RH_SWAP_POOLS_V2.map(poolId), fixture.poolIds, "RH_SWAP_POOLS_V2 is DeployVaultSwapV4b's list");
+assert.equal(new Set(fixture.poolIds).size, fixture.poolIds.length, "no pool twice");
+for (const k of RH_SWAP_POOLS_V2) {
+  assert.ok(BigInt(k.currency0) < BigInt(k.currency1), "v4 keys are sorted");
+  assert.notEqual(k.hooks.toLowerCase(), "0x958541c0ce2e1a158309f7d1b141963eda31c880", "never the stale-quote hook");
+}
+assert.ok(!RH_SWAP_POOLS_V2.some((k) => poolId(k).startsWith("0x3b0cbf06")), "v1's thinned ETH/USDG pool is not v2's hub");
+n += 4;
+// every v2 token has its metadata, and its pools join it to the rest
+for (const a of RH_SWAP_ASSETS_V2) {
+  const t = knownTokens(4663).find((x) => x.address.toLowerCase() === a.toLowerCase());
+  assert.ok(t && t.decimals > 0 && t.symbol, `metadata for ${a}`);
+  assert.ok(RH_SWAP_POOLS_V2.some((k) => [k.currency0, k.currency1].some((c) => c.toLowerCase() === a.toLowerCase()) || a === RH_WETH));
+}
+assert.equal(new Set(RH_SWAP_ASSETS_V2.map((a) => a.toLowerCase())).size, RH_SWAP_ASSETS_V2.length);
+assert.equal(RH_SWAP_ASSETS_V2.length, 29, "USDG, GLOAM, WETH, six more and 20 stock tokens");
 n += 2;
 
 // Routes both ways: direct, and through ETH.
@@ -156,6 +176,25 @@ for (const amt of [1n, 99n, 100n, 19_999n, 20_000_000n, 10n ** 18n + 7n]) {
 }
 n++;
 
+// The vault's limits: what one deposit can bring in, and the most one swap may spend so its refund lands.
+{
+  const v = { perDeposit: 500_000_000n, total: 25_000_000_000n, deposited: 24_800_000_000n };
+  assert.equal(depositRoom(v), 200_000_000n, "the total binds");
+  assert.equal(depositRoom({ ...v, deposited: 0n }), 500_000_000n, "the per-deposit limit binds");
+  assert.equal(depositRoom({ ...v, deposited: 30_000_000_000n }), 0n, "over a lowered total: nothing");
+  assert.equal(depositRoom({ perDeposit: 0n, total: 0n, deposited: 0n }), 0n, "not taken");
+  const cap = maxSwapInForRefund(v);
+  assert.ok(refundAmountFor(cap) <= v.perDeposit && refundAmountFor(cap + 1n) > v.perDeposit, "the largest that fits");
+  assert.ok(refundFits(v, cap) && !refundFits(v, cap + 1n));
+  assert.ok(!refundFits({ ...v, total: 24_000_000_000n }, 100_000_000n), "a refund past a lowered total");
+  assert.equal(maxSwapInForRefund({ perDeposit: 0n, total: 0n, deposited: 0n }), 0n);
+  // price impact: the same rate at both sizes is 0, a 2% worse rate at full size is 200 bps
+  assert.equal(priceImpactBps(1000n, 2000n, 10n, 20n), 0);
+  assert.equal(priceImpactBps(1000n, 1960n, 10n, 20n), 200);
+  assert.equal(priceImpactBps(1000n, 2100n, 10n, 20n), 0, "never below 0");
+  n += 11;
+}
+
 // Quote age: refreshed every 15 seconds, gone once two refreshes are missed.
 assert.equal(QUOTE_TTL_MS, 15_000);
 assert.ok(quoteFresh(1_000, 1_000));
@@ -220,10 +259,12 @@ n += 4;
   assert.ok(!isSwapAsset(4663, WETH, V1), "v1 never had WETH");
   n += 8;
 
-  const ethUsd87 = RH_SWAP_POOLS_V2[0]!;
-  const ethGloam = RH_SWAP_POOLS_V2[1]!;
-  const directDear = RH_SWAP_POOLS_V2[2]!;
-  const wethUsd = RH_SWAP_POOLS_V2[5]!;
+  const byId = (prefix: string) => RH_SWAP_POOLS_V2.find((k) => poolId(k).startsWith(prefix))!;
+  const ethUsd87 = byId("0x387bf619"); // ETH / USDG 0.05%, the hub (the name kept from v1's tests)
+  const ethGloam = byId("0xc5f37371");
+  const directDear = byId("0xe5b1e488");
+  const wethUsd = byId("0x84bd4e2d");
+  const sym = (s: string) => RH_SWAP_ASSETS_V2.find((a) => knownTokens(4663).find((t) => t.address.toLowerCase() === a.toLowerCase())?.symbol === s)!;
   const key = (r: readonly { fee: number; currency0: string }[]) => r.map((k) => `${k.currency0.slice(0, 6)}:${k.fee}`).join(">");
 
   // ETH through WETH at either end, mirrored from the router's walk
@@ -237,7 +278,7 @@ n += 4;
   assert.equal(routeCurrencies(v2, ETH, USDG, [ethUsd87]), null, "a native note never");
   assert.equal(routeCurrencies(v2, USDG, GLOAM, [directDear, directDear]), null, "a pool twice");
   assert.equal(routeCurrencies(v1, USDG, WETH, [ethUsd87]), null, "v1 has no WETH");
-  assert.equal(routeCurrencies(v1, USDG, GLOAM, [RH_SWAP_POOLS_V2[3]!, ethGloam]), null, "a v2 pool on v1");
+  assert.equal(routeCurrencies(v1, USDG, GLOAM, [byId("0x24107d15"), ethGloam]), null, "a v2 pool on v1");
   n += 11;
   // three hops: WETH -> USDG -> ETH -> GLOAM is one route v2 takes (and v1 could not)
   const wg = routesBetween(WETH, GLOAM, v2);
@@ -246,7 +287,28 @@ n += 4;
   assert.ok(wg.every((r) => routeCurrencies(v2, WETH, GLOAM, r) !== null));
   assert.ok(wg.every((r, i) => i === 0 || wg[i - 1]!.length <= r.length), "fewest hops first");
   const uw = routesBetween(USDG, WETH, v2);
-  assert.equal(uw.filter((r) => r.length === 1).length, 4, "three ETH pools wrapped, and the WETH pool");
+  assert.equal(uw.filter((r) => r.length === 1).length, 3, "two ETH pools wrapped, and the WETH pool");
+  // stock tokens: one hop to USDG, two between two stocks, ETH-paired ones through ETH
+  const SPY = sym("SPY"), NVDA = sym("NVDA"), SPCX = sym("SPCX"), MU = sym("MU");
+  assert.ok(routesBetween(USDG, SPY, v2).some((r) => r.length === 1));
+  assert.ok(routesBetween(SPY, NVDA, v2).some((r) => r.length === 2), "stock to stock through USDG");
+  assert.deepEqual(routeCurrencies(v2, MU, WETH, [byId("0x881b4219")]), [MU, "0x0000000000000000000000000000000000000000"], "MU / ETH, wrapped");
+  assert.ok(routesBetween(SPCX, GLOAM, v2).some((r) => r.length === 2), "SPCX -> ETH -> GLOAM");
+  // the walk finds exactly what trying every sequence of pools finds
+  const brute = (a: Address, b: Address) => {
+    const out: string[] = [];
+    const go = (route: typeof RH_SWAP_POOLS_V2[number][]) => {
+      if (route.length && routeCurrencies(v2, a, b, route)) out.push(route.map(poolId).join(">"));
+      if (route.length < 3) for (const k of RH_SWAP_POOLS_V2) if (!route.includes(k)) go([...route, k]);
+    };
+    go([]);
+    return out.sort();
+  };
+  for (const [a, b] of [[USDG, GLOAM], [RH_WETH, GLOAM], [SPY, NVDA], [GLOAM, MU]] as [Address, Address][]) {
+    assert.deepEqual(routesBetween(a, b, v2).map((r) => r.map(poolId).join(">")).sort(), brute(a, b), "walk == brute force");
+  }
+  assert.ok(MAX_QUOTED_ROUTES >= 12);
+  n += 6;
   assert.equal(routesBetween(USDG, GLOAM, v1).length, 2, "v1's routes as before");
   // a removed pool (livePools) is never routed through
   const noLaunch = routesBetween(WETH, GLOAM, v2, (k) => poolId(k) !== poolId(ethGloam));
@@ -319,18 +381,29 @@ if (process.argv.includes("--live")) {
     VAULT_SWAP_ROUTERS[4663] = VAULT_SWAP_V2_ROUTER[4663];
     const name: Record<string, string> = { [USDG.toLowerCase()]: "USDG", [GLOAM.toLowerCase()]: "GLOAM", [RH_WETH.toLowerCase()]: "WETH" };
     const dec: Record<string, number> = { USDG: 6, GLOAM: 18, WETH: 18 };
+    for (const t of knownTokens(4663)) name[t.address.toLowerCase()] = t.symbol;
+    for (const t of knownTokens(4663)) dec[t.symbol] = t.decimals;
+    const tok = (s: string) => knownTokens(4663).find((t) => t.symbol === s)!.address as Address;
     const ask: [Address, Address, bigint][] = [
       [USDG, RH_WETH, 50_000_000n],
       [RH_WETH, USDG, 2n * 10n ** 16n],
       [RH_WETH, GLOAM, 10n ** 16n],
       [GLOAM, RH_WETH, 20n * 10n ** 18n],
       [USDG, GLOAM, 20_000_000n],
+      [USDG, tok("SPY"), 100_000_000n],
+      [tok("SPY"), tok("NVDA"), 10n ** 17n],
+      [USDG, tok("GLD"), 100_000_000n],
+      [RH_WETH, tok("MU"), 2n * 10n ** 16n],
+      [USDG, tok("cbBTC"), 100_000_000n],
     ];
     for (const [a, b, amt] of ask) {
       const q = await planVaultSwap(rh2 as never, 4663, { assetIn: a, assetOut: b, amountIn: amt, feeBps: 25 });
       assert.ok(q.cost <= q.available && q.amountOut > 0n);
       const A = name[a.toLowerCase()]!, B = name[b.toLowerCase()]!;
-      console.log(`live RH v2: ${Number(amt) / 10 ** dec[A]!} ${A} -> ${Number(q.amountOut) / 10 ** dec[B]!} ${B} in ${q.route.length} hop(s) (fees ${q.route.map((k) => k.fee).join(",")}), leftover ${Number(q.leftover) / 10 ** dec[A]!} ${A}`);
+      console.log(
+        `live RH v2: ${Number(amt) / 10 ** dec[A]!} ${A} -> ${Number(q.amountOut) / 10 ** dec[B]!} ${B} in ${q.route.length} hop(s) ` +
+          `(fees ${q.route.map((k) => k.fee).join(",")}), impact ${q.impactBps ?? "?"} bps, leftover ${Number(q.leftover) / 10 ** dec[A]!} ${A}`
+      );
       n++;
     }
     VAULT_SWAP_V2_ROUTER[4663] = null;
