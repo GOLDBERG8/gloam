@@ -135,7 +135,11 @@ export default function DocsThreatModelPage() {
         137 an hour later, an observer will guess it was you, and the proof cannot stop
         that. The mainnet vaults are brand new, so the crowd is thin at first: treat
         unlinkability as weak until more people use them. The testnet crowd is small
-        too. Splitting amounts and waiting before you cash out help.
+        too. Splitting amounts and waiting before you cash out help. A cash out sent
+        later still carries a proof that shows roughly when it was made; the app
+        swaps in a fresh one while it is open, and one that goes out while it is
+        closed keeps its last.{" "}
+        <Link href="/docs/privacy-model">More in the privacy model</Link>.
       </p>
 
       <h3>The relay</h3>

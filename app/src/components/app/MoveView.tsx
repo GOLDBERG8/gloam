@@ -2744,10 +2744,17 @@ export function MoveView() {
                     <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
                       {cashOutWhen === "now"
                         ? relayAvailable
-                          ? "Later sends it at a random time in that window, so it can't be matched to a payment by timing."
+                          ? "Later sends it at a random time in that window, so it doesn't go out right after a payment."
                           : "Cashing out later needs the Gloam relay, which is off right now."
                         : "Your proof is made now and the Gloam relay sends it at a random time in that window. It can't change the amount or where it goes. If it can't go out, nothing moves and it comes back to your private balance."}
                     </p>
+                    {cashOutWhen !== "now" && (
+                      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                        A proof shows roughly when it was made. While Gloam is open it swaps in a fresh one now and then, so
+                        leaving it open until the send hides the most. If it goes out while Gloam is closed, it shows when
+                        its proof was last made.
+                      </p>
+                    )}
                   </div>
                   )}
 

@@ -129,11 +129,13 @@ export default function DocsPrivacyPage() {
         <li>
           <strong>A different amount.</strong> Cash out part of a balance, not
           the exact sum that came in. The app first sets that part aside in its
-          own private note, then cashes it out, and warns when the amount sits
-          within 1% of money that arrived in the last day.
+          own private note, then cashes it out. It says so when the amount sits
+          within 1% of money you added or were paid in the last 30 days, or when
+          you added money in the last few hours. It only reads this
+          browser&apos;s own history.
         </li>
         <li>
-          <strong>Later.</strong> Within an hour or within 6 hours, at a random
+          <strong>Later.</strong> Within an hour, 6 hours or a day, at a random
           time inside the window. The proof is made in your browser at once and
           the relay sends it then. The proof binds the amount and the recipient,
           so the relay can only send it as it is or not at all. The vault
@@ -143,11 +145,34 @@ export default function DocsPrivacyPage() {
           way until the network settles it.
         </li>
         <li>
+          <strong>In pieces.</strong> For a stablecoin above 5, the default is
+          to cash out privately: 2 to 4 pieces of ordinary sizes, none matching
+          money you added or were paid recently, each sent later at its own
+          random time. Pieces that all land at one address can still be added
+          up there, so a busy address (an exchange deposit address, say) or a
+          different address for each piece hides more. &quot;Send it all
+          now&quot; is always one tap away.
+        </li>
+        <li>
           <strong>Another address.</strong> A fresh wallet that never deposited
           is best. The app warns when the address is the connected wallet or
           one that deposited.
         </li>
       </ul>
+      <p>
+        <strong>What a waiting proof shows.</strong> Sending later hides when
+        you asked for the cash out, but not entirely. Every proof is made
+        against the vault&apos;s root at that moment, and the vault keeps every
+        root, so anyone who rebuilds the tree can tell roughly when a proof was
+        made. Cash outs proven together, like the pieces of one cash out, can
+        be grouped that way, and one proven right after a deposit points back
+        at it. While the app is open, Gloam makes a fresh proof of each waiting
+        cash out and swaps it in on the relay, with the same recipient, amount
+        and send time. It does this now and then, and once more shortly before
+        each one goes out. A cash out that goes out while the app is closed
+        keeps the root from when its proof was last made, so leaving the app
+        open until it goes hides the most.
+      </p>
 
       <h2>What we will not promise</h2>
       <ul>
@@ -361,7 +386,11 @@ export default function DocsPrivacyPage() {
         delivers or where (the escrow address binds it), and rate limits each
         device and each network. A cash out scheduled for
         later is kept as the proof and its public inputs, never a secret, and
-        is dropped once it is sent, cancelled or can no longer go out.
+        is dropped once it is sent, cancelled or can no longer go out. While it
+        waits, the app can swap its proof for a fresher one of the same cash
+        out: the relay takes it only for the same balance, recipient, amount
+        and asset, more than a minute before the send time, after the same dry
+        run, and nothing else about the cash out changes.
       </p>
 
       <h2>Before you put real money in</h2>
