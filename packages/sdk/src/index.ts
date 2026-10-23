@@ -37,7 +37,7 @@
  * pools have no swap at all), so its on-chain path reverts today.
  */
 
-export const SDK_VERSION = "0.2.1";
+export const SDK_VERSION = "0.2.2";
 
 export * from "./intents.js";
 export * from "./rates.js";

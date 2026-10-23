@@ -23,7 +23,7 @@ import { noteNullifierPoseidon } from "./note.js";
 import { fieldToHex, hexToField } from "./poseidon.js";
 import type { Prover } from "./prove.js";
 import type { ReceiveKey, ReceiveKeyJwk } from "./receiveTag.js";
-import { relayIntent, type RelayOptions } from "./relay.js";
+import { GloamRelayError, relayIntent, type RelayOptions } from "./relay.js";
 import { syncTree, type SyncTreeParams } from "./sync.js";
 import type { NoteExport } from "./witness.js";
 import {
@@ -105,6 +105,9 @@ export function sweepChainFromClient(client: PublicClient, params: SyncTreeParam
 export function relaySubmitter(opts: RelayOptions = {}): SweepSubmitter {
   return (intent) => relayIntent(intent, opts);
 }
+
+/** Relay answers that leave open whether the transaction went out. */
+const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "internal", "in_flight"]);
 
 export type SweepStatus = "swept" | "already_spent" | "not_settled" | "bad_note" | "unconfirmed" | "failed";
 
@@ -197,6 +200,9 @@ export async function sweepReceivedNote(params: SweepParams): Promise<SweepResul
   let hash: Hex | null = null;
   let reverted = false;
   let error = "";
+  // The relay could not say whether it sent the sweep (a timeout after the node took it, a lost reply):
+  // it may still land, so the fresh note is kept rather than reported as nothing moved.
+  let maybeSent = false;
   try {
     hash = await params.submit(intent);
     const receipt = await chain.waitForReceipt(hash);
@@ -204,6 +210,7 @@ export async function sweepReceivedNote(params: SweepParams): Promise<SweepResul
     reverted = true;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
+    maybeSent = !hash && e instanceof GloamRelayError && RELAY_MAYBE_SENT.has(e.code);
   }
 
   // It did not confirm cleanly. Ask the chain what actually happened.
@@ -211,7 +218,7 @@ export async function sweepReceivedNote(params: SweepParams): Promise<SweepResul
   if (landed === true) return result("swept", null, { hash, freshNote: fresh });
   const spent = await chain.isSpent(nullifier).catch(() => null);
   if (landed === false && spent === true) return result("already_spent", ALREADY_SPENT, { hash });
-  if (landed === false && spent === false && (!hash || reverted)) {
+  if (landed === false && spent === false && !maybeSent && (!hash || reverted)) {
     return result("failed", `The sweep did not go through and nothing moved${error ? `: ${error}` : "."} It can be retried.`, { hash });
   }
   return result(
