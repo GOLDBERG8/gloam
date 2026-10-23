@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
-import { VAULT_SWAP_ROUTERS } from "@/lib/vaultSwap";
+import { VAULT_SWAP_ROUTERS, VAULT_SWAP_V2_ROUTER } from "@/lib/vaultSwap";
 
 export const metadata: Metadata = {
   title: "Private swaps",
@@ -13,6 +13,9 @@ export const metadata: Metadata = {
 
 const VAULT = "0x39e28cde55cab798874746ac52cb4b5cc99a0194";
 const TREASURY = "0xB3900ac9350903218e4c7597bAb0f008F01B30B8";
+const RH_V1_ROUTER = "0x34AB06208586A737Bf1607fa996Bc9162271c52d";
+/** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the page follows the switch. */
+const V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
 
 export default function DocsPrivateSwapsPage() {
   return (
@@ -71,11 +74,23 @@ export default function DocsPrivateSwapsPage() {
           <tbody>
             <tr>
               <td>Robinhood Chain</td>
-              <td>USDG and $GLOAM</td>
-              <td>
-                Uniswap v4, in two hops through ETH, or the direct USDG and
-                $GLOAM pool when it pays more
-              </td>
+              {V2 ? (
+                <>
+                  <td>USDG, $GLOAM and ETH (held as WETH), any one for another</td>
+                  <td>
+                    Uniswap v4, in up to three hops over the router&apos;s
+                    allowed pools, whichever route pays the most
+                  </td>
+                </>
+              ) : (
+                <>
+                  <td>USDG and $GLOAM</td>
+                  <td>
+                    Uniswap v4, in two hops through ETH, or the direct USDG and
+                    $GLOAM pool when it pays more
+                  </td>
+                </>
+              )}
             </tr>
             <tr>
               <td>Tempo</td>
@@ -194,6 +209,7 @@ export default function DocsPrivateSwapsPage() {
         Beta deposit limits apply to what lands, because the new note is a
         deposit. One swap brings in at most 500 of a stablecoin, or 25,000
         $GLOAM, and only while the vault has room under its total.
+        {V2 && " WETH has its own limits, and a token the vault does not take yet can't be swapped into."}
       </p>
 
       <h2 id="refund">If a swap can&apos;t finish</h2>
@@ -223,20 +239,47 @@ export default function DocsPrivateSwapsPage() {
 
       <h2 id="trust">What the router can and cannot do</h2>
       <ul>
-        <li>
-          <strong>No owner, no admin, no upgrade.</strong> The routers have no
-          settings anyone can change after deploy.
-        </li>
-        <li>
-          <strong>Fixed venues.</strong>{" "}
-          On Robinhood Chain the router only uses
-          three Uniswap v4 pools fixed when it was deployed. On Tempo it only
-          uses Tempo&apos;s stablecoin exchange.
-        </li>
+        {V2 ? (
+          <>
+            <li>
+              <strong>No upgrade, and nobody moves money.</strong> No one can
+              change the routers&apos; code, the vault, the treasury or the
+              exchange they use, and no function sends what passes through them
+              anywhere but your new note and the treasury.
+            </li>
+            <li>
+              <strong>Allowed venues, changed in public.</strong>{" "}
+              On Robinhood Chain the router only uses Uniswap v4 pools on its
+              allowlist. Its owner can add a pool only with 3 days of public
+              notice on chain, and can take one off at once. A swap names its
+              route in advance, so a pool added later can never be slipped into
+              it. On Tempo the router only uses Tempo&apos;s stablecoin exchange.
+            </li>
+            <li>
+              <strong>ETH as WETH.</strong> The vault holds WETH. When a route
+              uses a pool that holds ETH, the router unwraps or wraps exactly
+              what that pool trades, inside the swap, and keeps none of it.
+            </li>
+          </>
+        ) : (
+          <>
+            <li>
+              <strong>No owner, no admin, no upgrade.</strong> The routers have no
+              settings anyone can change after deploy.
+            </li>
+            <li>
+              <strong>Fixed venues.</strong>{" "}
+              On Robinhood Chain the router only uses
+              three Uniswap v4 pools fixed when it was deployed. On Tempo it only
+              uses Tempo&apos;s stablecoin exchange.
+            </li>
+          </>
+        )}
         <li>
           <strong>Exact output or nothing.</strong> The router checks that it
           got the full amount of your new note and paid no more than arrived
           from the vault. Otherwise the whole swap reverts.
+          {V2 && " So even a pool that turns against a swap can keep at most its price buffer, the part that would go to the treasury, never your new note and never anyone else's money."}
         </li>
         <li>
           <strong>The vault is unchanged.</strong> The mainnet vault still has
@@ -256,9 +299,16 @@ export default function DocsPrivateSwapsPage() {
       <h2 id="contracts">Contracts</h2>
       <ul>
         <li>
-          <strong>Robinhood Chain router</strong> (GloamVaultSwapV4),{" "}
+          <strong>Robinhood Chain router</strong> ({V2 ? "GloamVaultSwapV4b" : "GloamVaultSwapV4"}),{" "}
           <code>{VAULT_SWAP_ROUTERS[4663]}</code>
         </li>
+        {V2 && (
+          <li>
+            <strong>Earlier Robinhood Chain router</strong> (GloamVaultSwapV4),
+            which still finishes the refunds of swaps made through it,{" "}
+            <code>{RH_V1_ROUTER}</code>
+          </li>
+        )}
         <li>
           <strong>Tempo router</strong> (GloamVaultSwapTempo),{" "}
           <code>{VAULT_SWAP_ROUTERS[4217]}</code>
