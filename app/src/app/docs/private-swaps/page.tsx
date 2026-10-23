@@ -76,7 +76,11 @@ export default function DocsPrivateSwapsPage() {
               <td>Robinhood Chain</td>
               {V2 ? (
                 <>
-                  <td>USDG, $GLOAM and ETH (held as WETH), any one for another</td>
+                  <td>
+                    USDG, $GLOAM, ETH (held as WETH), USDe, U, cbBTC, VIRTUAL,
+                    PONS, CASHCAT and 20 Robinhood stock tokens (SPY, NVDA, TSLA,
+                    AAPL and more), any one for another
+                  </td>
                   <td>
                     Uniswap v4, in up to three hops over the router&apos;s
                     allowed pools, whichever route pays the most
@@ -209,7 +213,8 @@ export default function DocsPrivateSwapsPage() {
         Beta deposit limits apply to what lands, because the new note is a
         deposit. One swap brings in at most 500 of a stablecoin, or 25,000
         $GLOAM, and only while the vault has room under its total.
-        {V2 && " WETH has its own limits, and a token the vault does not take yet can't be swapped into."}
+        {V2 &&
+          " Every other token has its own limits, and a token the vault does not take yet can't be swapped into. A swap also spends no more than its refund could bring back in one deposit, so a larger part of your balance is split first."}
       </p>
 
       <h2 id="refund">If a swap can&apos;t finish</h2>
@@ -259,6 +264,12 @@ export default function DocsPrivateSwapsPage() {
               <strong>ETH as WETH.</strong> The vault holds WETH. When a route
               uses a pool that holds ETH, the router unwraps or wraps exactly
               what that pool trades, inside the swap, and keeps none of it.
+            </li>
+            <li>
+              <strong>Issuers keep their powers.</strong> Robinhood can pause a
+              stock token or block an address, as Paxos can with USDG. A swap in
+              or out of a paused token fails and nothing moves; a refund in one
+              waits until it can land.
             </li>
           </>
         ) : (
