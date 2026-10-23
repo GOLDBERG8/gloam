@@ -229,7 +229,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
       `${tempoTestnet.blockExplorers.default.url}/address/${addr}`,
   },
   // Mainnet: ShieldPoolPayments with the ceremony's final keys, payments only
-  // (no sealed swap), beta deposit limits on, no payment-memo board yet.
+  // (no sealed swap), beta deposit limits on, and a payment-memo board (payMemo).
   "robinhood-mainnet": {
     key: "robinhood-mainnet",
     label: "Robinhood Chain",
