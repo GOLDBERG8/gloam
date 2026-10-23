@@ -397,10 +397,15 @@ export function MoveView() {
   const savedLinkId = useRef<string | null>(null);
   /** The payment in flight is a claim link (counted once it lands, lib/funnel). */
   const pendingClaimLink = useRef(false);
-  /** After direct pay: post encrypted ticket on-chain (GloamPayMemo) */
+  /**
+   * After direct pay: post encrypted ticket on-chain (GloamPayMemo). `relay` is
+   * the choice made at send time, so turning Hide my wallet off mid-send can't
+   * post the heads-up from the wallet that the payment was hidden from.
+   */
   const pendingMemo = useRef<{
     paymentCommitment: Hex;
     ticket: string;
+    relay: boolean;
   } | null>(null);
 
   // Confirm path: transfer → optional on-chain memo → share UI
@@ -510,7 +515,7 @@ export function MoveView() {
         setStatus("Letting them know privately…");
         pendingAction.current = "memo";
         handledHash.current = null;
-        if (relayOn) {
+        if (m.relay) {
           try {
             const h = await relayMemo({
               chainId: network.chainId,
@@ -558,7 +563,7 @@ export function MoveView() {
       setBusy(false);
       setStatus(null);
     })();
-  }, [isSuccess, txHash, relayOn, network.chainId, refreshNotes, refreshTree, writeContract]);
+  }, [isSuccess, txHash, network.chainId, refreshNotes, refreshTree, writeContract]);
 
   // Wallet reject / tx fail: drop ephemeral payment secrets
   useEffect(() => {
@@ -1082,6 +1087,7 @@ export function MoveView() {
         pendingMemo.current = {
           paymentCommitment: fieldToBytes32(w.publicInputs.newCommitment0),
           ticket: share,
+          relay: relayOn,
         };
       } else {
         pendingMemo.current = null;
