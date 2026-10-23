@@ -105,32 +105,151 @@ export const RH_SWAP_POOLS: readonly PoolKey[] = [
 ];
 
 /**
- * v2's pools: the list DeployVaultSwapV4b.s.sol allows at deploy. To add one,
- * the router's owner queues it on chain (usable 3 days later) and it is added
- * here too. The app routes only through a pool that is on this list and that
- * the router allows right now (livePools), so one the owner removed is
- * skipped at once. Hookless pools only, but for GLOAM's launch pool.
+ * v2's pools: exactly the list DeployVaultSwapV4b.s.sol allows at deploy, in
+ * the same order (contracts/test/fixtures/vault-swap-v2-pools.json pins both).
+ * To add one, the router's owner queues it on chain (usable 3 days later) and
+ * it is added here too. The app routes only through a pool that is on this list
+ * and that the router allows right now (livePools), so one the owner removed is
+ * skipped at once.
+ *
+ * Picked from live Robinhood Chain state on 2026-10-23 (price impact quoted at
+ * $50 to $5,000): ETH and USDG as the hubs, then each token's deepest hookless
+ * pool, and where a Fables pool is deeper or close, that one too as a second
+ * route. Fables hooks are not upgradeable and only set the pool's fee (their
+ * admin can change it or pause a pool); GLOAM's launch pool has the Orynth
+ * hook, which takes the creator fee. Never a pool with the unverified hook
+ * 0x958541c0…c880 (it quotes stale prices). Whatever a hook does, the router
+ * pays at most what arrived and delivers the exact note, so a hook can cost a
+ * swap its buffer at most, or make it fail.
  */
 export const RH_SWAP_POOLS_V2: readonly PoolKey[] = [
-  ...RH_SWAP_POOLS,
-  // ETH / USDG, fee 0.01%, hookless: the best price at small sizes
-  { currency0: NATIVE, currency1: RH_USDG, fee: 100, tickSpacing: 1, hooks: NATIVE },
-  // ETH / USDG, fee 0.05%, hookless: the deepest at larger sizes
-  { currency0: NATIVE, currency1: RH_USDG, fee: 500, tickSpacing: 10, hooks: NATIVE },
-  // WETH / USDG, fee 0.02%, hookless: WETH with no wrapping at all
-  { currency0: RH_WETH, currency1: RH_USDG, fee: 200, tickSpacing: 4, hooks: NATIVE },
-  // USDG / GLOAM direct, fee 2.4%, hookless
-  { currency0: RH_USDG, currency1: RH_GLOAM, fee: 24000, tickSpacing: 240, hooks: NATIVE },
+  // ETH / USDG, 0.05%, hookless (0x387bf619…)
+  { currency0: NATIVE, currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 500, tickSpacing: 10, hooks: NATIVE },
+  // ETH / USDG, 0.01%, hookless (0x24107d15…)
+  { currency0: NATIVE, currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 100, tickSpacing: 1, hooks: NATIVE },
+  // WETH / USDG, 0.02%, hookless (0x84bd4e2d…)
+  { currency0: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 200, tickSpacing: 4, hooks: NATIVE },
+  // ETH / GLOAM, 0%, Orynth launch hook (0xc5f37371…)
+  { currency0: NATIVE, currency1: "0xDcD885F5c60b3aD49F6D58718696417314e8724d", fee: 0, tickSpacing: 200, hooks: "0x953391a2DDf7E8437FeB878FDF2C6f325Fbf00CC" },
+  // USDG / GLOAM, 4.215%, hookless (0xe5b1e488…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xDcD885F5c60b3aD49F6D58718696417314e8724d", fee: 42150, tickSpacing: 422, hooks: NATIVE },
+  // USDG / GLOAM, 2.4%, hookless (0x9200eb96…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xDcD885F5c60b3aD49F6D58718696417314e8724d", fee: 24000, tickSpacing: 240, hooks: NATIVE },
+  // USDe / USDG, 0.01%, hookless (0xa5f23cae…)
+  { currency0: "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 100, tickSpacing: 1, hooks: NATIVE },
+  // USDG / U, 0.0075%, hookless (0xf399bd15…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xcE24439F2D9C6a2289F741120FE202248B666666", fee: 75, tickSpacing: 1, hooks: NATIVE },
+  // USDG / cbBTC, 0.15%, hookless (0x94c62eeb…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xCEC185eB182c47d1bA1EFc84e6959e18cd620Be4", fee: 1500, tickSpacing: 15, hooks: NATIVE },
+  // PONS / USDG, 0.3%, hookless (0x4be9657e…)
+  { currency0: "0x39dBED3a2bd333467115dE45665cC57F813C4571", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 3000, tickSpacing: 60, hooks: NATIVE },
+  // CASHCAT / USDG, 0.269%, hookless (0xa92a3df2…)
+  { currency0: "0x020bfC650A365f8BB26819deAAbF3E21291018b4", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 2690, tickSpacing: 54, hooks: NATIVE },
+  // CASHCAT / USDG, dynamic fee, Fables fee hook (0x31608601…)
+  { currency0: "0x020bfC650A365f8BB26819deAAbF3E21291018b4", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 8388608, tickSpacing: 60, hooks: "0x08E52564Bad99E05a694b4809F397edcA417A080" },
+  // USDG / VIRTUAL, 0.3%, hookless (0xa9573206…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31", fee: 3000, tickSpacing: 60, hooks: NATIVE },
+  // SPY / USDG, 0.01%, hookless (0xe1ae6a4c…)
+  { currency0: "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 100, tickSpacing: 1, hooks: NATIVE },
+  // USDG / NVDA, 0.01%, hookless (0x6444a8e0…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC", fee: 100, tickSpacing: 1, hooks: NATIVE },
+  // TSLA / USDG, 0.3%, hookless (0x8517f807…)
+  { currency0: "0x322F0929c4625eD5bAd873c95208D54E1c003b2d", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 3000, tickSpacing: 60, hooks: NATIVE },
+  // TSLA / USDG, dynamic fee, Fables fee hook (0xd5effce8…)
+  { currency0: "0x322F0929c4625eD5bAd873c95208D54E1c003b2d", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 8388608, tickSpacing: 10, hooks: "0x67D86050d22D574Df046F3D90F722045F714e080" },
+  // AMZN / USDG, 0.24%, hookless (0xefc94885…)
+  { currency0: "0x12f190a9F9d7D37a250758b26824B97CE941bF54", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 2400, tickSpacing: 24, hooks: NATIVE },
+  // AMZN / USDG, dynamic fee, Fables fee hook (0x5619cb84…)
+  { currency0: "0x12f190a9F9d7D37a250758b26824B97CE941bF54", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 8388608, tickSpacing: 60, hooks: "0x5Eb87F69bE00Df39981622Fd60A8De4b7837e080" },
+  // ETH / SPCX, 0.3%, hookless (0x541942af…)
+  { currency0: NATIVE, currency1: "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa", fee: 3000, tickSpacing: 30, hooks: NATIVE },
+  // SPCX / USDG, dynamic fee, Fables fee hook (0xb81d873d…)
+  { currency0: "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 8388608, tickSpacing: 10, hooks: "0x5Eb87F69bE00Df39981622Fd60A8De4b7837e080" },
+  // ETH / CRCL, 0.15%, hookless (0x6d9af55c…)
+  { currency0: NATIVE, currency1: "0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5", fee: 1500, tickSpacing: 15, hooks: NATIVE },
+  // USDG / CRCL, dynamic fee, Fables fee hook (0xdb9c3400…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5", fee: 8388608, tickSpacing: 60, hooks: "0x5Eb87F69bE00Df39981622Fd60A8De4b7837e080" },
+  // USDG / META, 0.3%, hookless (0x5875d407…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35", fee: 3000, tickSpacing: 60, hooks: NATIVE },
+  // USDG / MSTR, 0.24%, hookless (0xc105b830…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xec262a75e413fAfD0dF80480274532C79D42da09", fee: 2400, tickSpacing: 24, hooks: NATIVE },
+  // GOOGL / USDG, 0.3%, hookless (0xd4ecb79f…)
+  { currency0: "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 3000, tickSpacing: 60, hooks: NATIVE },
+  // USDG / AAPL, 0.3%, hookless (0xc748f467…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9", fee: 3000, tickSpacing: 60, hooks: NATIVE },
+  // USDG / AAPL, dynamic fee, Fables fee hook (0xa2347ba6…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9", fee: 8388608, tickSpacing: 10, hooks: "0x70a9A88402989226847Ec122043CE5e7FF462080" },
+  // USDG / MSFT, 0.3%, hookless (0x9194a557…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xe93237C50D904957Cf27E7B1133b510C669c2e74", fee: 3000, tickSpacing: 60, hooks: NATIVE },
+  // USDG / PLTR, 0.15%, hookless (0xc59eaeda…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0x894E1EC2D74FFE5AEF8Dc8A9e84686acCB964F2A", fee: 1500, tickSpacing: 15, hooks: NATIVE },
+  // USDG / AMD, 1%, hookless (0xde9f85fd…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC", fee: 10000, tickSpacing: 200, hooks: NATIVE },
+  // USDG / COIN, 0.25%, hookless (0xe2e1a0e3…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0x6330D8C3178a418788dF01a47479c0ce7CCF450b", fee: 2500, tickSpacing: 25, hooks: NATIVE },
+  // AMC / USDG, 0.05%, hookless (0x06b97324…)
+  { currency0: "0x05a3d1Cd21d0C88145E82600E62e7E496e0F222B", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 500, tickSpacing: 5, hooks: NATIVE },
+  // USDG / HIMS, 0.9%, hookless (0x68d4f28f…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xCceE82fE024c36fA15E1005edE3E9e4787e23D09", fee: 9000, tickSpacing: 90, hooks: NATIVE },
+  // USDG / HIMS, dynamic fee, Fables fee hook (0x16dce5f6…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xCceE82fE024c36fA15E1005edE3E9e4787e23D09", fee: 8388608, tickSpacing: 60, hooks: "0x5Eb87F69bE00Df39981622Fd60A8De4b7837e080" },
+  // USDG / INTC, 1%, hookless (0xf2e329e6…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xc72b96e0E48ecd4DC75E1e45396e26300BC39681", fee: 10000, tickSpacing: 200, hooks: NATIVE },
+  // USDG / INTC, dynamic fee, Fables fee hook (0x5e4c3534…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xc72b96e0E48ecd4DC75E1e45396e26300BC39681", fee: 8388608, tickSpacing: 60, hooks: "0x5Eb87F69bE00Df39981622Fd60A8De4b7837e080" },
+  // TSM / USDG, 0.75%, hookless (0x0ba5d53d…)
+  { currency0: "0x58FfE4a942d3885bAa22D7520691F611EF09e7AA", currency1: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 7500, tickSpacing: 75, hooks: NATIVE },
+  // USDG / GLD, 0.21%, hookless (0xd85389e6…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xC9a981FEE1F9DEc688bb123ccDeCc63D0deBFC4e", fee: 2100, tickSpacing: 21, hooks: NATIVE },
+  // USDG / GLD, dynamic fee, Fables fee hook (0xfe281bbf…)
+  { currency0: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", currency1: "0xC9a981FEE1F9DEc688bb123ccDeCc63D0deBFC4e", fee: 8388608, tickSpacing: 10, hooks: "0xB608a78761f179f7C56f15E7D13921B92F00a080" },
+  // ETH / MU, 0.8%, hookless (0x881b4219…)
+  { currency0: NATIVE, currency1: "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD", fee: 8000, tickSpacing: 80, hooks: NATIVE },
 ];
 
 /** What v1 swaps between. */
 const RH_SWAP_ASSETS_V1: readonly Address[] = [RH_USDG, RH_GLOAM];
 /**
- * What v2 swaps between, in the order the picker lists them. To offer another
- * token: add it here and its pools to RH_SWAP_POOLS_V2 (queued on the router
- * first), and have the vault take it (a deposit limit, queued on the vault).
+ * What v2 swaps between, in the order the picker lists them: the dollar, $GLOAM,
+ * ETH (as WETH), two more dollars, crypto, then Robinhood's stock tokens. Each
+ * one's metadata is in lib/tokens RH_MAINNET_SWAP_TOKENS. To offer another
+ * token: add it here and there, its pools to RH_SWAP_POOLS_V2 (queued on the
+ * router first), and have the vault take it (a deposit limit, queued on the
+ * vault). Left out on purpose: HOOD (a third-party vault share), QQQ (6 to 17%
+ * price impact at $5,000 on v4), tokens with a transfer tax or one-sided
+ * liquidity, and tokens that trade only on Uniswap v3.
  */
-export const RH_SWAP_ASSETS_V2: readonly Address[] = [RH_USDG, RH_GLOAM, RH_WETH];
+export const RH_SWAP_ASSETS_V2: readonly Address[] = [
+  RH_USDG,
+  RH_GLOAM,
+  RH_WETH,
+  "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34", // USDe
+  "0xcE24439F2D9C6a2289F741120FE202248B666666", // U
+  "0xCEC185eB182c47d1bA1EFc84e6959e18cd620Be4", // cbBTC
+  "0x39dBED3a2bd333467115dE45665cC57F813C4571", // PONS
+  "0x020bfC650A365f8BB26819deAAbF3E21291018b4", // CASHCAT
+  "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31", // VIRTUAL
+  "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C", // SPY
+  "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC", // NVDA
+  "0x322F0929c4625eD5bAd873c95208D54E1c003b2d", // TSLA
+  "0x12f190a9F9d7D37a250758b26824B97CE941bF54", // AMZN
+  "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa", // SPCX
+  "0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5", // CRCL
+  "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35", // META
+  "0xec262a75e413fAfD0dF80480274532C79D42da09", // MSTR
+  "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3", // GOOGL
+  "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9", // AAPL
+  "0xe93237C50D904957Cf27E7B1133b510C669c2e74", // MSFT
+  "0x894E1EC2D74FFE5AEF8Dc8A9e84686acCB964F2A", // PLTR
+  "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC", // AMD
+  "0x6330D8C3178a418788dF01a47479c0ce7CCF450b", // COIN
+  "0x05a3d1Cd21d0C88145E82600E62e7E496e0F222B", // AMC
+  "0xCceE82fE024c36fA15E1005edE3E9e4787e23D09", // HIMS
+  "0xc72b96e0E48ecd4DC75E1e45396e26300BC39681", // INTC
+  "0x58FfE4a942d3885bAa22D7520691F611EF09e7AA", // TSM
+  "0xC9a981FEE1F9DEc688bb123ccDeCc63D0deBFC4e", // GLD
+  "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD", // MU
+];
 
 // ---------------------------------------------------------------- Tempo (Stablecoin DEX)
 
@@ -438,7 +557,11 @@ export function routeCurrencies(
   return path;
 }
 
-/** Every route the router takes from `assetIn` to `assetOut`, fewest hops first. */
+/**
+ * Every route the router takes from `assetIn` to `assetOut`, fewest hops
+ * first: a walk over the pools that join, each route checked by
+ * routeCurrencies, the router's own rules.
+ */
 export function routesBetween(
   assetIn: Address,
   assetOut: Address,
@@ -447,15 +570,27 @@ export function routesBetween(
 ): PoolKey[][] {
   if (!r || r.venue !== "v4") return [];
   const pools = allowed ? r.pools.filter(allowed) : r.pools;
+  const weth = r.weth;
   const out: PoolKey[][] = [];
-  const extend = (route: PoolKey[]) => {
-    if (route.length && routeCurrencies(r, assetIn, assetOut, route)) out.push(route);
-    if (route.length >= r.maxHops) return;
-    for (const k of pools) if (!route.includes(k)) extend([...route, k]);
+  const extend = (route: PoolKey[], cur: Address) => {
+    for (const k of pools) {
+      if (route.includes(k)) continue;
+      // a WETH note pays its first pool in ETH when that pool holds ETH and not WETH
+      const from = !route.length && weth && same(assetIn, weth) && !holds(k, weth) && holds(k, NATIVE) ? NATIVE : cur;
+      if (!holds(k, from)) continue;
+      const next = same(k.currency0, from) ? k.currency1 : k.currency0;
+      const at = [...route, k];
+      if (routeCurrencies(r, assetIn, assetOut, at)) out.push(at);
+      // past the output a route could only come back to it
+      if (at.length < r.maxHops && !same(next, assetOut)) extend(at, next);
+    }
   };
-  extend([]);
+  extend([], assetIn);
   return out.sort((a, b) => a.length - b.length);
 }
+
+/** The most routes one quote asks about, fewest hops first: one multicall, kept small. */
+export const MAX_QUOTED_ROUTES = 24;
 
 /** Whether `route` is one the router would take, for the relay to check before it pays gas. */
 export function isKnownRoute(
@@ -596,25 +731,25 @@ function quoteParams(route: readonly PoolKey[], path: readonly Address[], exactI
   };
 }
 
-/** What `amountIn` buys along each route, all in one multicall. 0 where a route can't fill. */
+/** What each route's amount buys along it, all in one multicall. 0 where a route can't fill. */
 async function v4ExactInAll(
   client: PublicClient,
   r: SwapRouter,
   routes: readonly PoolKey[][],
   assetIn: Address,
   assetOut: Address,
-  amountIn: bigint
+  amountIn: readonly bigint[]
 ): Promise<bigint[]> {
   const res = await client.multicall({
     multicallAddress: RH_MULTICALL3,
     allowFailure: true,
     contracts: routes.map(
-      (route) =>
+      (route, i) =>
         ({
           address: RH_V4_QUOTER,
           abi: quoterAbi,
           functionName: "quoteExactInput",
-          args: [quoteParams(route, routeCurrencies(r, assetIn, assetOut, route)!, true, amountIn)],
+          args: [quoteParams(route, routeCurrencies(r, assetIn, assetOut, route)!, true, amountIn[i]!)],
         }) as const
     ),
   });
@@ -648,6 +783,34 @@ export function refundAmountFor(amount: bigint): bigint {
   return amount - amount / 100n;
 }
 
+/** One asset's beta deposit limits in the vault, and what it holds of it now. */
+export type VaultRoom = { perDeposit: bigint; total: bigint; deposited: bigint };
+
+/** The most one deposit of the asset can bring in right now: 0 when the vault doesn't take it or is full. */
+export function depositRoom(v: VaultRoom): bigint {
+  const left = v.total > v.deposited ? v.total - v.deposited : 0n;
+  return v.perDeposit < left ? v.perDeposit : left;
+}
+
+/**
+ * Whether a swap spending `amount` of a note could always land its refund note
+ * (refundAmountFor) back in the vault: within the input asset's per-deposit
+ * limit, and within its total once the note itself has left. A refund that
+ * doesn't fit waits at the escrow until the limit is raised, so the app never
+ * makes one: a larger note is split first.
+ */
+export function refundFits(v: VaultRoom, amount: bigint): boolean {
+  const back = refundAmountFor(amount);
+  return back <= v.perDeposit && v.deposited - amount + back <= v.total;
+}
+
+/** The most of one note a single swap may spend so its refund note fits (refundFits). */
+export function maxSwapInForRefund(v: VaultRoom): bigint {
+  let a = (v.perDeposit * 100n) / 99n + 1n;
+  while (a > 0n && refundAmountFor(a) > v.perDeposit) a--;
+  return a;
+}
+
 /** The vault's cash-out fee on `amount` (ShieldPoolCore._withdrawFee). */
 export function vaultFeeOf(amount: bigint, feeBps: number): bigint {
   const bps = BigInt(feeBps);
@@ -666,7 +829,15 @@ export type SwapPlan = {
   /** available - cost, at the quote: goes to the treasury. */
   leftover: bigint;
   route: PoolKey[];
+  /**
+   * How much worse this size trades than a hundredth of it on the same route,
+   * in basis points (pool fees cancel out): the price impact. null when unknown.
+   */
+  impactBps?: number | null;
 };
+
+/** Above this price impact the swap tab warns that a smaller amount gets a better rate. */
+export const IMPACT_WARN_BPS = 100;
 
 /**
  * The best swap of a note worth `amountIn` of `assetIn` into `assetOut`: the
@@ -711,18 +882,32 @@ export async function planVaultSwap(client: PublicClient, chainId: number, p: Sw
     return { router: r.address, available, amountOut, cost, leftover: available - cost, route: [] };
   }
 
-  const routes = routesBetween(p.assetIn, p.assetOut, r, await livePools(client, r));
+  const routes = routesBetween(p.assetIn, p.assetOut, r, await livePools(client, r)).slice(0, MAX_QUOTED_ROUTES);
   if (!routes.length) throw new Error("There is no swap between these two yet.");
-  const outs = await v4ExactInAll(client, r, routes, p.assetIn, p.assetOut, available);
+  // every route at the full size and at a hundredth of it, in one multicall
+  const probe = available / 100n;
+  const outs = await v4ExactInAll(client, r, [...routes, ...(probe > 0n ? routes : [])], p.assetIn, p.assetOut, [
+    ...routes.map(() => available),
+    ...(probe > 0n ? routes.map(() => probe) : []),
+  ]);
   let best = 0;
   for (let i = 1; i < routes.length; i++) if (outs[i]! > outs[best]!) best = i;
   if (!(outs[best]! > 0n)) throw new Error("No pool can fill this swap right now. Try a smaller amount.");
   const route = routes[best]!;
   const amountOut = (outs[best]! * (10_000n - buffer)) / 10_000n;
   if (amountOut <= 0n) throw new Error("That amount is too small to swap.");
+  const small = probe > 0n ? outs[routes.length + best]! : 0n;
+  const impactBps = small > 0n ? priceImpactBps(available, outs[best]!, probe, small) : null;
   const cost = await v4ExactOut(client, r, route, p.assetIn, p.assetOut, amountOut);
   if (cost > available) throw new Error("The price is moving too fast. Try again in a moment.");
-  return { router: r.address, available, amountOut, cost, leftover: available - cost, route };
+  return { router: r.address, available, amountOut, cost, leftover: available - cost, route, impactBps };
+}
+
+/** 1 - (out / in) / (smallOut / smallIn), in basis points, never below 0. */
+export function priceImpactBps(amountIn: bigint, out: bigint, smallIn: bigint, smallOut: bigint): number {
+  if (amountIn <= 0n || smallIn <= 0n || smallOut <= 0n) return 0;
+  const bps = 10_000n - (out * smallIn * 10_000n) / (smallOut * amountIn);
+  return bps > 0n ? Number(bps) : 0;
 }
 
 /** How often a quote on screen is asked again. One older than two of these stops showing. */
