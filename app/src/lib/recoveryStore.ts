@@ -12,7 +12,7 @@
  * production, in-process locally) under its own prefix.
  */
 import "server-only";
-import { createHash, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { jsonOf, kv } from "./partnersKv";
 
 const PREFIX = "gloam:recovery:v1:";
@@ -36,6 +36,42 @@ export class RecoveryError extends Error {
 }
 
 const keyFor = (id: string) => PREFIX + id;
+const lockFor = (id: string) => PREFIX + id + ":lock";
+
+/**
+ * How long one save may hold a backup's lock. A save is three store calls, each
+ * capped at a few seconds, so this is far longer than a save ever takes; it only
+ * matters if a server dies mid-save, when the lock frees itself.
+ */
+const LOCK_TTL_SEC = 15;
+
+/**
+ * Runs a read-check-write on one backup with nobody else changing it in
+ * between. Two devices saving from the same version used to both pass the
+ * version check, and the later write dropped the other device's data from the
+ * backup. Now the second one finds the lock taken and gets a 409, so it fetches
+ * the newer backup, merges it in, and saves on top (lib/recovery upload).
+ *
+ * The lock is a plain SET NX with an expiry, which the production store and the
+ * in-process store both speak, so they behave the same. It is released only if
+ * it is still ours.
+ */
+async function withBackupLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const lock = lockFor(id);
+  const token = randomBytes(16).toString("hex");
+  const [got] = await kv([["SET", lock, token, "NX", "EX", LOCK_TTL_SEC]]);
+  if (got !== "OK") throw new RecoveryError(409, "Another device is saving this backup right now. Try again.");
+  try {
+    return await fn();
+  } finally {
+    try {
+      const [held] = await kv([["GET", lock]]);
+      if (held === token) await kv([["DEL", lock]]);
+    } catch {
+      // the lock expires on its own
+    }
+  }
+}
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 function sameHash(a: string, b: string): boolean {
@@ -71,23 +107,27 @@ export async function writeBackup(p: { id: string; write: string; c: string; n: 
   }
   if (!Number.isSafeInteger(p.n) || p.n < 1) throw new RecoveryError(400, "Bad backup version.");
 
-  const [raw] = await kv([["GET", keyFor(p.id)]]);
-  const current = jsonOf<Stored>(raw);
-  const w = sha256(p.write);
-  if (current) {
-    if (!sameHash(current.w, w)) throw new RecoveryError(403, "This backup belongs to a different key.");
-    if (p.n <= current.n) throw new RecoveryError(409, "A newer backup is already saved.");
-  }
-  const next: Stored = { w, c: p.c, n: p.n, t: Date.now() };
-  await kv([["SET", keyFor(p.id), JSON.stringify(next)]]);
-  return { n: next.n, t: next.t };
+  return withBackupLock(p.id, async () => {
+    const [raw] = await kv([["GET", keyFor(p.id)]]);
+    const current = jsonOf<Stored>(raw);
+    const w = sha256(p.write);
+    if (current) {
+      if (!sameHash(current.w, w)) throw new RecoveryError(403, "This backup belongs to a different key.");
+      if (p.n <= current.n) throw new RecoveryError(409, "A newer backup is already saved.");
+    }
+    const next: Stored = { w, c: p.c, n: p.n, t: Date.now() };
+    await kv([["SET", keyFor(p.id), JSON.stringify(next)]]);
+    return { n: next.n, t: next.t };
+  });
 }
 
 /** Deletes a backup. Needs the write token; a missing backup counts as deleted. */
 export async function deleteBackup(id: string, write: string): Promise<void> {
-  const [raw] = await kv([["GET", keyFor(id)]]);
-  const current = jsonOf<Stored>(raw);
-  if (!current) return;
-  if (!sameHash(current.w, sha256(write))) throw new RecoveryError(403, "This backup belongs to a different key.");
-  await kv([["DEL", keyFor(id)]]);
+  await withBackupLock(id, async () => {
+    const [raw] = await kv([["GET", keyFor(id)]]);
+    const current = jsonOf<Stored>(raw);
+    if (!current) return;
+    if (!sameHash(current.w, sha256(write))) throw new RecoveryError(403, "This backup belongs to a different key.");
+    await kv([["DEL", keyFor(id)]]);
+  });
 }
