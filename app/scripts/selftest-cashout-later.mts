@@ -49,6 +49,7 @@ process.env.GLOAM_RELAYER_PRIVATE_KEYS = FUNDED_KEY;
 const {
   DELAY_WINDOWS,
   GIVE_UP_AFTER_MS,
+  JOB_TTL_SEC,
   MAX_DELAY_MS,
   MIN_DELAY_MS,
   SENDING_STALE_MS,
@@ -184,7 +185,7 @@ async function setup(...jobs: CashOutJob[]) {
 // ---------------------------------------------------------------- send time
 
 await test("send time is drawn inside the window, never right away", () => {
-  for (const w of ["hour", "6h"] as const) {
+  for (const w of ["hour", "6h", "day"] as const) {
     const lo = drawSendAfter(T0, w, () => 0);
     const hi = drawSendAfter(T0, w, () => 0.999999999);
     assert.equal(lo, T0 + MIN_DELAY_MS);
@@ -194,8 +195,12 @@ await test("send time is drawn inside the window, never right away", () => {
       assert.ok(t >= T0 + MIN_DELAY_MS && t < T0 + DELAY_WINDOWS[w]);
     }
   }
-  assert.equal(DELAY_WINDOWS["6h"], MAX_DELAY_MS);
-  assert.equal(MAX_DELAY_MS, 6 * 60 * 60 * 1000);
+  assert.equal(DELAY_WINDOWS.hour, 60 * 60 * 1000);
+  assert.equal(DELAY_WINDOWS["6h"], 6 * 60 * 60 * 1000);
+  assert.equal(DELAY_WINDOWS.day, MAX_DELAY_MS);
+  assert.equal(MAX_DELAY_MS, 24 * 60 * 60 * 1000);
+  // a job waiting its longest, then retrying until it gives up, is still on record
+  assert.ok(JOB_TTL_SEC * 1000 > MAX_DELAY_MS + GIVE_UP_AFTER_MS);
 });
 
 // ---------------------------------------------------------------- the runner
@@ -1105,7 +1110,7 @@ await test("8. a job that waited its whole window still goes out: the vault keep
   const j = job({ createdAt: T0 - MAX_DELAY_MS, sendAfter: T0 - 1 });
   const { store, chain } = await setup(j);
   assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
-  assert.deepEqual(Object.keys(DELAY_WINDOWS), ["hour", "6h"]);
+  assert.deepEqual(Object.keys(DELAY_WINDOWS), ["hour", "6h", "day"]);
 });
 
 console.log(`\n${passed} passed`);

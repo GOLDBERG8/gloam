@@ -4,8 +4,9 @@
  * A cash out is public (the asset, the amount and the wallet it pays), so one
  * that follows a payment within a minute can be matched to it by timing. Here
  * the browser makes the cash-out proof as usual and hands it to the relay with
- * a send time picked at random inside the window the person chose (an hour or
- * six). A cron sends due jobs through the normal relay path (lib/relay/server).
+ * a send time picked at random inside the window the person chose (an hour,
+ * six, or a day). A cron sends due jobs through the normal relay path
+ * (lib/relay/server).
  *
  * A job holds no secret: the proof and its public inputs. The proof binds the
  * amount and the recipient, so whoever holds the job can only send it as it is
@@ -33,10 +34,10 @@
  */
 import type { Address, Hex } from "viem";
 
-/** The longest a cash out may wait. */
-export const MAX_DELAY_MS = 6 * 60 * 60 * 1000;
+/** The longest a cash out may wait. A live job's record (JOB_TTL_SEC) outlasts it, give-up time included. */
+export const MAX_DELAY_MS = 24 * 60 * 60 * 1000;
 /** The windows the app offers. */
-export const DELAY_WINDOWS = { hour: 60 * 60 * 1000, "6h": MAX_DELAY_MS } as const;
+export const DELAY_WINDOWS = { hour: 60 * 60 * 1000, "6h": 6 * 60 * 60 * 1000, day: MAX_DELAY_MS } as const;
 export type DelayWindow = keyof typeof DELAY_WINDOWS;
 /** No earlier than this after it is scheduled, so even the shortest draw is not "right away". */
 export const MIN_DELAY_MS = 2 * 60 * 1000;
