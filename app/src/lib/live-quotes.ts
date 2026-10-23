@@ -1,22 +1,57 @@
 import { MARKET_DEFS, type LiveQuote, type MarketDef } from "./markets";
 
-type YahooChart = {
-  chart?: {
-    result?: Array<{
-      meta?: {
-        regularMarketPrice?: number;
-        previousClose?: number;
-        chartPreviousClose?: number;
-      };
-      indicators?: {
-        quote?: Array<{
-          close?: Array<number | null>;
-          volume?: Array<number | null>;
-        }>;
-      };
+type YahooResult = {
+  meta?: {
+    regularMarketPrice?: number;
+    regularMarketTime?: number;
+    regularMarketPreviousClose?: number | null;
+    previousClose?: number | null;
+    /** The close before the chart's range began (three months back here): never the day's baseline. */
+    chartPreviousClose?: number;
+  };
+  /** Each daily bar's session start, in seconds. */
+  timestamp?: number[];
+  indicators?: {
+    quote?: Array<{
+      close?: Array<number | null>;
+      volume?: Array<number | null>;
     }>;
   };
 };
+
+type YahooChart = {
+  chart?: {
+    result?: YahooResult[];
+  };
+};
+
+const usable = (n: number | null | undefined): n is number => n != null && Number.isFinite(n) && n > 0;
+
+/**
+ * The day's change in percent, against the previous session's close: Yahoo's
+ * regularMarketPreviousClose (or previousClose), else the close of the daily
+ * bar before the session the price is from. Never chartPreviousClose, which on
+ * a three-month chart is the close from three months ago. Null when there is
+ * no previous close to compare with.
+ */
+export function yahooDayChange(result: YahooResult | undefined): number | null {
+  const price = result?.meta?.regularMarketPrice;
+  if (!usable(price)) return null;
+  let prev = [result?.meta?.regularMarketPreviousClose, result?.meta?.previousClose].find(usable);
+  if (prev == null) {
+    const closes = result?.indicators?.quote?.[0]?.close ?? [];
+    const times = result?.timestamp ?? [];
+    const at = result?.meta?.regularMarketTime;
+    // the bar for the price's own session: the last one that started by then
+    let session = closes.length - 1;
+    if (at != null && times.length === closes.length) {
+      while (session >= 0 && times[session] > at) session--;
+    }
+    for (let i = session - 1; i >= 0 && prev == null; i--) if (usable(closes[i])) prev = closes[i] as number;
+  }
+  if (prev == null) return null;
+  return Number((((price - prev) / prev) * 100).toFixed(2));
+}
 
 function formatVol(n: number | undefined) {
   if (!n || !Number.isFinite(n)) return ", ";
@@ -50,17 +85,13 @@ async function fetchYahoo(symbol: string): Promise<LiveQuote | null> {
   const result = data.chart?.result?.[0];
   const price = result?.meta?.regularMarketPrice;
   if (price == null || !Number.isFinite(price)) return null;
-  const prev =
-    result?.meta?.previousClose ??
-    result?.meta?.chartPreviousClose ??
-    price;
-  const change24h = prev ? ((price - prev) / prev) * 100 : 0;
+  const change24h = yahooDayChange(result) ?? 0;
   const volumes = result?.indicators?.quote?.[0]?.volume ?? [];
   const closes = result?.indicators?.quote?.[0]?.close ?? [];
   const lastVol = [...volumes].reverse().find((v) => v != null && v > 0);
   return {
     mark: price,
-    change24h: Number(change24h.toFixed(2)),
+    change24h,
     volume: formatVol(lastVol ?? undefined),
     source: "live",
     updatedAt: Date.now(),
