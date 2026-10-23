@@ -7,6 +7,7 @@ import { wagmiConfig } from "@/lib/wagmi";
 import { TURNKEY_ENABLED } from "./TurnkeyEmbeddedProvider";
 import { TurnkeyAutoConnect } from "./TurnkeyAutoConnect";
 import { NetworkProvider } from "./NetworkProvider";
+import { CashOutProofRefresh } from "./CashOutProofRefresh";
 import { ReconnectWatchdog } from "./ReconnectWatchdog";
 
 export function Web3Provider({ children }: { children: ReactNode }) {
@@ -29,7 +30,10 @@ export function Web3Provider({ children }: { children: ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <ReconnectWatchdog />
         {TURNKEY_ENABLED && <TurnkeyAutoConnect />}
-        <NetworkProvider>{children}</NetworkProvider>
+        <NetworkProvider>
+          <CashOutProofRefresh />
+          {children}
+        </NetworkProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );

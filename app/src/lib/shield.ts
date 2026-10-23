@@ -481,6 +481,13 @@ export type CashOutMark = {
   /** Where it goes, for the note's own row. */
   to: Address;
   state: "scheduled" | "sent" | "expired" | "failed" | "cancelled";
+  /**
+   * The vault root the relay's proof was last made against, and when (ms), as
+   * far as this browser knows. A waiting proof is renewed against a later root
+   * while the app is open (lib/cashOutReprove); unset when not known here.
+   */
+  root?: Hex;
+  provenAt?: number;
 };
 
 /** One piece of a private cash out ("cash out privately", lib/cashOutPrivately). */

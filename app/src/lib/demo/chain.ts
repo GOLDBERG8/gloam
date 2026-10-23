@@ -132,6 +132,28 @@ export function demoCashOutStatus(id: string): DemoOwnedJob | "gone" {
   return job ? owned(job) : "gone";
 }
 
+/** The pretend relay taking a newer proof of a waiting job, by the relay's rules (lib/relay/scheduled replaceRefusal). */
+export async function demoReplaceCashOutProof(
+  id: string,
+  p: { chainId: number; nullifier: Hex; asset: Address; to: Address; amount: bigint }
+): Promise<{ status: "replaced"; job: DemoOwnedJob } | { status: "kept"; code: string }> {
+  await sleep(jitter(DEMO_MS.relay));
+  const job = demoCashOutJob(id);
+  if (!job) return { status: "kept", code: "not_found" };
+  if (job.status !== "scheduled") return { status: "kept", code: "not_live" };
+  if (job.sendAfter - Date.now() < 60_000) return { status: "kept", code: "too_late" };
+  const same =
+    job.chainId === p.chainId &&
+    job.nullifier.toLowerCase() === p.nullifier.toLowerCase() &&
+    job.to.toLowerCase() === p.to.toLowerCase() &&
+    job.asset.toLowerCase() === p.asset.toLowerCase() &&
+    job.amount === p.amount.toString();
+  if (!same) return { status: "kept", code: "mismatch" };
+  const next = { ...job, updatedAt: Date.now() };
+  putDemoCashOutJob(next);
+  return { status: "replaced", job: owned(next) };
+}
+
 /** Cancels a pretend job that has not gone out. */
 export function demoCancelCashOut(id: string): "cancelled" | "going" | "over" | "gone" {
   const job = demoCashOutJob(id);
