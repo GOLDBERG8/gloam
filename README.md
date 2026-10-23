@@ -14,7 +14,7 @@
 
 ---
 
-Stablecoins are becoming how businesses and AI agents pay each other, and every one of those payments is public. Gloam makes them private, and lets the payer prove exactly what someone needs to see: a balance above a figure, that a payment was made, or a payroll total, to one named reader, with an expiry. It runs on Tempo and Robinhood Chain mainnets, in beta with deposit limits, and the testnets stay up as a free practice network with test funds. On the Robinhood Chain testnet, stock tokens can be held and sent privately too. Private trading is not live: it is switched off while a new engine is built.
+Stablecoins are becoming how businesses and AI agents pay each other, and every one of those payments is public. Gloam makes them private, and lets the payer prove exactly what someone needs to see: a balance above a figure, that a payment was made, or a payroll total, to one named reader, with an expiry. It runs on Tempo and Robinhood Chain mainnets, in beta with deposit limits, and the testnets stay up as a free practice network with test funds. On both mainnets you can also swap straight from the private balance: who swapped stays private, and the tokens and amounts are public, like any DEX trade. On the Robinhood Chain testnet, stock tokens can be held and sent privately too. The first private trade design (sealed swaps) is retired.
 
 **Why one owner matters.** Privacy splits into two jobs. Shared secrets (sealed auctions, order books, lending pools) need someone to compute on many people's hidden data, so FHE and MPC networks such as Zama and Arcium use a committee that holds keys. A payment has one owner, so the owner proves it on their own device with zero-knowledge proofs, and nobody else ever holds a key. If a committee or operator is breached, everyone can be exposed, past payments included. If one owner's device is breached, one person is. Gloam does not invent new cryptography: it uses the proven ZK maths of the Zcash lineage and builds the payments product on top. Full comparison with Zama, Arcium, Tempo Zones, Helius Privacy and Railgun: [gloam.trade/docs/compare](https://gloam.trade/docs/compare).
 
@@ -53,18 +53,19 @@ Gloam is live on Robinhood Chain mainnet (`4663`) and Tempo mainnet (`4217`) fro
 | Assets | USDG, $GLOAM | USDC.e, pathUSD, USDT0, OUSD |
 | Gas | ETH (not a pool asset) | Paid in stablecoins |
 | Keys | Final keys from the trusted setup | Final keys from the trusted setup |
+| Private swaps | USDG and $GLOAM on Uniswap v4 (`GloamVaultSwapV4`) | USDC.e, pathUSD, USDT0, OUSD on Tempo's stablecoin exchange (`GloamVaultSwapTempo`) |
 
-- **Fees.** Deposits and private payments are free. Cashing out costs 0.25%. Half of Gloam's fees buy back $GLOAM (half of that burned, half to the treasury).
+- **Fees.** Deposits and private payments are free. Cashing out costs 0.25%. A private swap pays the same 0.25% on the amount swapped, plus a price buffer (0.5% on Robinhood Chain, 0.1% on Tempo) whose unused part goes to the treasury. Half of Gloam's fees buy back $GLOAM (half of that burned, half to the treasury).
 - **Beta deposit limits.** 500 per deposit and 25,000 in total for each stablecoin; $GLOAM 25,000 per deposit and 250,000 in total. Cash outs and private payments are never limited. Raising a limit or adding an asset waits a public 3-day timelock; the owner can lower limits or close deposits at once.
 - **Keys.** Mainnet proofs use the final keys from the 13-contributor trusted setup (drand round 6561386, release `ceremony-final`). The testnets keep the single-party dev keys.
-- **Not on mainnet.** Private trading (off on every network; the mainnet pool has no swap code at all), and stock tokens and faucets (testnet only).
+- **Not on mainnet.** The sealed trade (retired on every network; the mainnet pool has no swap code at all, and private swaps run through separate routers), and stock tokens and faucets (testnet only).
 - **Free practice network.** Robinhood Chain testnet (`46630`) and Tempo Moderato (`42431`) stay up as the free practice network: same app, test funds, no real value.
 
 Addresses are in [Contracts](#architecture) below.
 
 ## What works today (real ZK proofs)
 
-Rows that say testnet run only on the free practice network. Private trade is off on every network.
+Rows that say testnet run only on the free practice network. Private swaps run on mainnet only. The old sealed trade is retired on every network.
 
 | Path | Status | What you can do |
 | --- | --- | --- |
@@ -73,7 +74,7 @@ Rows that say testnet run only on the free practice network. Private trade is of
 | **Private payroll** | Live | Upload a CSV and pay a whole team at once in USDG (Robinhood Chain) or PathUSD (Tempo). Gloam-address payees are paid directly (and notified on-chain where a memo board runs, the testnets for now); everyone else gets a claim link. Crash-safe resume, results export. [Docs](https://gloam.trade/docs/payroll) |
 | **Scheduled payroll** | Live | Save a pay list as a schedule (monthly, every two weeks, weekly or one time) with a cap per run and an end date. A "Payroll due" reminder runs it in one click. Runs happen in your browser because only you hold the keys; schedules are encrypted at rest |
 | **Payment requests** | Live | Share a link or QR that opens Pay with your Gloam address, amount, asset and reference filled in. The details sit after the `#`, so they never reach a server and nothing about the request goes on-chain |
-| **Gloam relay** | Live | Submits proven sends, cash outs and payment memos from a Gloam account so the user's wallet never appears. One request per spend at a time, small memos only, and no cash out to the vault itself. Dry-runs every payment against the pool first; cash-out recipients are bound in the proof, so the relay can only submit or refuse. On mainnet the Gloam team runs the relayer at launch: it pays gas and cannot move or redirect money. SDK `relayIntent`, MCP `GLOAM_USE_RELAY=1` |
+| **Gloam relay** | Live | Submits proven sends, cash outs, private swaps and payment memos from a Gloam account so the user's wallet never appears. One request per spend at a time, small memos only, and no cash out to the vault itself. Dry-runs every payment against the pool first; cash-out recipients are bound in the proof, so the relay can only submit or refuse. On mainnet the Gloam team runs the relayer at launch: it pays gas and cannot move or redirect money. SDK `relayIntent`, MCP `GLOAM_USE_RELAY=1` |
 | **Passkey lock** | Live, optional | Protect the private balance on a browser with a passkey (Face ID, Touch ID, security key). The WebAuthn PRF output wraps the key that encrypts notes at rest, so the app unlocks only with the passkey. Backups stay restorable without it. Browsers without PRF keep the device key. [Docs](https://gloam.trade/docs/privacy-model#security) |
 | **Sanctions screening** | Live | Checked against a vendored snapshot of the OFAC sanctioned-address list (EVM): the depositing wallet in the app before signing and at `/api/screen`, and every cash-out address inside the relay before it submits. Public addresses only; a blocked wallet sees one neutral message. Refresh with `node app/scripts/refresh-ofac-list.mjs`; optional Chainalysis check via `CHAINALYSIS_API_KEY` |
 | **Issuer policies (Tempo)** | Live | Deposits and cash outs on Tempo also respect the stablecoin's TIP-403 transfer policy: the wallet must be allowed to send and the vault to receive on deposit, the vault to send and the recipient to receive on cash out. Read-only checks in the app, at `/api/screen` and in the relay, next to sanctions screening, with a warning when an issuer policy or pause would block the vault itself. Compliant privacy with no operator |
@@ -86,8 +87,9 @@ Rows that say testnet run only on the free practice network. Private trade is of
 | **Agent spending limits** | Live (MCP) | The owner sets each agent's assets, per-payment and per-day caps, allowed recipients, tools and expiry. Every spend is checked and logged before it is proved or signed; no limits means no spending. Note secrets stay in an encrypted store inside the server and the agent only sees handles. Enforced by the MCP server, off-chain. `gloam_get_limits`, `gloam_get_spending_report`. [Config](./mcp/README.md#spending-limits) |
 | **Hosted MCP server** | Live | Paste `https://www.gloam.trade/mcp` into Claude (Settings, Connectors, Add custom connector), ChatGPT, Cursor or any MCP client; nothing to install. Read and plan only: networks and assets, vault stats, payment request links, proof checks, deposit plans and MPP how-to. It never signs and refuses anything that looks like a key or note secret; for signing, the local server (`npx -y @gloamtrade/mcp`). [Docs](https://gloam.trade/docs/agents#connect-by-url) |
 | **Transparency page** | Live | [`/transparency`](https://gloam.trade/transparency) shows what anyone can see about the vault on each network: what it holds, counts of deposits, private transfers, cash-outs and payment messages, and recent public activity, read straight from public nodes |
+| **Private swaps** | Live (mainnet) | Swap straight from the private balance in Vault > Swap: USDG and $GLOAM on Robinhood Chain (Uniswap v4, two hops through ETH or the direct pool), and USDC.e, pathUSD, USDT0 and OUSD on Tempo (Tempo's stablecoin exchange). One relayed transaction unshields one note to a one-time CREATE2 escrow (`SwapEscrow`), buys an exact output, and shields it back as a new note. Who swapped, which note paid and where the output goes next stay private; the tokens and amounts are public. A swap spends one note, so Max is the largest single note. If someone sends the unshield step alone, the swap fails safely and 99% of the note comes back as a refund note. Routers have no owner, admin or upgrade. [Docs](https://gloam.trade/docs/private-swaps) |
 | **Stock tokens** | Testnet only (Robinhood Chain) | Shield testnet stock tokens (TSLA, AMZN, PLTR, NFLX, AMD), hold them privately and send them privately, like any other asset in the vault. Stock tokens are not a mainnet pool asset |
-| **Private trade** | Built, switched off | `sealedSwap` is built and tested but off on every network while we build a new engine for private trading: the mainnet pool (`ShieldPoolPayments`) leaves the swap code out entirely, and on the testnet pools `sealedSwapVerifier` is `0x0`. Trading mixes many people's orders, so it needs its own design (the first version hit audit H1, solvency, and the 2026-10-11 review found a rate overflow, ZK-1; deploy scripts now refuse to wire it back on without an explicit acknowledgement). Oracle-bound rates are built and tested too; see below |
+| **Sealed trade** | Retired | `sealedSwap` was the first private trade design. It stays off on every network: the mainnet pool (`ShieldPoolPayments`) leaves the swap code out entirely, and on the testnet pools `sealedSwapVerifier` is `0x0`. The first version hit audit H1 (solvency), and the 2026-10-11 review found a rate overflow (ZK-1); deploy scripts refuse to wire it back on without an explicit acknowledgement. Private swaps replaced it |
 
 Every private action is proof-gated on-chain. No mock fills, no theatrical privacy. If a path cannot be both private and solvent yet, it waits. See [`contracts/audit/H1-SWAP-SOLVENCY.md`](./contracts/audit/H1-SWAP-SOLVENCY.md).
 
@@ -101,7 +103,7 @@ What they do not prove is said plainly on the verify page: a proof of payment sh
 
 Robinhood Chain is an **Arbitrum Orbit L2** (Nitro, mainnet live since July 2026), ETH gas, Ethereum blob DA. Gloam targets what the chain actually ships:
 
-- **Chainlink oracles from block zero.** RH Chain prices tokenized equities on-chain via standard `AggregatorV3` feeds. Gloam's `OracleRates` module binds sealed-trade rates to the live feed with L2 sequencer-uptime, staleness, and positivity guards, and a ratio-tolerance check that is also on-chain slippage protection. Built and tested (`contracts/src/lib/OracleRates.sol`); it activates when private trade re-enables.
+- **Chainlink oracles from block zero.** RH Chain prices tokenized equities on-chain via standard `AggregatorV3` feeds. Gloam's `OracleRates` module binds sealed-trade rates to the live feed with L2 sequencer-uptime, staleness, and positivity guards, and a ratio-tolerance check that is also on-chain slippage protection. Built and tested (`contracts/src/lib/OracleRates.sol`) for the sealed trade, which is retired. Private swaps take the DEX pool's own price.
 - **Tokenized stocks are ERC-20s** (18 decimals, ERC-8056 Total-Return value). On the testnet, Gloam shields the faucet set (TSLA, AMZN, PLTR, NFLX, AMD). Stock tokens are not a mainnet pool asset.
 - **Groth16 runs native.** bn254 pairing precompiles are present and the 96 KB code-size cap fits large verifier contracts, so shield / unshield / transfer proofs verify with no special infra.
 - **First-class ERC-4337** opens the door to gasless private transactions.
@@ -115,7 +117,7 @@ The same private core runs on [Tempo](https://tempo.xyz) mainnet (`4217`), the p
 Privacy has to be checkable and correct before it holds real money. Mainnet is beta software handling real money, and this is where it stands.
 
 - **Reviewed internally before mainnet.** An internal pre-mainnet review of the mainnet code finished on 20 October 2026 with no Critical or High findings open. An external audit is planned, not done. Until then, beta deposit limits cap what each pool can take in.
-- **Reviewed again on 2026-10-11.** A Kensho review of the contracts and an independent review of the circuits found no way to steal, inflate, double-spend or redirect pool funds, and confirmed both testnet pools match this repo byte for byte and are fully solvent. They did find the proof checker overclaiming (fixed: it fails closed and counts only real payments), a copyable legacy disclosure (retired), relay gas waste (fixed) and a latent overflow in the switched-off swap circuit (blocked until the new engine). Every finding and its status is in [`contracts/audit/REMEDIATION.md`](./contracts/audit/REMEDIATION.md).
+- **Reviewed again on 2026-10-11.** A Kensho review of the contracts and an independent review of the circuits found no way to steal, inflate, double-spend or redirect pool funds, and confirmed both testnet pools match this repo byte for byte and are fully solvent. They did find the proof checker overclaiming (fixed: it fails closed and counts only real payments), a copyable legacy disclosure (retired), relay gas waste (fixed) and a latent overflow in the switched-off sealed swap circuit (that design is retired). Every finding and its status is in [`contracts/audit/REMEDIATION.md`](./contracts/audit/REMEDIATION.md).
 - **Earlier findings fixed, then re-verified.** A Kensho pass found a critical funded drain, two highs, and a set of mediums in the sealed pool and client. Every critical and high is fixed or, for H1, switched off, and **verified on-chain and in code** (internal re-check): the drainable pool drained and de-published, value-binding enforced at deposit (C1), the swap path disabled (H1), the re-open path closed (one-way verifier + two-step ownership). Reviews so far are internal; an external audit is planned. Full status: [`contracts/audit/REMEDIATION.md`](./contracts/audit/REMEDIATION.md).
 - **No admin withdraw, timelocked rule changes.** There is no function the team can call to take pooled funds, and notes leave only through an unshield proof. The mainnet pools end setup in the same deploy run that creates them (`endSetup()`), so once live a new verifier, a raised deposit limit, a new asset or a higher fee must be queued on-chain and waits a public 3-day delay before it can run (`queueChange`). Lowering a limit or closing deposits works at once. The testnet pools were redeployed the same way on 2026-09-29 (there the owner can also change swap rates and oracles, behind the same delay). Verify `setupMode() == false` on the pools listed below.
 - **Selective disclosure, not a mixer.** Prove balance or a payment to a counterparty or auditor without revealing everything. The right posture for a regulated-sponsor chain.
@@ -175,6 +177,8 @@ gloam/
 | `PoseidonT3` | [`0x1a32…9Cb4`](https://robin.etherscan.io/address/0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4) |
 | Owner and treasury (one wallet at launch; a multisig is planned) | [`0x76b7…D4D8`](https://robin.etherscan.io/address/0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8) |
 | Relayer (run by the Gloam team; submits proven transactions and pays gas, cannot move or redirect money) | [`0xb1E9…512e`](https://robin.etherscan.io/address/0xb1E994586E62994648a0b866BF33F2EDd942512e) |
+| Private swap router `GloamVaultSwapV4` (Uniswap v4, three pools fixed at deploy; no owner, admin or upgrade) | [`0x34AB…c52d`](https://robin.etherscan.io/address/0x34AB06208586A737Bf1607fa996Bc9162271c52d) |
+| Swap treasury (where a swap's unused input goes, fixed in the router) | [`0xB390…30B8`](https://robin.etherscan.io/address/0xB3900ac9350903218e4c7597bAb0f008F01B30B8) |
 
 | Asset | Address | Beta limit (per deposit / total) |
 | --- | --- | --- |
@@ -190,6 +194,8 @@ gloam/
 | `PoseidonT3` | [`0x1a32…9Cb4`](https://explore.tempo.xyz/address/0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4) |
 | Owner and treasury (one wallet at launch; a multisig is planned) | [`0x76b7…D4D8`](https://explore.tempo.xyz/address/0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8) |
 | Relayer (run by the Gloam team; submits proven transactions and pays gas, cannot move or redirect money) | [`0xb1E9…512e`](https://explore.tempo.xyz/address/0xb1E994586E62994648a0b866BF33F2EDd942512e) |
+| Private swap router `GloamVaultSwapTempo` (Tempo's stablecoin exchange; no owner, admin or upgrade) | [`0xfCa1…F2DC`](https://explore.tempo.xyz/address/0xfCa1887e77f738ef9C5751974b3f3873d029F2DC) |
+| Swap treasury (where a swap's unused input goes, fixed in the router) | [`0xB390…30B8`](https://explore.tempo.xyz/address/0xB3900ac9350903218e4c7597bAb0f008F01B30B8) |
 
 | Asset (TIP-20, 6 decimals) | Address | Beta limit (per deposit / total) |
 | --- | --- | --- |
@@ -216,7 +222,7 @@ On both mainnets: deposits and private payments are free, and a cash out costs 0
 | Dual-proof verifier `DualProofVerifier` | [`0x82F4…03A2`](https://explore.testnet.tempo.xyz/address/0x82f4ece6533e48574914bedeb55a8242bc1a03a2) |
 | Pay memo `GloamPayMemo` (no poster in the event) | [`0x3ca8…b4E3`](https://explore.testnet.tempo.xyz/address/0x3ca88712e9219b5ee4c82d31cafeab64c9e9b4e3) |
 
-Earlier testnet pools are superseded and listed in [`contracts/ARCHITECTURE.md`](./contracts/ARCHITECTURE.md); the pre-C1 RH pool `0x4F38…` is drained and retired, never use it. Circuits (Groth16 on BN254, Circom 2.1.6, Poseidon, depth-20 Merkle membership): `shield`, `transfer`, `unshield` and `sealedSwap` (disabled) for the pool, plus `solvency`, `receipt` and `payroll_total` for the off-chain proofs. Constraint counts and both key sets (testnet dev keys, mainnet final keys) are in [`contracts/circuits/README.md`](./contracts/circuits/README.md).
+Earlier testnet pools are superseded and listed in [`contracts/ARCHITECTURE.md`](./contracts/ARCHITECTURE.md); the pre-C1 RH pool `0x4F38…` is drained and retired, never use it. Circuits (Groth16 on BN254, Circom 2.1.6, Poseidon, depth-20 Merkle membership): `shield`, `transfer`, `unshield` and `sealedSwap` (retired) for the pool, plus `solvency`, `receipt` and `payroll_total` for the off-chain proofs. Constraint counts and both key sets (testnet dev keys, mainnet final keys) are in [`contracts/circuits/README.md`](./contracts/circuits/README.md).
 
 ## Local
 
@@ -232,7 +238,7 @@ Run the reference app from `app/` (`next dev`), or open [gloam.trade/app](https:
 ## Guardrails
 
 - Mainnet is beta with real money: deposit limits on, reviewed internally, external audit planned. Say so plainly. The testnets stay the free practice network, on dev keys.
-- Private trading stays off. Never describe it as live.
+- The sealed trade stays retired. Private swaps are live on mainnet: always say the tokens and amounts are public.
 - Real privacy only. Never fake or mock a private success.
 - Selective disclosure over opacity. Verifiable, not just hidden.
 - Brand: monochrome with a green tint (`#2e7d53` light, `#8fd3ad` dark), Aeonik, light and dark. Calm, spacious, plain-language.

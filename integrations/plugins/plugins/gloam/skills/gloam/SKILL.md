@@ -78,7 +78,9 @@ only reaches the conversation when a retry fails. Always pass `maxAmount` with t
 - Be honest about privacy. Deposits (shields) are public, and the mainnet pools are new, so the
   crowd of notes to hide among is small at first. Quote `gloam_privacy_status` when the user asks
   how private something is. Never call Gloam audited: it was reviewed internally before launch and
-  an external audit is planned. Private trading is not live.
+  an external audit is planned. Private swaps are live in the Gloam app on both mainnets (who
+  swapped stays private, the tokens and amounts are public), but these tools do not swap. The old
+  sealed trade is retired.
 
 ## When tools return plans
 

@@ -96,7 +96,7 @@ Each `GloamNetwork` carries `chainId`, `pool`, `deployBlock`, a viem `chain`, `r
 What is different on mainnet:
 
 - **Final keys.** The mainnet verifiers hold the final keys of the 13-contributor trusted setup (drand round 6561386, release `ceremony-final`). The testnets keep the single-party dev keys. A proof made with one set never verifies against the other, so prove with `circuitArtifactUrls(circuit, chainId)`, which picks the right set for the chain.
-- **Payments only.** The mainnet pools (`ShieldPoolPayments`) take deposits, private payments and cash outs. Private trading is not on mainnet. Stock tokens are testnet only, and Robinhood Chain mainnet takes no native ETH deposit (ETH is only gas).
+- **Payments only.** The mainnet pools (`ShieldPoolPayments`) take deposits, private payments and cash outs, and have no swap code. Private swaps run in the Gloam app through a separate router on each mainnet; this SDK does not build them yet. Stock tokens are testnet only, and Robinhood Chain mainnet takes no native ETH deposit (ETH is only gas).
 - **Beta deposit limits.** 500 per deposit and 25,000 in total for each stablecoin, 25,000 and 250,000 for $GLOAM. `buildShieldBoundIntent` refuses an unlisted asset or an amount over the per-deposit limit before it proves. Cash outs and private payments are never limited.
 - **Fees.** Deposits and private payments are free. A cash out costs 0.25%: the pool keeps `cashOutFee(amount)` and sends the rest.
 - **Pools come with the SDK version.** Mainnet pool addresses live in `MAINNET_POOLS`. If your SDK version has no pool for a mainnet, `mainnetNetwork()` returns `null` and the builders refuse that chain id rather than guess. Update the SDK, or pass `poolAddress` yourself.
@@ -442,9 +442,9 @@ RH_MAINNET_CHAIN_ID (4663), TEMPO_MAINNET_CHAIN_ID (4217), MAINNET_POSEIDON_T3
 | `buildShieldIntent(p)` | Plain `shield(...)`, no proof (legacy pools only) | Refused on mainnet |
 | `buildUnshieldIntent(p)` | Witness + proof, then `unshield(...)` (cash out) | Live, mainnet and testnet |
 | `buildPrivateSendIntent(p)` | Transfer witness, then `transfer(...)`; returns payment + change notes | Live, mainnet and testnet |
-| `buildPrivateTradeIntent(p)` | Sealed-swap witness, then `sealedSwap(...)` | Off everywhere; refused on mainnet |
+| `buildPrivateTradeIntent(p)` | Sealed-swap witness, then `sealedSwap(...)` | Retired; refused on mainnet |
 
-Each builder returns a `GloamIntent` whose `exec` is guaranteed populated. Every builder takes `chainId` (default Robinhood Chain testnet) and `poolAddress` (default: Gloam's pool on that chain). `buildPrivateTradeIntent` produces a valid intent for the testnets, but private trading is switched off on every live pool, so its call reverts today.
+Each builder returns a `GloamIntent` whose `exec` is guaranteed populated. Every builder takes `chainId` (default Robinhood Chain testnet) and `poolAddress` (default: Gloam's pool on that chain). `buildPrivateTradeIntent` produces a valid intent for the testnets, but the sealed trade is retired and switched off on every live pool, so its call reverts.
 
 ### Notes
 
@@ -587,7 +587,7 @@ PUBLIC_INPUTS.sealedSwap // [root, nullifier, newCOut, newCChange, assetIn, asse
 - **A new pool has a small crowd.** Privacy depends on how many notes you hide among. On a brand new mainnet pool that crowd is thin at first, so do not treat a quick deposit and cash out of the same amount as unlinkable.
 - **Testnet is free practice.** Robinhood Chain testnet (`46630`) and Tempo Moderato (`42431`) keep running with the single-party dev keys and test funds that have no value.
 - **Real privacy only.** No mock successes. If a path cannot be private, the SDK returns a plan rather than a fake result.
-- **Private trading is off** on every pool (the mainnet pools have no swap at all). Shield, private send, cash out, and disclosure are live and proof-gated.
+- **The sealed trade is retired** on every pool (the mainnet pools have no swap code at all). Private swaps are live in the Gloam app on both mainnets; the SDK does not build them yet. Shield, private send, cash out, and disclosure are live and proof-gated.
 - **Note secrets are the sole spend authority.** Persist and protect them. `localStorage` is fine for a demo, not for real value. Never hand one to an agent: the `@gloamtrade/mcp` server keeps them in an encrypted store and gives the agent handles.
 - **A received x402 payment is not yours until you sweep it.** The payer knows the payment note's secret. Use `settleGloamPayment` and serve only on `grantAccess`.
 

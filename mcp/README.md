@@ -19,7 +19,7 @@ Every tool that touches a chain takes a `network`:
 
 On mainnet:
 
-- **Payments only, beta limits.** The mainnet pools take deposits, private payments and sweeps. Private trading is not live. A deposit is at most 500 of a stablecoin (25,000 GLOAM) during the beta, checked before anything is proved; private payments are never limited.
+- **Payments only, beta limits.** On the mainnet pools this server makes deposits, private payments and sweeps. It does not swap: private swaps are in the Gloam app (Vault > Swap) on both mainnets. A deposit is at most 500 of a stablecoin (25,000 GLOAM) during the beta, checked before anything is proved; private payments are never limited.
 - **Fees.** Deposits and private payments are free. Cashing out costs 0.25% (this server does not cash out; use the Gloam app or the SDK).
 - **Final keys.** Proofs for mainnet use the final keys of the 13-contributor trusted setup, downloaded from `https://www.gloam.trade/circuits/final` and checked against the SHA-256 the SDK pins. Testnet proofs use the dev keys. The two are cached apart.
 - **Beta software.** The contracts and circuits were reviewed internally before launch with no Critical or High findings open; an external audit is planned, not done. The mainnet pools are new, so the crowd of notes to hide among is small at first. Start with small amounts.
@@ -76,9 +76,9 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 | --- | --- | --- |
 | `gloam_info` | read | What Gloam is, its networks, and what the agent can do |
 | `gloam_privacy_status` | read | Honest posture: what is public, what is private, mainnet limits and fees, how thin the anonymity set is |
-| `gloam_list_markets` | read | Markets planned for private trading, with indicative testnet marks. Private trading is not live |
-| `gloam_quote` | read | Indicative quote for a future private trade |
-| `gloam_plan_private_trade` | plan | Describe a private trade (never executes; private trading is off) |
+| `gloam_list_markets` | read | Markets from the retired sealed trade, with indicative testnet marks. Nothing here trades |
+| `gloam_quote` | read | Indicative quote for the retired sealed trade |
+| `gloam_plan_private_trade` | plan | Describe a sealed trade (never executes; the sealed trade is retired) |
 | `gloam_plan_shield` | plan | Describe a shield before executing (no signing) |
 | `gloam_execute_shield` | execute | **Real private deposit** on the chosen network. Mints a note, generates the Groth16 proof server-side with that network's keys, broadcasts `shieldBound()`, and returns a note handle |
 | `gloam_execute_transfer` | execute | Public transfer of test ETH on Robinhood Chain testnet (funding while practicing). Amount and recipient are visible |
@@ -378,4 +378,4 @@ Then the agent can shield into a private balance, pay for x402 and MPP resources
 - **Mainnet (beta, real money):** Tempo and Robinhood Chain, payments only, beta deposit limits, the trusted setup's final keys. Reviewed internally before launch; an external audit is planned, not done.
 - **Testnet (free practice):** Tempo Moderato and Robinhood Chain testnet, dev keys, test funds with no value.
 - **Circuit files** are fetched from `https://www.gloam.trade/circuits` (final keys under `/final`) on first use, checked against pinned SHA-256 and cached locally (`GLOAM_ARTIFACTS_DIR`).
-- **Private trading** is off on every network; the market and trade tools only plan. See the [agent docs](https://gloam.trade/docs/agents).
+- **Swaps.** Private swaps are live in the Gloam app on both mainnets, with who swapped kept private and the amounts public ([docs](https://gloam.trade/docs/private-swaps)). This server does not swap: its market and trade tools only plan, for the retired sealed trade. See the [agent docs](https://gloam.trade/docs/agents).
