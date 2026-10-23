@@ -351,6 +351,9 @@ export async function secureClaim(
   const out = fresh as LocalNote | null;
   if (result.status === "swept" && out) {
     await finalize(env, out, result.hash);
+  } else if (result.status === "not_settled") {
+    // not in the vault: out of the balance until it is (reconcileUnfunded)
+    updateLocalNote(note.id, { unfunded: true });
   } else if (result.status === "already_spent") {
     updateLocalNote(note.id, { status: "recovered" });
     // Spent by someone else, unless one of our own moves landed: ask the chain.
@@ -361,6 +364,43 @@ export async function secureClaim(
   // what happened (reconcileClaims). A relay that lost its reply may still
   // have sent it.
   return result;
+}
+
+/**
+ * Does the vault hold this payment yet? A claim it doesn't is saved as
+ * `unfunded`: kept, out of the balance until it lands. A read that fails
+ * counts as not yet; the next sync asks again.
+ */
+export async function claimFunded(commitment: Hex, env: ClaimEnv = appClaimEnv()): Promise<boolean> {
+  return (await env.chain.isCommitmentSeen(commitment).catch(() => false)) === true;
+}
+
+/**
+ * Claimed payments the vault had not shown: count each one it shows now. A
+ * claim saved before this check (no leaf on record, never checked) is checked
+ * once too. Returns true when something changed.
+ */
+export async function reconcileUnfunded(env?: ClaimEnv): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const unchecked = getAllNotes().filter(
+    (n) =>
+      isClaimedNote(n) &&
+      n.status !== "recovered" &&
+      (n.unfunded === true || (n.unfunded === undefined && n.leafIndex == null))
+  );
+  if (!unchecked.length) return false;
+  const e = env ?? appClaimEnv();
+  const pool = e.pool;
+  if (!pool) return false;
+  let changed = false;
+  for (const n of unchecked) {
+    if (n.chainId !== e.chainId || n.pool.toLowerCase() !== pool.toLowerCase()) continue;
+    const seen = await e.chain.isCommitmentSeen(n.commitment).catch(() => null);
+    if (seen === null || n.unfunded === !seen) continue;
+    updateLocalNote(n.id, { unfunded: !seen });
+    changed = true;
+  }
+  return changed;
 }
 
 /**

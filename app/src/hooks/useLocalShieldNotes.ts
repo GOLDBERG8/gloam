@@ -6,11 +6,12 @@ import { getRhPublicClient } from "@/lib/rhClient";
 import { useDemoLive } from "@/lib/demo";
 import { readDemo } from "@/lib/demoFlag";
 import { unlockNoteVault, syncFromDisk, NOTES_KEY } from "@/lib/noteVault";
-import { reconcileClaims } from "@/lib/claimSweep";
+import { reconcileClaims, reconcileUnfunded } from "@/lib/claimSweep";
 import { reconcileCashOuts } from "@/lib/cashOutLater";
 import {
   activeSpendableNotes,
   confirmedNotes,
+  unfundedClaims,
   fetchChainShieldNotes,
   loadLocalNotes,
   markNoteRecovered,
@@ -90,7 +91,9 @@ export function useLocalShieldNotes(address?: string | null) {
     }
     setSyncing(true);
     try {
-      // Secured claims and cash-out splits whose move landed (or never can) since last time.
+      // Claimed payments that reached the vault since, then secured claims and
+      // cash-out splits whose move landed (or never can) since last time.
+      if (await reconcileUnfunded().catch(() => false)) setLocal(loadLocalNotes(address));
       if (await reconcileClaims().catch(() => false)) setLocal(loadLocalNotes(address));
       const publicClient = getRhPublicClient();
       const rows = await fetchChainShieldNotes(
@@ -183,6 +186,8 @@ export function useLocalShieldNotes(address?: string | null) {
     () => activeSpendableNotes(merged),
     [merged]
   );
+  /** Claimed payments the vault hasn't shown yet: listed, never in `open` or the totals. */
+  const waiting = useMemo(() => unfundedClaims(merged), [merged]);
   const confirmed = useMemo(() => confirmedNotes(merged), [merged]);
   const byAsset = useMemo(() => sumByAsset(open), [open]);
   const shieldedWei = useMemo(() => sumEthWei(open), [open]);
@@ -192,6 +197,7 @@ export function useLocalShieldNotes(address?: string | null) {
     chain,
     merged,
     open,
+    waiting,
     confirmed,
     byAsset,
     shieldedWei,

@@ -7,7 +7,8 @@
  * sweep self-test proves one for real. Covers: a clean secure, the payer
  * spending it back first, a closed wallet prompt and a retry, a relay that
  * sent the move but lost its reply, a receipt that timed out, a payment not in
- * the vault yet, and the wrong network. Throughout, the balance must never
+ * the vault yet (kept, listed apart, never counted until it lands: review
+ * finding 6, 23 Oct 2026), and the wrong network. Throughout, the balance must never
  * count the money twice or lose it.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-claim-sweep.mts
@@ -27,8 +28,10 @@ import {
 
 const { getActiveNetwork } = await import("../src/lib/networks");
 const { getAllNotes } = await import("../src/lib/noteVault");
-const { activeSpendableNotes, saveLocalNote } = await import("../src/lib/shield");
-const { claimNoteId, isUnsecuredClaim, reconcileClaims, secureClaim } = await import("../src/lib/claimSweep");
+const { activeSpendableNotes, saveLocalNote, sumByAsset, unfundedClaims } = await import("../src/lib/shield");
+const { claimFunded, claimNoteId, isUnsecuredClaim, reconcileClaims, reconcileUnfunded, secureClaim } = await import(
+  "../src/lib/claimSweep"
+);
 type LocalNote = import("../src/lib/shield").LocalNote;
 type ClaimEnv = import("../src/lib/claimSweep").ClaimEnv;
 
@@ -104,7 +107,7 @@ function mockPool() {
 }
 
 /** A payment someone made to us: in the pool, and claimed into this browser. */
-async function claimed(pool: ReturnType<typeof mockPool>, amount: bigint, opts: { inPool?: boolean } = {}) {
+async function claimed(pool: ReturnType<typeof mockPool>, amount: bigint, opts: { inPool?: boolean; unfunded?: boolean } = {}) {
   const secret = await randomSecretField();
   const commitment = fieldToHex(await noteCommitmentPoseidon(secret, amount, ASSET));
   const nullifier = fieldToHex(await noteNullifierPoseidon(secret, hexToField(commitment)));
@@ -125,6 +128,7 @@ async function claimed(pool: ReturnType<typeof mockPool>, amount: bigint, opts: 
     status: "open",
     source: "local",
     note: "Invoice 042",
+    ...(opts.unfunded !== undefined ? { unfunded: opts.unfunded } : {}),
   };
   saveLocalNote(note);
   await new Promise((r) => setTimeout(r, 2)); // distinct ids
@@ -325,14 +329,56 @@ await test("receipt timed out: pending until the chain shows it", async () => {
   assert.equal(total(counted(claim)), 4_000_000n);
 });
 
-await test("payment not in the vault yet: nothing sent, still flagged", async () => {
+await test("payment not in the vault yet: nothing sent, still flagged, and out of the balance", async () => {
   const pool = mockPool();
   const claim = await claimed(pool, 1_000_000n, { inPool: false });
   const r = await secureClaim({ note: claim, relay: true, sendWithWallet: noWallet }, pool.env());
   assert.equal(r.status, "not_settled");
   assert.equal(freshOf(claim).length, 0);
   assert.equal(isUnsecuredClaim(byId(claim.id)), true);
-  assert.equal(total(counted(claim)), 1_000_000n);
+  assert.equal(byId(claim.id).unfunded, true);
+  assert.equal(total(counted(claim)), 0n, "never counted before the vault shows it");
+});
+
+// Review finding 6, 23 Oct 2026: a claim code nobody paid must not show as money.
+await test("an unpaid claim is kept, listed apart and never counted, until the vault shows it", async () => {
+  const pool = mockPool();
+  const env = pool.env();
+  // a code that opens fine (secret, amount, asset agree) but was never paid into the vault
+  const secret = await randomSecretField();
+  const commitment = fieldToHex(await noteCommitmentPoseidon(secret, 40_000_000n, ASSET));
+  assert.equal(await claimFunded(commitment, env), false, "the claim flow sees it is not in the vault");
+  assert.equal(await claimFunded(commitment, pool.env({ chain: { ...env.chain, isCommitmentSeen: async () => { throw new Error("rpc down"); } } })), false, "an unread vault counts as not yet");
+  const claim = await claimed(pool, 40_000_000n, { inPool: false, unfunded: true });
+  const before = sumByAsset(getAllNotes()).get(lc(ASSET)) ?? 0n;
+  assert.equal(total(counted(claim)), 0n);
+  assert.ok(unfundedClaims(getAllNotes()).some((n) => n.id === claim.id), "listed as waiting");
+  assert.equal(await reconcileUnfunded(env), false, "still not there");
+  assert.equal(byId(claim.id).unfunded, true);
+  // the payment lands
+  await pool.insert(claim.commitment);
+  assert.equal(await reconcileUnfunded(env), true);
+  assert.equal(byId(claim.id).unfunded, false);
+  assert.equal(total(counted(claim)), 40_000_000n, "counted once the vault shows it");
+  assert.equal((sumByAsset(getAllNotes()).get(lc(ASSET)) ?? 0n) - before, 40_000_000n);
+  assert.equal(unfundedClaims(getAllNotes()).some((n) => n.id === claim.id), false);
+});
+
+await test("a claim saved before this check is checked once, and taken out of the balance if unpaid", async () => {
+  const pool = mockPool();
+  const unpaid = await claimed(pool, 2_000_000n, { inPool: false });
+  const paid = await claimed(pool, 3_000_000n);
+  assert.equal(total(counted(unpaid)), 2_000_000n, "an old claim, never checked");
+  assert.equal(await reconcileUnfunded(pool.env()), true);
+  assert.equal(byId(unpaid.id).unfunded, true);
+  assert.equal(total(counted(unpaid)), 0n);
+  assert.equal(byId(paid.id).unfunded, false, "a paid one is marked checked");
+  assert.equal(total(counted(paid)), 3_000_000n);
+  // an unreadable vault changes nothing
+  const env = pool.env();
+  await pool.insert(unpaid.commitment);
+  assert.equal(await reconcileUnfunded(pool.env({ chain: { ...env.chain, isCommitmentSeen: async () => { throw new Error("rpc down"); } } })), false);
+  assert.equal(byId(unpaid.id).unfunded, true);
 });
 
 await test("a claim on another network is refused before anything runs", async () => {

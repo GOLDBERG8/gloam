@@ -199,8 +199,17 @@ export function PortfolioView() {
   // chain's own symbol rather than a hardcoded "ETH".
   const nativeSymbol = network.primaryAsset.symbol;
   const nativeUsdRate: number | null = isTempo ? 1 : ethUsd;
-  const { open: shieldNotes, merged: allNotes, shieldedWei, byAsset, syncing, refresh: refreshVault } =
-    useLocalShieldNotes(address);
+  const {
+    open: shieldNotes,
+    waiting: waitingClaims,
+    merged: allNotes,
+    shieldedWei,
+    byAsset,
+    syncing,
+    refresh: refreshVault,
+  } = useLocalShieldNotes(address);
+  // Claimed payments the vault hasn't shown yet are listed after the balance, never counted in it.
+  const vaultRows = useMemo(() => [...shieldNotes, ...waitingClaims], [shieldNotes, waitingClaims]);
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const refreshAll = async () => {
@@ -567,7 +576,7 @@ export function PortfolioView() {
       {/* Main split: vault + holdings, with the public feed alongside */}
       <div className="grid gap-5 lg:grid-cols-12">
         <div className="min-w-0 space-y-5 lg:col-span-8">
-          {shieldNotes.length > 0 && (
+          {vaultRows.length > 0 && (
             <section className="gl-card overflow-hidden">
               <header className="flex items-center justify-between gap-3 max-sm:px-5 pb-3 pt-5 sm:px-6">
                 <div>
@@ -577,7 +586,7 @@ export function PortfolioView() {
                 <KindBadge sealed />
               </header>
               <ul className="divide-y divide-line border-t border-line">
-                {shieldNotes.slice(0, 6).map((n) => (
+                {vaultRows.slice(0, 6).map((n) => (
                   <li
                     key={n.id}
                     className="flex min-h-[64px] items-center justify-between gap-3 max-sm:px-5 py-3 transition-colors hover:bg-surface/60 sm:px-6"
@@ -594,12 +603,14 @@ export function PortfolioView() {
                           <span className="text-mute">{assetLabel(n.asset)}</span>
                         </p>
                         <p className="mt-0.5 truncate text-[12.5px] text-mute">
-                          {n.leafIndex != null
-                            ? "Ready to send privately or cash out"
-                            : "Confirming…"}
-                          {isClaimedNote(n) || isSecuredClaim(n) ? ", received" : ""}
+                          {n.unfunded
+                            ? "Waiting for this payment to reach the vault. Not in your balance yet."
+                            : n.leafIndex != null
+                              ? "Ready to send privately or cash out"
+                              : "Confirming…"}
+                          {!n.unfunded && (isClaimedNote(n) || isSecuredClaim(n)) ? ", received" : ""}
                         </p>
-                        {isUnsecuredClaim(n) && (
+                        {isUnsecuredClaim(n) && !n.unfunded && (
                           <p className="mt-0.5 text-[12.5px] text-warn">
                             Not secured yet, so the sender can still take it back.{" "}
                             <Link

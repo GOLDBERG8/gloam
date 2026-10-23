@@ -38,19 +38,20 @@ export function isCircuitNote(n: LocalNote): boolean {
   return hasSecret(n) && Boolean(n.bound) && n.scheme !== "keccak";
 }
 
-/** Unspent and circuit-compatible: can back a proof of funds. */
+/** Unspent, in the vault and circuit-compatible: can back a proof of funds. */
 export function isFundsNote(n: LocalNote): boolean {
-  return isCircuitNote(n) && n.status !== "recovered";
+  return isCircuitNote(n) && n.status !== "recovered" && !n.unfunded;
 }
 
 /**
  * A payment someone sent this wallet. Claimed payments (a Gloam address
  * payment, a claim link, a payroll payout) are saved with an `imp-` id; change,
  * deposits and trades are not. Spent ones still count: the payment still
- * happened. The prover checks the note on chain before proving.
+ * happened. One the vault hasn't shown yet is not a payment yet. The prover
+ * checks the note on chain before proving.
  */
 export function isReceivedPayment(n: LocalNote): boolean {
-  return n.id.startsWith("imp-") && isCircuitNote(n);
+  return n.id.startsWith("imp-") && isCircuitNote(n) && !n.unfunded;
 }
 
 export type FundsPick =
