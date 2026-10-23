@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "Cookie Policy" };
 
 export default function CookiesPage() {
   return (
-    <LegalLayout title="Cookie Policy" updated="October 21, 2026">
+    <LegalLayout title="Cookie Policy" updated="October 23, 2026">
       <p>
         This Cookie Policy explains what Gloam keeps on your device and which
         usage counts it collects on gloam.trade. Gloam runs on mainnet with
@@ -17,8 +17,9 @@ export default function CookiesPage() {
         The short version: we set no advertising or tracking cookies. The only
         cookies we set are sign-in cookies, and only when you sign in. Usage
         counts are anonymous, use no cookies, and run only if you choose
-        &ldquo;Accept all&rdquo;, except four claim-link totals that hold
-        nothing about who you are (described below).
+        &ldquo;Accept all&rdquo;, except four claim-link totals and a one-way
+        count of how many different wallets use Gloam, neither of which keeps
+        anything about who you are (described below).
       </p>
       <h2>Your preferences</h2>
       <CookiePreferences />
@@ -49,8 +50,8 @@ export default function CookiesPage() {
       </p>
       <p>
         <strong>Claim-link totals.</strong>{" "}With &ldquo;Essential
-        only&rdquo;, or before you choose, the only thing counted is four daily
-        totals that show whether payment links reach people: a claim link was
+        only&rdquo;, or before you choose, the app counts four daily totals
+        that show whether payment links reach people: a claim link was
         made, opened, or claimed, and someone who claimed one made their own
         first payment. Each count is just &ldquo;add 1 to today&rdquo;, on
         mainnet or a testnet: no
@@ -58,6 +59,17 @@ export default function CookiesPage() {
         amount, the people involved or your wallet. Your browser keeps a short
         local note of the links it already counted (in local storage), so the
         same one is not counted twice.
+      </p>
+      <p>
+        <strong>People counts.</strong>{" "}When you connect a wallet, and a
+        few minutes after you claim, deposit, send, swap, cash out, run payroll
+        or pay a request, the app sends our server your wallet address and
+        which of those you did, nothing more. The server turns the address into
+        a one-way code with a secret key and adds it to counters that only say
+        how many different wallets they have seen. It keeps no address, and
+        the counters cannot list anyone. Your browser keeps a short local note
+        of what it already sent today (in local storage), so each counts once
+        a day. Details are in the Privacy Policy.
       </p>
       <p>
         Nothing else is counted with &ldquo;Essential only&rdquo;, or before you

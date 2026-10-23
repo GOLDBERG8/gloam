@@ -90,6 +90,28 @@ export default function PrivacyPage() {
         cookie banner. We keep the daily totals for about 13 months.
       </p>
       <p>
+        <strong>People counts.</strong>{" "}To know how many people use Gloam,
+        the app tells our server your wallet address when you connect, and
+        which of a few things you did: claimed a payment, deposited, sent
+        privately, swapped, cashed out, ran payroll or paid a request. The
+        things you did are sent a few minutes later, together, and each counts
+        once a day. Nothing else goes with it: no amount, note, claim code,
+        transaction or recipient. Our server turns the address into a one-way
+        code with a secret key and adds the code to counters that can only say
+        roughly how many different wallets they have seen, in all, for each
+        action and for each day. The address is not stored or logged, and the
+        counters cannot be turned back into a list of wallets. We do the same
+        with the wallets that deposit into the vault or receive a cash out,
+        which anyone can already see on chain. Mainnet and testnets are counted
+        apart, and the recording demo is not counted. Someone holding both our
+        secret key and the counters could check whether a wallet they already
+        know is probably in them; the key stays on our server. Because nothing
+        kept can say who you are, these counts run whether or not you accept
+        the cookie banner. Your browser remembers what it already sent today.
+        We keep the daily counters for 35 days and the others while the
+        Services run.
+      </p>
+      <p>
         <strong>Vercel Web Analytics.</strong>{" "}Our hosting provider, Vercel,
         counts page views for us. It runs only if you choose &ldquo;Accept
         all&rdquo; and sets no cookies. Vercel

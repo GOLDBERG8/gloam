@@ -30,7 +30,8 @@ export function CookieBanner() {
         <p className="text-[14px] text-foreground">Cookies</p>
         <p className="mt-1.5 text-[13px] leading-relaxed text-mute">
           We set no ad or tracking cookies. Essential only keeps what the site
-          needs to work, plus four anonymous claim-link totals. Accept all
+          needs to work, plus four anonymous claim-link totals and a one-way
+          count of how many wallets use Gloam. Accept all
           turns on anonymous counts with no cookies: page views, visits and
           app steps.
           See{" "}
