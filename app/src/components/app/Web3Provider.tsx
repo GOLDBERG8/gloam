@@ -9,6 +9,7 @@ import { TurnkeyAutoConnect } from "./TurnkeyAutoConnect";
 import { NetworkProvider } from "./NetworkProvider";
 import { CashOutProofRefresh } from "./CashOutProofRefresh";
 import { ReconnectWatchdog } from "./ReconnectWatchdog";
+import { PeopleCount } from "./PeopleCount";
 
 export function Web3Provider({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -32,6 +33,7 @@ export function Web3Provider({ children }: { children: ReactNode }) {
         {TURNKEY_ENABLED && <TurnkeyAutoConnect />}
         <NetworkProvider>
           <CashOutProofRefresh />
+          <PeopleCount />
           {children}
         </NetworkProvider>
       </QueryClientProvider>
