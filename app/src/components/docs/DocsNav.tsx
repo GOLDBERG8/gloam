@@ -40,12 +40,13 @@ export const DOCS_NAV: DocNavGroup[] = [
     items: [
       { href: "/docs/payroll", label: "Private payroll" },
       { href: "/docs/private-pay", label: "Private pay" },
+      { href: "/docs/private-swaps", label: "Private swaps" },
       { href: "/docs/encryption", label: "How shield works" },
       { href: "/docs/privacy-model", label: "What stays private" },
       { href: "/docs/threat-model", label: "Threat model" },
       { href: "/docs/compare", label: "How Gloam compares" },
       { href: "/docs/proofs", label: "Proofs" },
-      { href: "/docs/sealed-trade", label: "Private trade" },
+      { href: "/docs/sealed-trade", label: "Sealed trade (retired)" },
       { href: "/docs/chain", label: "Networks" },
       { href: "/docs/data", label: "Prices & oracles" },
     ],
@@ -77,7 +78,7 @@ export const DOCS_TABS: DocsTab[] = [
     match: ["/docs", "/docs/testnet", "/docs/product", "/docs/production"],
   },
   { label: "Payroll", href: "/docs/payroll", match: ["/docs/payroll"] },
-  { label: "Payments", href: "/docs/private-pay", match: ["/docs/private-pay"] },
+  { label: "Payments", href: "/docs/private-pay", match: ["/docs/private-pay", "/docs/private-swaps"] },
   {
     label: "Privacy",
     href: "/docs/privacy-model",
