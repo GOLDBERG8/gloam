@@ -88,6 +88,22 @@ assert((await openSealedTicket(sealed, payee.privateJwk)) === plain, "a bare JWK
 await rejects(() => openSealedTicket(sealed, other), /different receive tag/, "another key cannot open it");
 assert((await sealToReceiveTag(plain, payee.tag)) !== sealed, "each seal is fresh (ephemeral key + iv)");
 await rejects(() => sealToReceiveTag(plain, "gloam:rcpt:x"), /receive tag/, "cannot seal to a non-tag");
+// The plaintext is padded to a 512-byte step, so a ticket's length does not show
+// how large the amount is or how long the note is.
+{
+  const sealedFor = async (amountWei, note) =>
+    sealToReceiveTag(encodeNotePackage({ pool: SEALED_VAULT, asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", amountWei, secret: fieldToHex(7n), commitment: fieldToHex(8n), note }), payee.tag);
+  const sizes = new Set();
+  for (const [w, n] of [["1", undefined], ["10000", undefined], ["100000000000", undefined], ["1", "Invoice 042"], ["25000000", "agent:42"]]) {
+    const t = await sealedFor(w, n);
+    sizes.add(t.length);
+    const opened = await openSealedTicket(t, payee);
+    assert(opened === encodeNotePackage({ pool: SEALED_VAULT, asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", amountWei: w, secret: fieldToHex(7n), commitment: fieldToHex(8n), note: n }), "a padded ticket opens to the exact package");
+  }
+  assert(sizes.size === 1, `small and large amounts, with or without a short note, seal to one length (got ${[...sizes].join(", ")})`);
+  const largest = await sealedFor(((1n << 128n) - 1n).toString(), "\u{1F600}".repeat(20) + "x".repeat(60));
+  assert(largest.length <= 1714, `the largest ticket stays within what the board and the relay take (${largest.length} bytes)`);
+}
 // tamper one ciphertext byte: AES-GCM rejects it
 const flip = sealed.slice(0, -3) + (sealed.at(-3) === "A" ? "B" : "A") + sealed.slice(-2);
 await rejects(() => openSealedTicket(flip, payee), null, "a tampered ticket does not open");
@@ -187,7 +203,7 @@ if (existsSync(appFile)) {
     // The app's browser identity, holding the SDK-generated key.
     store.set("gloam.receive.identity.v1", JSON.stringify({ v: 1, createdAt: 1, privateJwk: payee.privateJwk, publicSpkiB64: payee.tag.slice(RECEIVE_TAG_PREFIX.length) }));
     assert((await app.getOrCreateReceiveIdentity()).tag === payee.tag, "app reads the same tag from the same key");
-    assert((await app.decryptTicketWithLocalTag(sealed)) === plain, "the app opens a ticket the SDK sealed");
+    assert((await app.decryptTicketWithLocalTag(sealed)).trimEnd() === plain, "the app opens a ticket the SDK sealed");
     assert((await app.decryptTicketWithLocalTag(built.payload.payload.paymentNote)).startsWith("gloam1."), "the app opens an x402 payment note as a gloam1. package");
     const fromApp = await app.encryptTicketForTag(plain, payee.tag);
     assert((await openSealedTicket(fromApp, payee)) === plain, "the SDK opens a ticket the app sealed");

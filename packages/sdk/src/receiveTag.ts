@@ -146,6 +146,23 @@ async function ecdhAesKey(privateKey: WebCryptoKey, publicKey: WebCryptoKey): Pr
   );
 }
 
+/**
+ * A sealed ticket's length would show the amount's size and the note's length,
+ * so the plaintext is padded with spaces to a 512-byte step. The cap is the
+ * largest note package (1158 bytes: a 78-digit amount and an 80-character note),
+ * so no ticket grows past what the memo board and the relay take. Openers trim
+ * the padding off.
+ */
+const SEAL_PAD_STEP = 512;
+const SEAL_PAD_MAX = 1158;
+
+function padSealed(raw: Uint8Array): Uint8Array {
+  if (raw.length >= SEAL_PAD_MAX) return raw;
+  const out = new Uint8Array(Math.min(Math.ceil(raw.length / SEAL_PAD_STEP) * SEAL_PAD_STEP, SEAL_PAD_MAX)).fill(0x20);
+  out.set(raw);
+  return out;
+}
+
 /** Seal a ticket (any string, usually a gloam1. note package) so only `tag`'s owner can open it. */
 export async function sealToReceiveTag(plaintext: string, tag: string): Promise<string> {
   const theirSpki = tagSpki(tag);
@@ -156,7 +173,7 @@ export async function sealToReceiveTag(plaintext: string, tag: string): Promise<
   const aes = await ecdhAesKey(ephem.privateKey, theirPub);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const cipher = new Uint8Array(
-    await crypto.subtle.encrypt({ name: "AES-GCM", iv: buf(iv) }, aes, buf(new TextEncoder().encode(plaintext)))
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: buf(iv) }, aes, buf(padSealed(new TextEncoder().encode(plaintext))))
   );
   const out = new Uint8Array(2 + ephemSpki.length + 12 + cipher.length);
   out[0] = (ephemSpki.length >> 8) & 0xff;
@@ -167,7 +184,7 @@ export async function sealToReceiveTag(plaintext: string, tag: string): Promise<
   return SEALED_TICKET_PREFIX + b64urlEncode(out);
 }
 
-/** Open a gloam2t. ticket with the receive key it was sealed to. Throws if it was sealed to someone else. */
+/** Open a gloam2t. ticket with the receive key it was sealed to (padding trimmed). Throws if it was sealed to someone else. */
 export async function openSealedTicket(sealed: string, key: ReceiveKey | ReceiveKeyJwk): Promise<string> {
   const s = sealed.trim();
   if (!s.startsWith(SEALED_TICKET_PREFIX)) throw new Error("Not a sealed Gloam ticket (gloam2t.…).");
@@ -182,7 +199,7 @@ export async function openSealedTicket(sealed: string, key: ReceiveKey | Receive
   const aes = await ecdhAesKey(await importPrivate(jwk), await importPublic(ephemSpki));
   try {
     const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf(iv) }, aes, buf(cipher));
-    return new TextDecoder().decode(new Uint8Array(plain));
+    return new TextDecoder().decode(new Uint8Array(plain)).trimEnd();
   } catch {
     throw new Error("This ticket was sealed to a different receive tag.");
   }
