@@ -13,6 +13,7 @@ import {GloamVaultSwapV4b} from "../src/GloamVaultSwapV4b.sol";
 import {MockERC20} from "./MockERC20.sol";
 import {MockPoolManager} from "./VaultSwap.t.sol";
 import {VaultSwapReviewTest} from "./VaultSwapReview.t.sol";
+import {DeployVaultSwapV4b} from "../script/DeployVaultSwapV4b.s.sol";
 
 /// WETH as Robinhood Chain has it (Arbitrum's aeWETH): withdraw sends ETH with a plain call.
 contract MockWETH {
@@ -372,6 +373,19 @@ contract VaultSwapV4bTest is VaultSwapReviewTest {
         _v2().removePool(_id(direct));
         vm.prank(next);
         _v2().removePool(_id(direct));
+    }
+
+    /// The deploy script's pools are the app's (lib/vaultSwap RH_SWAP_POOLS_V2, checked by
+    /// selftest-vault-swap against the same ids), sorted as v4 keys must be.
+    function test_v2_deploy_script_pools_are_the_apps() public {
+        PoolKey[] memory p = new DeployVaultSwapV4b().pools();
+        bytes4[7] memory ids =
+            [bytes4(0x3b0cbf06), 0xc5f37371, 0xe5b1e488, 0x24107d15, 0x387bf619, 0x84bd4e2d, 0x9200eb96];
+        assertEq(p.length, ids.length);
+        for (uint256 i = 0; i < p.length; i++) {
+            assertEq(bytes4(_id(p[i])), ids[i]);
+            assertLt(uint160(p[i].currency0), uint160(p[i].currency1));
+        }
     }
 
     // ═════════════════════════════════════════════════════════════ ETH through WETH
