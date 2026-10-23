@@ -65,6 +65,7 @@ import {
   GLOAM_RELAY_URL,
   GLOAM_X402_SCHEME,
   relayIntent,
+  GloamRelayError,
   assertDepositAllowed,
   type GloamIntent,
   type GloamPaymentPayload,
@@ -261,6 +262,20 @@ function assetInfo(chainId: number, asset: Address, fallbackDecimals = 18) {
 
 /** A spend reservation with no transaction after this long was never sent (a crash between reserve and broadcast). */
 const STUCK_MS = 10 * 60 * 1000;
+
+/** Relay answers that do not prove the transaction stayed unsent: the node may have taken it before the error. */
+const RELAY_MAYBE_SENT = ["maybe_sent", "rpc", "network", "error", "internal", "in_flight"];
+
+/**
+ * Whether a send that threw may still have put the transaction on chain.
+ * Through the relay only a refusal it names (limits, screening, a failed dry
+ * run) is sure; a lost connection or an unclear answer is not. A wallet send is
+ * judged as before: no hash back, not sent.
+ */
+function mayHaveSent(err: unknown, viaRelay: boolean): boolean {
+  if (!viaRelay) return false;
+  return !(err instanceof GloamRelayError) || RELAY_MAYBE_SENT.includes(err.code);
+}
 
 const shortTag = (t: string) => (t.length > 30 ? `${t.slice(0, 18)}…${t.slice(-6)}` : t);
 
@@ -735,8 +750,10 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
                 refreshed.push(`${n.handle}: spendable again`);
               }
             } else if (await chain.isCommitmentSeen(n.commitment)) {
-              notes.update(n.handle, { status: "unspent" });
-              refreshed.push(`${n.handle}: confirmed`);
+              // A payment this server sent is the payee's once it lands, never this server's balance.
+              const sent = n.origin === "payment";
+              notes.update(n.handle, { status: sent ? "spent" : "unspent" });
+              refreshed.push(`${n.handle}: ${sent ? "payment landed" : "confirmed"}`);
             } else if (await failed(n.createdTx)) {
               // Its creating transaction reverted, so the note never existed.
               notes.remove(n.handle);
@@ -1064,6 +1081,10 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
 
     let hash: Hex | undefined;
     let change: StoredNote | undefined;
+    let sent: StoredNote | undefined;
+    let sending = false;
+    let viaRelay = false;
+    let header: string | undefined;
     try {
       const asset = spend.asset;
       const commitment = fieldToHex(await noteCommitmentPoseidon(hexToField(input.secret), input.amountWei, asset));
@@ -1102,9 +1123,33 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           label: `change from paying ${req.resource}`,
         });
       }
+      // The payment note is the payee's money once it lands, and only this server
+      // can hand it over: keep it from before the send, so a payment that lands
+      // with no answer is never lost.
+      sent = notes.add({
+        network: net.key,
+        chainId: net.chainId,
+        pool: req.poolAddress as Address,
+        asset,
+        symbol,
+        decimals,
+        amountWei: payment.paymentNote.amountWei,
+        secret: payment.paymentNote.secret,
+        commitment: payment.paymentNote.commitment,
+        nullifier: payment.paymentNote.nullifier,
+        status: "pending",
+        pending: "create",
+        origin: "payment",
+        createdTx: null,
+        label: `payment for ${req.resource}`,
+      });
+      // The sealed payment, to present if the send has an unclear outcome (no tx hash yet).
+      header = encodePaymentHeader(payment.payload);
       // With the Gloam relay the agent's wallet never appears next to the
       // payment (GLOAM_USE_RELAY=1, or GLOAM_RELAY_URL for a self-hosted relay).
       const relay = relayUrl();
+      viaRelay = Boolean(relay);
+      sending = true;
       hash = relay
         ? await deps.relay(payment.intent, { url: relay })
         : await signer.walletClient.writeContract({
@@ -1117,21 +1162,34 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       const storeWarnings = [
         input.handle ? tryStore(() => notes.update(input.handle!, { spentTx: sentHash })) : undefined,
         change ? tryStore(() => notes.update(change!.handle, { createdTx: sentHash })) : undefined,
+        tryStore(() => notes.update(sent!.handle, { createdTx: sentHash })),
       ].filter(Boolean);
       const receipt = await signer.publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") {
         settleSpend(gate, "reverted", { hash });
-        if (change) tryStore(() => notes.remove(change!.handle));
         // A revert usually means nothing moved, unless the note was already spent elsewhere.
         const nullifier = fieldToHex(await noteNullifierPoseidon(hexToField(input.secret), hexToField(commitment)));
         const spentElsewhere = await sweepChain(signer.publicClient, net).isSpent(nullifier).catch(() => false);
-        if (spentElsewhere && input.handle) tryStore(() => notes.update(input.handle!, { status: "spent", spentTx: null }));
-        else release();
+        if (spentElsewhere) {
+          // Possibly by an earlier copy of this same transfer (a resend), whose change and
+          // payment notes landed: keep them pending, gloam_list_notes refresh settles them.
+          if (input.handle) tryStore(() => notes.update(input.handle!, { status: "spent", spentTx: null }));
+        } else {
+          if (change) tryStore(() => notes.remove(change!.handle));
+          tryStore(() => notes.remove(sent!.handle));
+          release();
+        }
         return fail({
           status: "error",
           error: spentElsewhere
-            ? `Transfer reverted (${hash}): that note was already spent by another transaction.`
+            ? `Transfer reverted (${hash}): that note was already spent by another transaction, which may be an earlier copy of this payment.`
             : `Transfer reverted (${hash}). Nothing moved; the note is spendable again.`,
+          ...(spentElsewhere
+            ? {
+                check: "Call gloam_list_notes with refresh. If the change or the payment confirms, this payment went through: retry the request with paymentHeader and do not pay again.",
+                paymentHeader: header,
+              }
+            : {}),
         });
       }
       const logWarning = settleSpend(gate, "sent", { hash });
@@ -1145,8 +1203,9 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           })
         );
       }
+      if (sent) storeWarnings.push(tryStore(() => notes.update(sent!.handle, { status: "spent", createdTx: sentHash })));
       payment.payload.payload.txHash = hash;
-      const header = encodePaymentHeader(payment.payload);
+      header = encodePaymentHeader(payment.payload);
       // The MPP credential: the same sealed note plus a binding to this one challenge. Never throws past here:
       // the money already moved, so a failure must not be reported as a failed payment.
       let authorization: string | undefined;
@@ -1191,16 +1250,26 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       };
     } catch (err) {
       const error = errMsg(err);
+      // A send that threw may still have landed (a relay timeout after the node took it):
+      // only a send surely never made frees the note and forgets its outputs.
+      const maybeSent = Boolean(hash) || (sending && mayHaveSent(err, viaRelay));
       // Broadcast but unconfirmed still counts against the limit, to be safe.
-      settleSpend(gate, hash ? "unconfirmed" : "failed", { hash, reason: error });
-      if (!hash) {
+      settleSpend(gate, maybeSent ? "unconfirmed" : "failed", { hash, reason: error });
+      if (!maybeSent) {
         release();
         if (change) tryStore(() => notes.remove(change!.handle));
+        if (sent) tryStore(() => notes.remove(sent!.handle));
       }
       return fail({
         status: "error",
         error,
-        ...(hash ? { hash, check: "It was broadcast and may still land. Call gloam_list_notes with refresh before paying again." } : {}),
+        ...(maybeSent
+          ? {
+              ...(hash ? { hash } : {}),
+              check: "It may have been sent and may still land. Call gloam_list_notes with refresh before paying again: if the payment lands, retry the request with paymentHeader instead of paying again.",
+              ...(header ? { paymentHeader: header } : {}),
+            }
+          : {}),
       });
     }
   }
@@ -1542,6 +1611,8 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     }
 
     let held: StoredNote | undefined;
+    // Set when the sweep's send threw in a way that does not prove it stayed unsent.
+    let sweepMaybeSent = false;
     try {
       const sweep = await sweepReceivedNote({
         note,
@@ -1549,7 +1620,11 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         chainId: net.chainId,
         prove: await deps.transferProver(net),
         chain: sweepChain(client, net),
-        submit,
+        submit: (intent) =>
+          submit(intent).catch((e: unknown) => {
+            sweepMaybeSent = mayHaveSent(e, Boolean(relay));
+            throw e;
+          }),
         // The fresh note's secret is the money: store it before the sweep is sent.
         beforeSubmit: (fresh) => {
           held = notes.add({
@@ -1622,6 +1697,15 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           final: false,
           message: `${sweep.reason} Check with gloam_list_notes (refresh), then verify again.`,
           hash: sweep.hash,
+        });
+      }
+      if (sweep.status === "failed" && sweepMaybeSent) {
+        // The relay may have taken the sweep before its error, and the fresh note is the money if it lands: keep it pending.
+        return text({
+          status: "unconfirmed",
+          grantAccess: false,
+          final: false,
+          message: "The sweep may have been sent and may still land. Check with gloam_list_notes (refresh), then verify again.",
         });
       }
       if (held) tryStore(() => notes.remove(held!.handle));

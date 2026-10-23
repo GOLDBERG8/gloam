@@ -33,8 +33,14 @@ import type { NetworkKey } from "./networks.js";
 type Env = Record<string, string | undefined>;
 
 export type NoteStatus = "unspent" | "pending" | "spent";
-/** Where the note came from: a shield, the change of a payment, or a payment this server received and swept. */
-export type NoteOrigin = "shield" | "change" | "received";
+/**
+ * Where the note came from: a shield, the change of a payment, or a payment this
+ * server received and swept. "payment" is a payment this server sent: the
+ * payee's money, kept from before it is sent so a payment that lands is never
+ * lost. It is never this server's balance and never pays; once it lands it is
+ * marked spent (handed over).
+ */
+export type NoteOrigin = "shield" | "change" | "received" | "payment";
 export type KeySource = "GLOAM_NOTE_KEY" | "signer";
 
 export type StoredNote = {
@@ -291,7 +297,7 @@ export function noteView(n: StoredNote) {
 export function balances(notes: StoredNote[]) {
   const by = new Map<string, { network: string; asset: Address; symbol: string; decimals: number; unspent: bigint; pending: bigint; notes: number }>();
   for (const n of notes) {
-    if (n.status === "spent") continue;
+    if (n.status === "spent" || n.origin === "payment") continue;
     if (n.status === "pending" && n.pending === "spend") continue;
     const k = `${n.chainId}:${n.asset.toLowerCase()}`;
     const cur = by.get(k) ?? { network: n.network, asset: n.asset, symbol: n.symbol, decimals: n.decimals, unspent: 0n, pending: 0n, notes: 0 };
