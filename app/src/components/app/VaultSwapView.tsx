@@ -176,6 +176,7 @@ export function VaultSwapView() {
     // The first held token in the list's order (the dollar first), not the
     // largest raw amount: 18-decimal GLOAM would always outrank 6-decimal USDG.
     assets.find((a) => holdings.has(a.toLowerCase())) ??
+    assets[0] ??
     null;
   const toAsset: Address | null =
     (toPick && payAsset && !same(toPick, payAsset) ? toPick : null) ??
@@ -186,7 +187,8 @@ export function VaultSwapView() {
   const held = payAsset ? holdings.get(payAsset.toLowerCase()) : undefined;
   const typed = amountInput.trim() && payAsset ? parseAssetAmount(amountInput.trim(), payAsset) : null;
   const amountBad = amountInput.trim() !== "" && (typed === null || typed <= 0n);
-  const overTotal = typed !== null && held != null && typed > held.total;
+  // Nothing held counts as too little: a price still shows, the swap does not.
+  const overTotal = typed !== null && !amountBad && (held == null || typed > held.total);
   const overNote = typed !== null && held != null && !overTotal && typed > held.largest;
   const amount = typed !== null && !amountBad && !overTotal && !overNote ? typed : null;
 
@@ -248,17 +250,21 @@ export function VaultSwapView() {
   // The flip button turns half a circle on each flip.
   const [turns, setTurns] = useState(0);
 
-  // A fresh quote whenever what is being swapped changes (after a short pause while typing).
+  // A fresh quote whenever what is being swapped changes (after a short pause while
+  // typing). Any valid amount gets a price, even more than the balance holds, so
+  // people can see the rate before they add money; the button still says why the
+  // swap can't go. A price depends only on the tokens, the amount and the fee.
+  const quoteAmount = typed !== null && !amountBad ? typed : null;
   const quoteKey =
-    note && toAsset && feeBps != null && amount !== null ? `${note.id}|${toAsset}|${amount}|${feeBps}` : null;
+    payAsset && toAsset && feeBps != null && quoteAmount !== null ? `${payAsset}|${toAsset}|${quoteAmount}|${feeBps}` : null;
   useEffect(() => {
-    if (!quoteKey || !note || !toAsset || feeBps == null || amount === null || busy) return;
+    if (!quoteKey || !payAsset || !toAsset || feeBps == null || quoteAmount === null || busy) return;
     let live = true;
     const t = window.setTimeout(() => {
       setQuoting(true);
       setQuoteError(null);
       const key = quoteKey;
-      planVaultSwap(getRhPublicClient(), network.chainId, { assetIn: note.asset, assetOut: toAsset, amountIn: amount, feeBps })
+      planVaultSwap(getRhPublicClient(), network.chainId, { assetIn: payAsset, assetOut: toAsset, amountIn: quoteAmount, feeBps })
         .then((p) => live && setQuote({ key, plan: p }))
         .catch((e) => {
           if (!live) return;
@@ -402,8 +408,8 @@ export function VaultSwapView() {
                     : { key: "swap", label: "Swap privately", ready: Boolean(shownPlan && relayOk === true) };
 
   return (
-    <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-10">
-      <div className="gl-card mx-auto w-full min-w-0 max-w-[560px] p-4 sm:p-6 lg:mx-0">
+    <div className="mx-auto flex w-full min-w-0 max-w-[520px] flex-col gap-4 lg:mx-0">
+      <div className="gl-card w-full min-w-0 p-4 sm:p-6">
         <div className="flex items-center justify-between gap-3 px-1 pb-5">
           <p className="t-title text-foreground">Swap</p>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-1 text-[12px] font-medium text-sealed">
@@ -418,10 +424,6 @@ export function VaultSwapView() {
               Connect the wallet you use with Gloam to swap from your private balance.
             </p>
             <WalletMenu />
-          </div>
-        ) : !notes.length ? (
-          <div className="rounded-[20px] bg-surface p-6 text-[14px] leading-relaxed text-soft">
-            Nothing to swap yet. Add {assets.map(assetLabel).join(" or ")} to your private balance first.
           </div>
         ) : (
           <>
@@ -593,8 +595,13 @@ export function VaultSwapView() {
               </div>
             )}
 
-            {(quoteError || overRoom || relayOk === false || (note && amount !== null && amount < BigInt(note.amountWei))) && (
+            {(!notes.length || quoteError || overRoom || relayOk === false || (note && amount !== null && amount < BigInt(note.amountWei))) && (
               <div className="gl-settle mt-4 space-y-2.5 px-1 text-[12.5px] leading-[1.6]">
+                {!notes.length && (
+                  <p className="text-mute">
+                    You can check prices now. To swap, add {assets.map(assetLabel).join(" or ")} to your private balance first, in Add.
+                  </p>
+                )}
                 {quoteError && <p className="text-warn">{quoteError}</p>}
                 {overRoom && room != null && toAsset && (
                   <p className="text-warn">The vault takes at most {formatAssetLabel(room, toAsset)} right now. Swap a smaller amount.</p>
@@ -840,30 +847,61 @@ function TokenPicker({
   );
 }
 
-/** What stays private, what is public, and what happens if a swap can't finish. Kept in full. */
+/**
+ * What stays private, what is public, and what happens if a swap can't finish.
+ * Kept in full, folded under the swap: the one-line summary always shows.
+ */
 function PrivacyNotes({ venue }: { venue: string }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="gl-card min-w-0 p-6 text-[13.5px] leading-[1.65] text-soft sm:p-7">
-      <p className="t-title text-foreground">What stays private</p>
-      <ul className="mt-3 space-y-2.5">
-        <li>Who swapped. The Gloam relay sends it, so your wallet never shows.</li>
-        <li>Which balance it came from, and where the new one goes next.</li>
-      </ul>
-      <p className="t-title mt-7 text-foreground">What is public</p>
-      <ul className="mt-3 space-y-2.5">
-        <li>The two amounts and the two tokens, as with any trade on {venue}.</li>
-        <li>
-          The amount you swap, too: swapping exactly what you added links back to that deposit. Swap a different
-          amount.
-        </li>
-        <li>And cashing out exactly what you got can be matched to this swap. Send it on or cash out a different amount.</li>
-      </ul>
-      <p className="t-title mt-7 text-foreground">If it can&apos;t finish</p>
-      <p className="mt-3">
-        Once a swap is sent, anyone can make it fail on purpose by sending its first step on its own. Then the money
-        comes back to your private balance by itself, less up to 1%: the vault&apos;s cash-out fee and a safety margin
-        that goes to the Gloam treasury.
-      </p>
+    <div className="gl-card min-w-0 text-[13.5px] leading-[1.65] text-soft">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex min-h-14 w-full items-center justify-between gap-4 rounded-[inherit] px-5 py-4 text-left transition-colors duration-200 hover:bg-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 sm:px-6"
+      >
+        <span className="min-w-0">
+          <span className="flex items-center gap-2 font-medium text-foreground">
+            <LockIcon />
+            What stays private
+          </span>
+          <span className="mt-1 block text-[13px] text-mute">
+            Who swapped stays private. The amounts and tokens are public, like any trade on {venue}.
+          </span>
+        </span>
+        <Chevron open={open} />
+      </button>
+      <div
+        className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="border-t border-line px-5 pb-6 pt-5 sm:px-6">
+            <p className="font-medium text-foreground">Private</p>
+            <ul className="mt-2 space-y-2">
+              <li>Who swapped. The Gloam relay sends it, so your wallet never shows.</li>
+              <li>Which balance it came from, and where the new one goes next.</li>
+            </ul>
+            <p className="mt-5 font-medium text-foreground">Public</p>
+            <ul className="mt-2 space-y-2">
+              <li>The two amounts and the two tokens, as with any trade on {venue}.</li>
+              <li>
+                The amount you swap, too: swapping exactly what you added links back to that deposit. Swap a different
+                amount.
+              </li>
+              <li>And cashing out exactly what you got can be matched to this swap. Send it on or cash out a different amount.</li>
+            </ul>
+            <p className="mt-5 font-medium text-foreground">If it can&apos;t finish</p>
+            <p className="mt-2">
+              Once a swap is sent, anyone can make it fail on purpose by sending its first step on its own. Then the money
+              comes back to your private balance by itself, less up to 1%: the vault&apos;s cash-out fee and a safety margin
+              that goes to the Gloam treasury.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
