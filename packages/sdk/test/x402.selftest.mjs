@@ -31,6 +31,7 @@ import {
   GLOAM_X402_SCHEME,
   GLOAM_VS_ZONE,
   SEALED_VAULT,
+  FIELD_PRIME,
 } from "../dist/index.js";
 
 let checks = 0;
@@ -125,6 +126,19 @@ assert((await verifyPaymentNoteBinding(payNote)) === true, "honest payment note 
 // a payer who lies about the amount (claims more than the commitment was minted for) fails the binding check
 const lyingNote = { ...payNote, amountWei: (PRICE * 4n).toString() };
 assert((await verifyPaymentNoteBinding(lyingNote)) === false, "lied-up payment note fails the binding check");
+// Poseidon reads its inputs mod p: a note claiming amount + p (or secret + p) has the
+// same commitment as the honest one, so only canonical fields may bind.
+const aliasAmount = { ...payNote, amountWei: (PRICE + FIELD_PRIME).toString() };
+assert(fieldToHex(await noteCommitmentPoseidon(BigInt(payNote.secret), PRICE + FIELD_PRIME, STABLE)) === payNote.commitment, "amount + p hashes to the same commitment");
+assert((await verifyPaymentNoteBinding(aliasAmount)) === false, "a note claiming amount + p does not bind");
+const vAlias = verifyGloamPayment({ requirements: req, payload: built.payload, note: aliasAmount });
+assert(vAlias.ok === false && /canonical/.test(vAlias.reason), "verify refuses a note claiming amount + p");
+const aliasSecret = { ...payNote, secret: fieldToHex(BigInt(payNote.secret) + FIELD_PRIME) };
+assert((await verifyPaymentNoteBinding(aliasSecret)) === false, "a note with secret + p does not bind");
+const aliasAsset = { ...payNote, asset: fieldToHex(BigInt(STABLE) + FIELD_PRIME) };
+assert((await verifyPaymentNoteBinding(aliasAsset)) === false, "a note with asset + p does not bind");
+const zeroNote = { ...payNote, amountWei: "0", commitment: fieldToHex(await noteCommitmentPoseidon(BigInt(payNote.secret), 0n, STABLE)) };
+assert((await verifyPaymentNoteBinding(zeroNote)) === false, "a zero-value note does not count as a payment");
 
 // after the agent broadcasts, it attaches the tx hash
 built.payload.payload.txHash = "0xabc123";

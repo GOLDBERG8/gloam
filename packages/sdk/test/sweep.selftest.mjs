@@ -33,6 +33,7 @@ import {
   transferCallArgs,
   GLOAM_NOT_FINAL,
   SEALED_VAULT,
+  FIELD_PRIME,
 } from "../dist/index.js";
 
 let checks = 0;
@@ -209,6 +210,14 @@ const stranger = await generateReceiveKey();
     note: { ...note, amountWei: "4000" }, poolAddress: SEALED_VAULT, chainId: NETWORK, prove: stubProve, chain: pool.chain, submit: submitTo(pool),
   });
   assert(lying.status === "bad_note" && !lying.final, "a note whose amount does not bind is refused");
+  // amount + p hashes to the same commitment, and the sweep proof would be valid (the
+  // circuit sees the reduced amount), but the fresh note would claim amount + p.
+  const sent = [];
+  const alias = await sweepReceivedNote({
+    note: { ...note, amountWei: (BigInt(note.amountWei) + FIELD_PRIME).toString() }, poolAddress: SEALED_VAULT, chainId: NETWORK, prove: stubProve, chain: pool.chain, submit: submitTo(pool, sent),
+  });
+  assert(alias.status === "bad_note" && !alias.final && alias.freshNote === null, "a note claiming amount + p is refused");
+  assert(sent.length === 0, "nothing is submitted for it");
 }
 
 // ── 6. submit failures ────────────────────────────────────────────────────────

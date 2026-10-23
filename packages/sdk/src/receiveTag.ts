@@ -21,7 +21,7 @@
  */
 
 import type { Address, Hex } from "viem";
-import { NATIVE_ASSET } from "./constants.js";
+import { FIELD_PRIME, NATIVE_ASSET } from "./constants.js";
 import { noteNullifierPoseidon } from "./note.js";
 import { fieldToHex, hexToField } from "./poseidon.js";
 import { cleanPaymentNote } from "./paymentNote.js";
@@ -205,6 +205,34 @@ export interface NotePackage {
   note?: string;
 }
 
+/** Notes are range checked to < 2^128 in every Gloam circuit. */
+const AMOUNT_LIMIT = 1n << 128n;
+
+const FIELD_HEX = /^0x[0-9a-fA-F]{1,64}$/;
+
+/**
+ * Why a note's fields are not the values the circuits see, or null when they
+ * are. Poseidon reduces its inputs modulo the field prime, so a note claiming
+ * amount + p (or secret + p) opens the same commitment as the real one: a payer
+ * holding 1 base unit could claim it holds 1 + p. Only canonical fields count:
+ * secret and commitment below the field prime, the amount in plain digits below
+ * 2^128, and the asset a 20-byte address.
+ */
+export function noteFieldProblem(note: { secret: string; commitment: string; amountWei: string; asset: string }): string | null {
+  const { secret, commitment, amountWei, asset } = note;
+  if (typeof secret !== "string" || !FIELD_HEX.test(secret) || BigInt(secret) >= FIELD_PRIME) {
+    return "The secret is not a field element.";
+  }
+  if (typeof commitment !== "string" || !FIELD_HEX.test(commitment) || BigInt(commitment) >= FIELD_PRIME) {
+    return "The commitment is not a field element.";
+  }
+  if (typeof amountWei !== "string" || !/^\d{1,39}$/.test(amountWei) || BigInt(amountWei) >= AMOUNT_LIMIT) {
+    return "The amount is not a whole number of base units below 2^128.";
+  }
+  if (typeof asset !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(asset)) return "The asset is not an address.";
+  return null;
+}
+
 /** Compact gloam1. form, byte-identical to the app's encodeNotePackage (a note goes under "n"). */
 export function encodeNotePackage(pack: Omit<NotePackage, "v" | "type" | "scheme"> & Partial<NotePackage>): string {
   const note = cleanPaymentNote(pack.note);
@@ -246,9 +274,8 @@ export function decodeNotePackage(input: string): NotePackage {
   };
   const note = cleanPaymentNote(obj.note ?? obj.n);
   if (note) pack.note = note;
-  if (!/^0x[0-9a-fA-F]+$/.test(pack.secret) || !/^\d+$/.test(pack.amountWei) || !/^0x[0-9a-fA-F]+$/.test(pack.commitment)) {
-    throw new Error("Not a valid Gloam note package.");
-  }
+  const problem = noteFieldProblem(pack);
+  if (problem) throw new Error(`Not a valid Gloam note package. ${problem}`);
   return pack;
 }
 

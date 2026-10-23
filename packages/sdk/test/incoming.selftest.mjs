@@ -26,6 +26,7 @@ import {
   mainnetNetwork,
   GLOAM_NETWORKS,
   RH_MAINNET_USDG,
+  FIELD_PRIME,
 } from "../dist/index.js";
 
 let checks = 0;
@@ -138,6 +139,20 @@ const someoneElse = await generateReceiveKey();
   chain.spend(a.nullifier, 4000);
   const after = await scanIncomingPayments({ client: chain.client, network: net, receiveKey: raeto, board: BOARD });
   assert(after.payments.length === 1 && after.payments[0].note === "agent-7", "a secured payment is not offered again");
+}
+
+// ── a code that claims more than its note holds ───────────────────────────────
+{
+  // A real 1-unit note, packaged as 1 + p: Poseidon reads the amount mod p, so the
+  // commitment matches and the note is in the vault, but it holds 0.000001 USDG.
+  const chain = mockChain();
+  const secret = await randomSecretField();
+  const commitment = fieldToHex(await noteCommitmentPoseidon(secret, 1n, RH_MAINNET_USDG));
+  const pack = encodeNotePackage({ pool: net.pool, asset: RH_MAINNET_USDG, amountWei: (1n + FIELD_PRIME).toString(), secret: fieldToHex(secret), commitment, note: "agent:attacker" });
+  chain.land(commitment);
+  chain.memos.push({ block: 1501n, commitment, memo: toHex(await sealToReceiveTag(pack, raeto.tag)), tx: "0xc1" });
+  const r = await scanIncomingPayments({ client: chain.client, network: net, receiveKey: raeto, board: BOARD });
+  assert(r.payments.length === 0, `a code claiming amount + p is not a payment (got ${r.payments.map((p) => p.amountWei).join(",")})`);
 }
 
 // ── a node that refuses wide ranges or too many results ───────────────────────

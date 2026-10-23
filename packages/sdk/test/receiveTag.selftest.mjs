@@ -32,6 +32,7 @@ import {
   noteCommitmentPoseidon,
   noteNullifierPoseidon,
   fieldToHex,
+  FIELD_PRIME,
   GLOAM_X402_SCHEME,
   GLOAM_X402_VERSION,
   GLOAM_VS_ZONE,
@@ -105,6 +106,24 @@ const withNote = "gloam1." + b64url(Buffer.from(JSON.stringify({ v: 1, t: "gloam
 assert(decodeNotePackage(withNote).secret === pkg.secret, "a package with the app's optional note still decodes");
 const exp = await notePackageToExport(back);
 assert(exp.nullifier === fieldToHex(await noteNullifierPoseidon(99n, BigInt(pkg.commitment))), "export derives the nullifier");
+
+// Only canonical fields decode. Poseidon reads its inputs mod p, so a package
+// claiming 250 + p (or secret + p) opens the same commitment as the real one.
+const rawPack = (over) => "gloam1." + b64url(Buffer.from(JSON.stringify({ v: 1, t: "gloam-private-note", s: "poseidon", p: pkg.pool, a: pkg.asset, w: "250", k: pkg.secret, c: pkg.commitment, ...over })));
+for (const [over, why] of [
+  [{ w: (250n + FIELD_PRIME).toString() }, "an amount of real + p"],
+  [{ w: (1n << 128n).toString() }, "an amount of 2^128 (the circuits' range check)"],
+  [{ w: "0x10" }, "an amount in hex"],
+  [{ w: "-1" }, "a negative amount"],
+  [{ k: fieldToHex(99n + FIELD_PRIME) }, "a secret of real + p"],
+  [{ k: "0x" + "0".repeat(65) + "1" }, "a secret longer than 32 bytes"],
+  [{ c: fieldToHex(BigInt(pkg.commitment) + FIELD_PRIME) }, "a commitment of real + p"],
+  [{ a: "0x" + (BigInt(STABLE) + FIELD_PRIME).toString(16) }, "an asset of real + p"],
+  [{ a: "not-hex" }, "an asset that is not an address"],
+]) {
+  await rejects(async () => decodeNotePackage(rawPack(over)), /Not a valid Gloam note package/, `decode refuses ${why}`);
+}
+assert(decodeNotePackage(rawPack({ w: ((1n << 128n) - 1n).toString() })).amountWei === ((1n << 128n) - 1n).toString(), "the largest amount the circuits take still decodes");
 
 // ── x402: payTo must be a receive tag ─────────────────────────────────────────
 const SECRET = 4242n, NOTE_AMOUNT = 1000n, PRICE = 400n;

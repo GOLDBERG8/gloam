@@ -45,6 +45,7 @@ import {
   isSealedTicket,
   notePackageToExport,
   NOTE_PACKAGE_PREFIX,
+  noteFieldProblem,
   openSealedTicket,
   sealToReceiveTag,
   type ReceiveKey,
@@ -510,6 +511,8 @@ export function verifyGloamPayment(args: {
       return fail("payment note does not decode");
     }
   }
+  // Poseidon reads every field mod p, so amount + p would open the same note.
+  if (noteFieldProblem(note)) return fail("payment note fields are not canonical");
   if (note.asset.toLowerCase() !== req.asset.toLowerCase()) {
     return fail("payment note asset does not match required asset");
   }
@@ -557,9 +560,14 @@ export function verifyGloamPayment(args: {
  * smaller amount (and is a real on-chain leaf), passing structural verify while
  * underpaying. The payee only learns the true value at cash-out. Run this before
  * granting access on any payment where the payee will rely on the amount.
+ *
+ * Only canonical fields bind (noteFieldProblem): the hash reads its inputs mod
+ * the field prime, so a note claiming amount + p would otherwise match the
+ * commitment of a note holding just `amount`.
  */
 export async function verifyPaymentNoteBinding(note: NoteExport): Promise<boolean> {
   try {
+    if (noteFieldProblem(note) || BigInt(note.amountWei) <= 0n) return false;
     const c = await noteCommitmentPoseidon(
       BigInt(note.secret),
       BigInt(note.amountWei),
