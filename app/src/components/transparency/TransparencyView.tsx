@@ -1,8 +1,7 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatUnits, zeroAddress } from "viem";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
@@ -11,13 +10,11 @@ import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { TokenLogo } from "@/components/app/TokenLogo";
 import {
-  MAINNET_ENABLED,
   NETWORK_KEYS,
   defaultNetworkKey,
   getNetwork,
   isNetworkKey,
   networkName,
-  type ChainFamily,
   type NetworkKey,
 } from "@/lib/networks";
 import {
@@ -27,26 +24,10 @@ import {
   type PublicEvent,
   type VaultHolding,
 } from "./ledger";
+import { NetworkPicker } from "./NetworkPicker";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { RH_MAINNET_TOKENS } from "@/lib/tokens";
 import { vaultSwapRouter } from "@/lib/vaultSwap";
-
-const LOGOS: Record<ChainFamily, string> = {
-  robinhood: "/brand/logos/robinhood.png",
-  tempo: "/brand/logos/tempo.svg",
-};
-
-/** Every network Gloam runs on: the two testnets, and each mainnet once its pool is in. */
-const NETS: { key: NetworkKey; logo: string }[] = NETWORK_KEYS.map((key) => ({
-  key,
-  logo: LOGOS[getNetwork(key).family],
-}));
-
-/** Tab name: the chain alone, until a mainnet sits next to its testnet. */
-function tabLabel(key: NetworkKey): string {
-  const n = getNetwork(key);
-  return MAINNET_ENABLED ? networkName(n) : n.label;
-}
 
 /* ---------------------------------------------------------------- data */
 
@@ -326,59 +307,6 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 }
 
 /* ---------------------------------------------------------------- pieces */
-
-function NetworkTabs({ value, onChange }: { value: NetworkKey; onChange: (k: NetworkKey) => void }) {
-  const refs = useRef<Record<string, HTMLButtonElement | null>>({});
-  function onKey(e: KeyboardEvent<HTMLButtonElement>) {
-    const i = NETS.findIndex((n) => n.key === value);
-    let j = -1;
-    if (e.key === "ArrowRight") j = (i + 1) % NETS.length;
-    else if (e.key === "ArrowLeft") j = (i - 1 + NETS.length) % NETS.length;
-    else if (e.key === "Home") j = 0;
-    else if (e.key === "End") j = NETS.length - 1;
-    if (j < 0) return;
-    e.preventDefault();
-    onChange(NETS[j].key);
-    refs.current[NETS[j].key]?.focus();
-  }
-  return (
-    <div
-      role="tablist"
-      aria-label="Network"
-      className={`inline-flex max-w-full self-start rounded-full bg-surface-2 p-1 max-sm:flex max-sm:w-full lg:self-auto dark:bg-panel dark:ring-1 dark:ring-line ${
-        MAINNET_ENABLED ? "overflow-x-auto" : ""
-      }`}
-    >
-      {NETS.map((n) => {
-        const active = n.key === value;
-        return (
-          <button
-            key={n.key}
-            ref={(el) => {
-              refs.current[n.key] = el;
-            }}
-            id={`net-tab-${n.key}`}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            aria-controls="ledger-panel"
-            tabIndex={active ? 0 : -1}
-            onClick={() => onChange(n.key)}
-            onKeyDown={onKey}
-            className={`flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-full pl-2 pr-4 text-[14px] transition-colors duration-200 max-sm:flex-1 ${
-              active
-                ? "bg-panel font-medium text-foreground shadow-card dark:bg-surface-2"
-                : "text-mute hover:text-foreground"
-            }`}
-          >
-            <Image src={n.logo} alt="" width={24} height={24} className="h-6 w-6 rounded-md ring-1 ring-line" />
-            {tabLabel(n.key)}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 function HoldingsCard({ ledger, prices, waiting }: { ledger: Ledger; prices: Prices | null; waiting: boolean }) {
   const n = getNetwork(ledger.network);
@@ -796,10 +724,10 @@ export function TransparencyView() {
                 Gloam server sits in between, and you do not need a wallet.
               </p>
             </div>
-            <NetworkTabs value={shown} onChange={choose} />
+            <NetworkPicker value={shown} onChange={choose} />
           </div>
 
-          <div id="ledger-panel" role="tabpanel" aria-labelledby={`net-tab-${shown}`} className="mt-10 min-w-0">
+          <div id="ledger-panel" role="region" aria-label={`The vault on ${networkName(net)}`} className="mt-10 min-w-0">
             {!ledger && error ? (
               <div role="alert" className="gl-card flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
