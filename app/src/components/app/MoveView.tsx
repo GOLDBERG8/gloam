@@ -50,7 +50,7 @@ import {
 } from "@/lib/notePackage";
 import {
   getOrCreateReceiveIdentity,
-  isReceiveTag,
+  isValidReceiveTag,
   encryptTicketForTag,
   rotateReceiveIdentity,
   type ReceiveIdentity,
@@ -1263,6 +1263,10 @@ export function MoveView() {
       if (amountPay > BigInt(selected.amountWei)) {
         throw new Error("That is more than this balance holds.");
       }
+      // a mistyped Gloam address is caught before anything is proven or sent
+      if (payStyle === "direct" && !isValidReceiveTag(recipientTag)) {
+        throw new Error("That Gloam address is incomplete or mistyped. Copy it again from their Receive page.");
+      }
 
       const path = await pathForLeaf(selected.leafIndex!);
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
@@ -1317,7 +1321,7 @@ export function MoveView() {
       let locked = false;
       if (payStyle === "direct") {
         const tag = recipientTag.trim();
-        if (!isReceiveTag(tag)) {
+        if (!isValidReceiveTag(tag)) {
           throw new Error(
             "Paste their Gloam address (it starts with gloamr1) to pay them privately."
           );
@@ -2251,10 +2255,16 @@ export function MoveView() {
                       placeholder="Their Gloam address (gloamr1…)"
                       className="gl-input tnum mt-3"
                     />
-                    <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
-                      Like sending to an address, but private. They find their
-                      Gloam address under Pay, Receive.
-                    </p>
+                    {recipientTag.trim().startsWith("gloamr1.") && !isValidReceiveTag(recipientTag) ? (
+                      <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                        That Gloam address looks incomplete or mistyped. Copy it again from their Receive page.
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                        Like sending to an address, but private. They find their
+                        Gloam address under Pay, Receive.
+                      </p>
+                    )}
                     {(contacts.length > 0 || recipientTag.trim().startsWith("gloamr1.")) && (
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         {contacts.map((c) => (

@@ -230,6 +230,31 @@ export function isReceiveTag(input: string): boolean {
   return input.trim().startsWith(RECEIVE_TAG_PREFIX);
 }
 
+/** DER header of a P-256 public key (SPKI), then 0x04 for an uncompressed point. */
+const P256_SPKI_HEAD = [
+  0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48,
+  0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04,
+];
+
+/**
+ * A whole Gloam address: gloamr1. followed by a P-256 public key that decodes,
+ * not just the prefix. "gloamr1." or "gloamr1.invalid" fail here, so a payroll
+ * row or a payment is refused when it is entered, not after it is proven.
+ */
+export function isValidReceiveTag(input: string): boolean {
+  const t = input.trim();
+  if (!t.startsWith(RECEIVE_TAG_PREFIX)) return false;
+  const body = t.slice(RECEIVE_TAG_PREFIX.length);
+  if (!/^[A-Za-z0-9_-]{120,124}$/.test(body)) return false;
+  let bytes: Uint8Array;
+  try {
+    bytes = b64urlDecode(body);
+  } catch {
+    return false;
+  }
+  return bytes.length === 91 && P256_SPKI_HEAD.every((b, i) => bytes[i] === b);
+}
+
 export function isPayToTagPackage(input: string): boolean {
   return input.trim().startsWith(PAY_TO_TAG_PREFIX);
 }
