@@ -39,7 +39,7 @@ export const VAULT_SWAP_ROUTERS: Record<number, Address | null> = {
  * wallets. Empty: open to everyone. The routers themselves are permissionless;
  * this only decides who sees the tab.
  */
-export const SWAP_PREVIEW_WALLETS: readonly string[] = ["0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8"];
+export const SWAP_PREVIEW_WALLETS: readonly string[] = [];
 
 export function swapOpenTo(address: string | undefined): boolean {
   if (SWAP_PREVIEW_WALLETS.length === 0) return true;
