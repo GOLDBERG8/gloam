@@ -140,6 +140,9 @@ import {
 } from "./PrivateCashOut";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { WalletMenu } from "./WalletMenu";
+import { AfterClaimNext } from "./AfterClaimNext";
+import { ClaimSafetyLine } from "./ClaimSafetyLine";
+import { canSwapAfterClaim, takeFirstClaim } from "@/lib/afterClaim";
 import { TokenLogo } from "./TokenLogo";
 import { AddTokenToWallet } from "./AddTokenToWallet";
 import { checkSweep, type SweepCheck, type SweepReader } from "@/lib/sweepCheck";
@@ -251,7 +254,8 @@ export function MoveView() {
   const [importOk, setImportOk] = useState<{
     text: string;
     note?: string;
-    fresh?: boolean;
+    /** A claim just secured: what it can do next (AfterClaimNext), full the first time in this browser. */
+    next?: { id: string; full: boolean; amount: string; asset: Address };
     tone?: "warn" | "danger";
   } | null>(null);
   /** The claimed payment being secured right now (lib/claimSweep). */
@@ -1545,7 +1549,7 @@ export function MoveView() {
         setImportOk({
           text: `${claim ? "Claimed and secured" : "Secured"} ${label}. Only you can spend it now, and the person who sent it can no longer take it back.`,
           note: claim?.note,
-          fresh: Boolean(claim),
+          next: claim ? { id: note.id, full: takeFirstClaim(), amount: label, asset: note.asset } : undefined,
         });
       } else if (r.status === "already_spent") {
         setImportOk({
@@ -1718,7 +1722,7 @@ export function MoveView() {
         setImportOk({
           text: `Claimed and secured ${r.label}. Only you can spend it now.`,
           note: r.note,
-          fresh: true,
+          next: { id: r.local.id, full: takeFirstClaim(), amount: r.label, asset: r.local.asset },
         });
         return;
       }
@@ -1862,6 +1866,22 @@ export function MoveView() {
     setClaimPreview(null);
   }
 
+  /**
+   * An action picked after a claim (AfterClaimNext): open that part of Pay with
+   * the claimed balance already picked, and bring it into view. "receive" goes
+   * to the Gloam address, where getting paid privately starts.
+   */
+  function afterClaimGo(id: Mode) {
+    selectMode(id);
+    window.setTimeout(() => {
+      const el = document.getElementById(id === "receive" ? "gloam-address" : "pay-card");
+      if (!el) return;
+      const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+      if (id === "receive") el.focus({ preventScroll: true });
+    }, 0);
+  }
+
   const shieldTokens = shieldTokensFor(network.chainId);
   const logoIdFor = (asset: string): string | null => {
     if (isNativeAsset(asset)) return null;
@@ -1910,7 +1930,7 @@ export function MoveView() {
   return (
     <>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="gl-card min-w-0 p-5 sm:p-7">
+        <div id="pay-card" className="gl-card min-w-0 scroll-mt-24 p-5 sm:p-7">
           <DevKeysBanner compact />
 
           {/* Mode tabs */}
@@ -2000,7 +2020,19 @@ export function MoveView() {
             </div>
           )}
 
-          {importOk && (
+          {importOk?.next ? (
+            <AfterClaimNext
+              key={importOk.next.id}
+              full={importOk.next.full}
+              amountLabel={importOk.next.amount}
+              text={importOk.text}
+              note={importOk.note}
+              swapHref={canSwapAfterClaim(network.chainId, importOk.next.asset, address) ? "/app/vault?tab=swap" : null}
+              onSend={() => afterClaimGo("send")}
+              onGetPaid={() => afterClaimGo("receive")}
+              onCashOut={() => afterClaimGo("cashout")}
+            />
+          ) : importOk && (
             <div
               className={`mt-5 flex items-start gap-3 rounded-xl px-4 py-3 text-[13.5px] leading-relaxed text-foreground ${
                 importOk.tone === "danger"
@@ -2032,36 +2064,6 @@ export function MoveView() {
                     label="Their note"
                     className="mt-1 text-soft"
                   />
-                )}
-                {importOk.fresh && (
-                  <>
-                    <span className="mt-2 block text-soft">
-                      Every new person in the vault makes every payment in it harder to trace, yours included.
-                    </span>
-                    <span className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setImportOk(null);
-                          setPayStyle("bearer");
-                          setMode("send");
-                        }}
-                        className="btn btn-ink btn-sm"
-                      >
-                        Send one back
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setImportOk(null);
-                          setMode("cashout");
-                        }}
-                        className="btn btn-ghost btn-sm"
-                      >
-                        Cash out
-                      </button>
-                    </span>
-                  </>
                 )}
               </span>
             </div>
@@ -2901,9 +2903,9 @@ export function MoveView() {
 
           {mode === "receive" && (
             <div className="mt-6 space-y-7">
-              <section>
+              <section id="gloam-address" tabIndex={-1} aria-labelledby="gloam-address-title" className="scroll-mt-24 outline-none">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-[15px] font-medium text-foreground">
+                  <h3 id="gloam-address-title" className="text-[15px] font-medium text-foreground">
                     Your Gloam address
                   </h3>
                   {myIdentity && (
@@ -3137,6 +3139,7 @@ export function MoveView() {
                       )}
                     </button>
                   )}
+                  {relayChecked && <ClaimSafetyLine free={relayAvailable && relayOn} />}
                 </div>
               </section>
             </div>
