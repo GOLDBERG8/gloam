@@ -25,13 +25,9 @@ import {
 } from "@/lib/claimSweep";
 import { readDemo } from "@/lib/demoFlag";
 import { syncShieldTree } from "@/lib/treeSync";
-import { buildPoseidonUnshieldWitness } from "@/lib/proverPoseidon";
 import { buildTransferWitness } from "@/lib/proverTransfer";
-import {
-  fieldToBytes32,
-  proveTransferInBrowser,
-  proveUnshieldInBrowser,
-} from "@/lib/proveClient";
+import { fieldToBytes32, proveTransferInBrowser } from "@/lib/proveClient";
+import { proveCashOut } from "@/lib/cashOutProof";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenWallets } from "@/lib/screeningClient";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
@@ -106,18 +102,42 @@ import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
 import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
 import { surelyNotSent } from "@/lib/walletErrors";
 import {
-  CashOutLaterError,
   cancelCashOut,
   dismissReturnedCashOut,
-  markFor,
   reconcileCashOuts,
   releaseGoneCashOut,
   returnedCashOutNotes,
-  scheduleCashOut,
+  scheduleNoteCashOut,
   scheduledCashOutNotes,
   type CashOutWindow,
 } from "@/lib/cashOutLater";
-import { freshPath, matchesRecentIncoming, roundDownToWhole, splitForCashOut } from "@/lib/cashOutSplit";
+import { freshPath, roundDownToWhole, splitForCashOut } from "@/lib/cashOutSplit";
+import {
+  findCashOutLink,
+  linkMessage,
+  piecesFee,
+  planPieces,
+  recentMoneyIn,
+  seededRandom,
+} from "@/lib/cashOutPlan";
+import {
+  keepPiece,
+  readPrivatePref,
+  runPrivateCashOut,
+  savePrivatePref,
+  schedulePiece,
+  unscheduledPieces,
+  type PieceProgress,
+} from "@/lib/cashOutPrivately";
+import {
+  CashOutLinkNote,
+  HowChoice,
+  PieceLeftover,
+  PiecesCard,
+  SpreadOver,
+  aboutTime,
+  scheduledLine,
+} from "./PrivateCashOut";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
@@ -193,7 +213,23 @@ export function MoveView() {
   const sweepRuns = useRef(new Map<string, Promise<SweepCheck>>());
   /** Where the last cash out went, for the "see it in your wallet" step after it lands. */
   const [cashedOut, setCashedOut] = useState<{ to: Address; asset: Address } | null>(null);
-  const [scheduledNotice, setScheduledNotice] = useState<{ at: number; label: string } | null>(null);
+  /** What was just scheduled: one cash out, or a private cash out's pieces (count, from `at` to `until`). */
+  const [scheduledNotice, setScheduledNotice] = useState<{ at: number; label: string; count?: number; until?: number } | null>(null);
+  // Cash out privately (lib/cashOutPrivately): a few pieces over time, the
+  // default whenever it is offered, unless this browser chose all at once.
+  const [privatePref, setPrivatePref] = useState(() => readPrivatePref().on);
+  const [planWindow, setPlanWindow] = useState<CashOutWindow>(() => readPrivatePref().window);
+  /** Picks the plan's sizes; "Other sizes" draws again. */
+  const [planSeed, setPlanSeed] = useState(() => Math.floor(Math.random() * 2 ** 31));
+  /** Each piece to its own address (piece 1 goes to "To"; these are pieces 2 to 4). */
+  const [perPiece, setPerPiece] = useState(false);
+  const [pieceTo, setPieceTo] = useState<string[]>([]);
+  /** The pieces' progress while a private cash out is being set up. */
+  const [planRun, setPlanRun] = useState<PieceProgress[] | null>(null);
+  /** The note a private cash out started from: the form stays on it while the run spends it. */
+  const [runNote, setRunNote] = useState<LocalNote | null>(null);
+  /** The piece being scheduled again from its notice. */
+  const [leftoverBusy, setLeftoverBusy] = useState<string | null>(null);
   const [sendAmount, setSendAmount] = useState(
     () => request?.amount ?? suggestion?.amount ?? ""
   );
@@ -244,6 +280,15 @@ export function MoveView() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [mustSaveCode, savedCode, shareBlob]);
+  // Setting up a private cash out: leaving now stops it after the piece in hand
+  // (nothing is lost, but the rest is not scheduled), so ask first.
+  const planRunning = planRun != null;
+  useEffect(() => {
+    if (!planRunning) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [planRunning]);
   const [contacts, setContacts] = useState<GloamContact[]>([]);
   /** Relay: submit proven actions from the Gloam relay so the wallet never shows. */
   const [relayAvailable, setRelayAvailable] = useState(false);
@@ -689,6 +734,7 @@ export function MoveView() {
   }, [suggestion, notes]);
 
   const selected =
+    runNote ??
     notes.find((n) => n.id === selectedId) ??
     notes.find((n) => n.id === requestNoteId) ??
     notes.find((n) => n.id === suggestNoteId) ??
@@ -726,10 +772,16 @@ export function MoveView() {
       : address && cashOutTo.toLowerCase() === address.toLowerCase()
         ? "This is the wallet you use with Gloam, so the cash out can be linked back to you."
         : null;
-  const cashOutMatchesRecent =
-    selected != null && !cashOutAmountInvalid && matchesRecentIncoming(cashOutAmount, allLocal, selected.asset);
-  const scheduledRows = useMemo(() => scheduledCashOutNotes(allLocal), [allLocal]);
+  // A cash out that lines up with money that came in (lib/cashOutPlan): a calm note under the amount.
+  const cashOutLink =
+    selected != null && !cashOutAmountInvalid ? findCashOutLink(cashOutAmount, allLocal, selected.asset) : null;
+  const scheduledRows = useMemo(
+    () => scheduledCashOutNotes(allLocal).sort((a, b) => a.cashOut!.at - b.cashOut!.at),
+    [allLocal]
+  );
   const returnedRows = useMemo(() => returnedCashOutNotes(allLocal), [allLocal]);
+  /** Pieces of a private cash out split off but not scheduled (a relay that was down, a closed tab). */
+  const leftoverRows = useMemo(() => unscheduledPieces(allLocal), [allLocal]);
   // Cash-out fee (mainnet pools). The proof still spends the whole note; the
   // pool keeps the fee and pays the rest. Older pools fail this read: no fee.
   const demoMode = useDemo();
@@ -751,6 +803,65 @@ export function MoveView() {
     selected != null &&
     poolForCashOut != null &&
     poolForCashOut < cashOutAmount;
+
+  // Cash out privately (lib/cashOutPrivately): 2 to 4 round pieces, none
+  // matching money that came in, each through cash out later. Offered for a
+  // stablecoin above 5 with the relay up, since the relay sends every step.
+  const selectedAsset = selected?.asset;
+  const cashOutStable =
+    selectedAsset != null &&
+    shieldTokensFor(network.chainId).some(
+      (t) => t.kind === "stablecoin" && t.address.toLowerCase() === selectedAsset.toLowerCase()
+    );
+  const moneyIn = selectedAsset ? recentMoneyIn(allLocal, selectedAsset) : [];
+  // Seeded, so the same amount shows the same pieces on every render until "Other sizes".
+  const plan =
+    selectedAsset && cashOutStable && !cashOutAmountInvalid && cashOutAmount > 0n
+      ? planPieces({
+          amount: cashOutAmount,
+          decimals: assetDecimals(selectedAsset),
+          avoid: moneyIn.map((m) => m.amountWei),
+          random: seededRandom(planSeed),
+        })
+      : null;
+  const planOffered = plan != null && relayAvailable && poseidonMode;
+  const planActive = planOffered && privatePref;
+  // While a run is setting pieces up, the card shows that run (the note it
+  // started from is spent part way, so the selection moves on underneath).
+  const planPieceList = planRun ? planRun.map((p) => p.amount) : (plan?.pieces ?? []);
+  const planTotal = planPieceList.reduce((t, p) => t + p, 0n);
+  /** The fee for what will go out: each piece pays the pool's own fee on its amount. */
+  const outFee = planActive ? piecesFee(planPieceList, cashOutFeeBps) : cashOutFee;
+  const avoiding =
+    moneyIn.length === 0
+      ? null
+      : moneyIn.every((m) => m.kind === "deposit")
+        ? "money you added"
+        : moneyIn.every((m) => m.kind === "received")
+          ? "money you were paid"
+          : "money you added or were paid";
+  const tiedToYou = (a: string) =>
+    depositWallets.has(a.toLowerCase()) || (address != null && a.toLowerCase() === address.toLowerCase());
+  /** Where each piece goes: all to "To", or piece 2 on to their own addresses. */
+  const pieceTargets: (Address | null)[] = planPieceList.map((_, i) => {
+    if (i === 0 || !perPiece) return cashOutTo;
+    const v = (pieceTo[i - 1] ?? "").trim();
+    return isAddress(v) ? (v as Address) : null;
+  });
+  const piecesReady = pieceTargets.length > 0 && pieceTargets.every(Boolean);
+  const distinctTargets = new Set(pieceTargets.filter(Boolean).map((a) => a!.toLowerCase())).size;
+  // Honest about what splitting can't hide: pieces that meet at one address add up there.
+  const whereLine = !planActive
+    ? null
+    : pieceTargets.some((a) => a && tiedToYou(a))
+      ? "Splitting can't hide a wallet that is tied to you: pieces that land there can still be linked back."
+      : !perPiece
+        ? `All ${planPieceList.length} pieces land at the same address, so anyone looking at it can add them up. A busy address, like an exchange deposit address, hides that better.`
+        : !piecesReady
+          ? "Paste an address for each piece. Fresh ones that never touched Gloam are best."
+          : distinctTargets < planPieceList.length
+            ? "Some pieces land at the same address, so they can be added up there."
+            : "Each piece lands at its own address, which makes them much harder to add up.";
 
   // Does money sent to this address get swept out? Read in the background; a
   // failed read is no warning, never a blocked cash out.
@@ -779,6 +890,20 @@ export function MoveView() {
   const sweepNow = sweepKey ? (sweepResults[sweepKey] ?? null) : null;
   const sweepHold = Boolean(sweepNow?.swept) && sweepOkFor !== sweepKey;
 
+  /** Round it: the amount down to whole units, so odd cents stay in the private balance. */
+  function roundCashOut() {
+    if (!selected) return;
+    const decimals = assetDecimals(selected.asset);
+    const whole = roundDownToWhole(cashOutAmountInvalid ? noteWei : cashOutAmount, decimals);
+    if (whole > 0n) setCashOutInput(formatUnits(whole, decimals));
+  }
+
+  /** Privately or all at once, remembered in this browser for next time. */
+  function choosePrivately(on: boolean) {
+    setPrivatePref(on);
+    savePrivatePref({ on });
+  }
+
   async function onCashOut() {
     if (!selected || !address || !network.pool || !poseidonMode) return;
     setError(null);
@@ -795,10 +920,6 @@ export function MoveView() {
       setError("Paste the address to cash out to.");
       return;
     }
-    if (demoMode && (later || amount < noteWei)) {
-      setError("The demo cashes out whole balances, now.");
-      return;
-    }
     if (later && !relayAvailable) {
       setError("Cashing out later needs the Gloam relay, which is off right now. Cash out now instead.");
       return;
@@ -809,33 +930,7 @@ export function MoveView() {
       );
       return;
     }
-    // Never to the vault or the memo board: the money would be stuck there.
-    const targetProblem = cashOutTargetProblem(to, network);
-    if (targetProblem) {
-      setError(targetProblem);
-      return;
-    }
-    // Money sent here has been swept out within seconds before: only on purpose.
-    // A check still running gets a few seconds; one that fails is no warning.
-    const sweepFor = `${network.chainId}:${to.toLowerCase()}:${selected.asset.toLowerCase()}`;
-    if (!demoMode && sweepOkFor !== sweepFor) {
-      const result = await Promise.race([
-        runSweepCheck(sweepFor, to, selected.asset as Address, network.chainId),
-        new Promise<null>((r) => window.setTimeout(() => r(null), 4_000)),
-      ]);
-      if (result?.swept) return; // the warning under "To" says why and how to go ahead
-    }
-    // The wallet it pays, relay or not (on Tempo, also checked against the
-    // asset's TIP-403 issuer policy).
-    const screen = await screenWallets([to], {
-      chainId: network.chainId,
-      asset: selected.asset,
-      flow: "cashout",
-    });
-    if (!screen.allowed) {
-      setError(screen.message ?? SCREEN_BLOCKED_MESSAGE);
-      return;
-    }
+    if (!(await checkCashOutTargets([to], selected.asset, to))) return;
 
     setBusy(true);
     setPaidPrivately(false);
@@ -880,39 +975,13 @@ export function MoveView() {
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
       spentNoteId.current = target.id;
       setStatus("Proving privately, this takes 10 to 30 seconds…");
-      const w = await buildPoseidonUnshieldWitness({
-        secretHex: target.secret,
-        amount: BigInt(target.amountWei),
-        asset: target.asset,
-        to,
-        path,
-      });
-      if (!w.checks.commitmentMatches) {
-        throw new Error(w.blocker ?? "This balance does not match the vault.");
-      }
-      const { proofBytes } = await proveUnshieldInBrowser(w.circomInput);
-      const call = {
-        chainId: network.chainId,
-        proof: proofBytes,
-        root: fieldToBytes32(w.publicInputs.root),
-        nullifier: fieldToBytes32(w.publicInputs.nullifier),
-        asset: target.asset,
-        to,
-        amount: BigInt(target.amountWei),
-      };
+      const call = await proveCashOut(target, to, path, network.chainId);
       if (later) {
         setStatus("Scheduling with the Gloam relay…");
-        let job;
-        try {
-          job = await scheduleCashOut({ ...call, window: cashOutWhen as CashOutWindow });
-        } catch (e) {
-          // This money already has a cash out waiting: show that one, with the address it really pays.
-          if (e instanceof CashOutLaterError && e.job) updateLocalNote(target.id, { cashOut: markFor(e.job) });
-          throw e;
-        }
         // Out of the balance while it waits; the chain settles it once it goes out. The
-        // address shown is the one the relay holds, not the one asked for.
-        updateLocalNote(target.id, { cashOut: markFor(job) });
+        // address shown is the one the relay holds, not the one asked for (and when this
+        // money already has a cash out waiting, the note shows that one).
+        const job = await scheduleNoteCashOut(target, call, cashOutWhen as CashOutWindow);
         spentNoteId.current = null;
         setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(target.amountWei, target.asset) });
         setCashOutInput("");
@@ -959,12 +1028,187 @@ export function MoveView() {
     }
   }
 
+  /**
+   * The checks every cash out passes before anything is proven, for each
+   * address it pays: never the vault or the memo board, the sweep check, and
+   * screening. A swept `quiet` address (the one under To) stops without a
+   * message, since its warning says why and how to go ahead; any other swept
+   * address is refused.
+   */
+  async function checkCashOutTargets(targets: Address[], asset: Address, quiet: Address | null): Promise<boolean> {
+    const unique = targets.filter((t, i) => targets.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i);
+    // Never to the vault or the memo board: the money would be stuck there.
+    for (const t of unique) {
+      const problem = cashOutTargetProblem(t, network);
+      if (problem) {
+        setError(problem);
+        return false;
+      }
+    }
+    // Money sent here has been swept out within seconds before: only on purpose.
+    // A check still running gets a few seconds; one that fails is no warning.
+    if (!demoMode) {
+      for (const t of unique) {
+        const key = `${network.chainId}:${t.toLowerCase()}:${asset.toLowerCase()}`;
+        if (sweepOkFor === key) continue;
+        const result = await Promise.race([
+          runSweepCheck(key, t, asset, network.chainId),
+          new Promise<null>((r) => window.setTimeout(() => r(null), 4_000)),
+        ]);
+        if (!result?.swept) continue;
+        if (quiet && t.toLowerCase() === quiet.toLowerCase()) return false;
+        setError(
+          `Money sent to ${shortAddress(t, 4)} has been moved out automatically within seconds before, by another account. Use another address for that piece.`
+        );
+        return false;
+      }
+    }
+    // The wallets it pays, relay or not (on Tempo, also checked against the
+    // asset's TIP-403 issuer policy).
+    const screen = await screenWallets(unique, { chainId: network.chainId, asset, flow: "cashout" });
+    if (!screen.allowed) {
+      setError(screen.message ?? SCREEN_BLOCKED_MESSAGE);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Cash out privately: the pieces, one at a time, each split off, proven and
+   * scheduled (lib/cashOutPrivately). Stops at the first problem with every
+   * piece either waiting to go out or in the private balance.
+   */
+  async function onPrivateCashOut() {
+    if (!selected || !address || !network.pool || !poseidonMode || !plan) return;
+    setError(null);
+    setScheduledNotice(null);
+    const amount = cashOutAmount;
+    const pieces = plan.pieces;
+    if (cashOutAmountInvalid || amount <= 0n || amount > noteWei) {
+      setError("Enter an amount up to this balance.");
+      return;
+    }
+    if (!piecesReady) {
+      setError(perPiece ? "Paste an address for each piece." : "Paste the address to cash out to.");
+      return;
+    }
+    if (!relayAvailable) {
+      setError("Cashing out privately needs the Gloam relay, which is off right now. Send it all now instead.");
+      return;
+    }
+    if (poolForCashOut != null && poolForCashOut < amount) {
+      setError(
+        `Not enough in the shared vault to cash out right now (${formatAssetLabel(poolForCashOut, selected.asset)} available, ${formatAssetLabel(amount, selected.asset)} needed). It opens up once more of this asset is added.`
+      );
+      return;
+    }
+    const targets = pieceTargets as Address[];
+    if (!(await checkCashOutTargets(targets, selected.asset, cashOutTo))) return;
+
+    const note = selected;
+    setBusy(true);
+    setPaidPrivately(false);
+    reset();
+    setRelayHash(undefined);
+    handledHash.current = null;
+    pendingAction.current = "cashout";
+    pendingChange.current = null;
+    setCashedOut(null);
+    setPlanRun(pieces.map((p, i) => ({ amount: p, to: targets[i]!, state: "waiting" })));
+    setRunNote(note);
+    try {
+      const r = await runPrivateCashOut({
+        note,
+        pieces,
+        to: targets,
+        window: planWindow,
+        owner: address as Address,
+        onStatus: setStatus,
+        onPiece: (i, patch) => setPlanRun((rows) => rows && rows.map((row, j) => (j === i ? { ...row, ...patch } : row))),
+      });
+      if (r.jobs.length) {
+        // Jobs come back in piece order: the first ones are what was scheduled.
+        const times = r.jobs.map((j) => j.sendAfter);
+        const out = pieces.slice(0, r.jobs.length).reduce((t, p) => t + p, 0n);
+        setScheduledNotice({
+          at: Math.min(...times),
+          until: Math.max(...times),
+          count: r.jobs.length,
+          label: formatAssetLabel(out, note.asset),
+        });
+      }
+      if (r.stoppedAt === null) {
+        setCashOutInput("");
+        setPieceTo([]);
+        setPerPiece(false);
+        setPlanSeed((v) => v + 7919);
+      } else {
+        const k = r.jobs.length;
+        const done =
+          k === 0
+            ? "Nothing was scheduled."
+            : `${k} of ${pieces.length} pieces ${k === 1 ? "is" : "are"} scheduled and ${k === 1 ? "goes" : "go"} out as planned.`;
+        setError(
+          r.maybeSent
+            ? `${done} Setting aside the next piece may have gone out. Your money is safe in the vault and shows again once it lands.`
+            : `${done} ${r.error ?? ""} The rest is safe in your private balance.`.replace(/\s+/g, " ")
+        );
+      }
+      void import("@/lib/track").then(({ track }) => {
+        track("unshield_private", {
+          window: planWindow,
+          pieceCount: pieces.length,
+          scheduledCount: r.jobs.length,
+          done: r.stoppedAt === null,
+        });
+      });
+    } catch (e) {
+      // Refused before anything moved.
+      setError(e instanceof Error ? e.message : "Cash out failed");
+    } finally {
+      setPlanRun(null);
+      setRunNote(null);
+      setBusy(false);
+      setStatus(null);
+      refreshNotes();
+    }
+  }
+
+  /** A piece that did not get scheduled, scheduled now as it was planned: the same address and window. */
+  async function scheduleLeftover(n: LocalNote) {
+    const tag = n.cashOutPlan;
+    if (!tag || !address) return;
+    setError(null);
+    setScheduledNotice(null);
+    if (!relayAvailable) {
+      setError("Scheduling needs the Gloam relay, which is off right now. Try again shortly.");
+      return;
+    }
+    if (!(await checkCashOutTargets([tag.to], n.asset, null))) return;
+    setLeftoverBusy(n.id);
+    setBusy(true);
+    setStatus("Proving privately, this takes 10 to 30 seconds…");
+    try {
+      const job = await schedulePiece(n);
+      setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(n.amountWei, n.asset) });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not schedule this piece.");
+    } finally {
+      setLeftoverBusy(null);
+      setBusy(false);
+      setStatus(null);
+      refreshNotes();
+    }
+  }
+
   async function cancelScheduled(note: LocalNote) {
     if (!note.cashOut) return;
     setError(null);
+    setScheduledNotice(null);
     const result = await cancelCashOut(note.cashOut.job);
     if (result === "cancelled") {
-      updateLocalNote(note.id, { cashOut: undefined });
+      // Back in the balance as plain money: a cancelled piece is not one still to schedule.
+      updateLocalNote(note.id, { cashOut: undefined, cashOutPlan: undefined });
     } else if (result === "over") {
       // It already ended without going out: back in the balance once the chain agrees.
       await reconcileCashOuts().catch(() => false);
@@ -972,7 +1216,8 @@ export function MoveView() {
       updateLocalNote(note.id, { cashOut: { ...note.cashOut, state: "sent" } });
       setError("It is already going out, so it can't be cancelled. It shows as cashed out once it lands.");
     } else if (result === "gone") {
-      if (!(await releaseGoneCashOut(note).catch(() => false))) {
+      if (await releaseGoneCashOut(note).catch(() => false)) keepPiece(note.id);
+      else {
         setError("The relay no longer holds this cash out, and the network could not confirm it is unspent. Refresh in a moment.");
       }
     } else {
@@ -1840,9 +2085,11 @@ export function MoveView() {
                       ? "Claimed, not secured yet"
                       : isClaimedNote(n) || isSecuredClaim(n) || !n.txHash
                         ? "Claimed"
-                        : n.id.startsWith("chg-")
-                          ? "Change from a payment"
-                          : "Added";
+                        : n.cashOutPlan || n.id.startsWith("co-")
+                          ? "Set aside to cash out"
+                          : n.id.startsWith("chg-")
+                            ? "Change from a payment"
+                            : "Added";
                     return (
                       <li key={n.id}>
                         <button
@@ -2187,6 +2434,20 @@ export function MoveView() {
                     </div>
                   ))}
 
+                  {leftoverRows.map((n) => (
+                    <PieceLeftover
+                      key={n.id}
+                      note={n}
+                      busy={working}
+                      scheduling={leftoverBusy === n.id}
+                      onSchedule={() => void scheduleLeftover(n)}
+                      onKeep={() => {
+                        keepPiece(n.id);
+                        refreshNotes();
+                      }}
+                    />
+                  ))}
+
                   {selected && (
                     <div className="rounded-[16px] bg-surface p-[16px] sm:p-5">
                       <label htmlFor="cashout-amt" className="text-[13px] text-mute">
@@ -2213,10 +2474,7 @@ export function MoveView() {
                           type="button"
                           className="btn btn-ghost btn-sm"
                           disabled={roundDownToWhole(noteWei, assetDecimals(selected.asset)) <= 0n}
-                          onClick={() => {
-                            const whole = roundDownToWhole(cashOutAmountInvalid ? noteWei : cashOutAmount, assetDecimals(selected.asset));
-                            if (whole > 0n) setCashOutInput(formatUnits(whole, assetDecimals(selected.asset)));
-                          }}
+                          onClick={roundCashOut}
                         >
                           Round it
                         </button>
@@ -2225,23 +2483,38 @@ export function MoveView() {
                         {cashOutAmountInvalid
                           ? `Enter an amount up to ${formatAssetLabel(noteWei, selected.asset)}.`
                           : cashOutPartial
-                            ? `First this sets ${formatAssetLabel(cashOutAmount, selected.asset)} aside privately, then cashes it out. The rest stays in your private balance.`
+                            ? planActive
+                              ? `First this sets ${formatAssetLabel(cashOutAmount, selected.asset)} aside privately in pieces, then schedules each one. The rest stays in your private balance.`
+                              : `First this sets ${formatAssetLabel(cashOutAmount, selected.asset)} aside privately, then cashes it out. The rest stays in your private balance.`
                             : `The whole balance: ${formatAssetLabel(noteWei, selected.asset)}.`}
                       </p>
-                      {cashOutMatchesRecent && !cashOutAmountInvalid && (
-                        <p className="mt-2 text-[12.5px] leading-relaxed text-warn">
-                          This matches money that came in recently. Cash out later or a different amount to keep them apart.
-                        </p>
+                      {cashOutLink && (
+                        <CashOutLinkNote
+                          text={linkMessage(cashOutLink)}
+                          action={
+                            planOffered && !privatePref ? (
+                              <button
+                                type="button"
+                                onClick={() => choosePrivately(true)}
+                                className="font-medium text-foreground underline underline-offset-4"
+                              >
+                                Cash out privately instead
+                              </button>
+                            ) : !planOffered ? (
+                              relayAvailable ? "Cashing out later, or a different amount, keeps them apart." : "A different amount keeps them apart."
+                            ) : null
+                          }
+                        />
                       )}
                       <div className="mt-4 border-t border-line pt-3">
                         <p className="text-[13px] text-mute">You get</p>
                         <p className="tnum mt-1.5 truncate text-[22px] font-light leading-tight text-foreground">
-                          {formatAssetAmount(cashOutAmount - cashOutFee, selected.asset)}{" "}
+                          {formatAssetAmount(cashOutAmount - outFee, selected.asset)}{" "}
                           <span className="text-[14px] text-mute">{assetLabel(selected.asset)}</span>
                         </p>
                         {cashOutFeeBps > 0 && (
                           <p className="tnum mt-1 text-[12.5px] text-mute">
-                            {formatFeePercent(cashOutFeeBps)} fee: {formatAssetLabel(cashOutFee, selected.asset)}
+                            {formatFeePercent(cashOutFeeBps)} fee{planActive ? " in total" : ""}: {formatAssetLabel(outFee, selected.asset)}
                           </p>
                         )}
                       </div>
@@ -2356,18 +2629,101 @@ export function MoveView() {
                     ) : null}
                   </div>
 
+                  {planOffered && plan && (
+                    <HowChoice
+                      privately={privatePref}
+                      onChange={choosePrivately}
+                      pieceCount={planPieceList.length}
+                      window={planWindow}
+                      disabled={working}
+                    />
+                  )}
+
+                  {planActive && plan && selected && (
+                    <>
+                      <PiecesCard
+                        pieces={planPieceList}
+                        asset={selected.asset}
+                        amount={planTotal}
+                        avoiding={avoiding}
+                        tailMatch={plan.tailMatch}
+                        run={planRun}
+                        onReroll={working ? undefined : () => setPlanSeed((v) => v + 1)}
+                        onRound={roundCashOut}
+                      />
+                      <SpreadOver
+                        value={planWindow}
+                        disabled={working}
+                        onChange={(w) => {
+                          setPlanWindow(w);
+                          savePrivatePref({ window: w });
+                        }}
+                      />
+                      <div>
+                        <p className="text-[12.5px] leading-relaxed text-mute">{whereLine}</p>
+                        <button
+                          type="button"
+                          disabled={working}
+                          onClick={() => setPerPiece((v) => !v)}
+                          className="-my-1 inline-flex min-h-10 items-center text-[13px] font-medium text-foreground underline underline-offset-4 disabled:opacity-50"
+                        >
+                          {perPiece ? "Send them all to one address" : "Use a different address for each piece"}
+                        </button>
+                        {perPiece && (
+                          <div className="mt-2 space-y-3">
+                            <p className="text-[12.5px] leading-relaxed text-mute">
+                              {`Piece 1, ${formatAssetLabel(plan.pieces[0]!, selected.asset)}, goes to the address under To.`}
+                            </p>
+                            {plan.pieces.slice(1).map((p, k) => {
+                              const v = pieceTo[k] ?? "";
+                              const ok = isAddress(v);
+                              return (
+                                <div key={k}>
+                                  <label htmlFor={`piece-to-${k + 2}`} className="text-[13px] text-mute">
+                                    {`Piece ${k + 2}, ${formatAssetLabel(p, selected.asset)}`}
+                                  </label>
+                                  <input
+                                    id={`piece-to-${k + 2}`}
+                                    value={v}
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    disabled={working}
+                                    onChange={(e) => {
+                                      const next = [...pieceTo];
+                                      next[k] = e.target.value.trim();
+                                      setPieceTo(next);
+                                    }}
+                                    placeholder="0x… another address"
+                                    className="gl-input tnum mt-2"
+                                  />
+                                  {v && !ok ? (
+                                    <p className="mt-2 text-[12.5px] text-warn">That isn&apos;t a valid 0x address. Check it and paste it again.</p>
+                                  ) : ok && tiedToYou(v) ? (
+                                    <p className="mt-2 text-[12.5px] leading-relaxed text-warn">This wallet is tied to you, so this piece can be linked back.</p>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {!planActive && (
                   <div>
                     <p id="cashout-when" className="text-[13px] text-mute">When</p>
-                    <div role="radiogroup" aria-labelledby="cashout-when" className="mt-2 grid grid-cols-3 gap-2">
+                    <div role="radiogroup" aria-labelledby="cashout-when" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       {(
                         [
                           ["now", "Now"],
                           ["hour", "Within an hour"],
                           ["6h", "Within 6 hours"],
+                          ["day", "Within a day"],
                         ] as const
                       ).map(([when, label]) => {
                         const active = cashOutWhen === when;
-                        const off = when !== "now" && (!relayAvailable || demoMode);
+                        const off = when !== "now" && !relayAvailable;
                         return (
                           <button
                             key={when}
@@ -2393,8 +2749,9 @@ export function MoveView() {
                         : "Your proof is made now and the Gloam relay sends it at a random time in that window. It can't change the amount or where it goes. If it can't go out, nothing moves and it comes back to your private balance."}
                     </p>
                   </div>
+                  )}
 
-                  {relayToggle}
+                  {!planActive && relayToggle}
                   {!connectedOk ? (
                     connectPrompt("cash out")
                   ) : (
@@ -2414,9 +2771,9 @@ export function MoveView() {
                         cashOutAmountInvalid ||
                         !cashOutTo ||
                         sweepHold ||
-                        (cashOutWhen !== "now" && !relayAvailable)
+                        (planActive ? !piecesReady : cashOutWhen !== "now" && !relayAvailable)
                       }
-                      onClick={() => void onCashOut()}
+                      onClick={() => void (planActive ? onPrivateCashOut() : onCashOut())}
                       className="btn btn-ink btn-lg btn-block"
                     >
                       {working && pendingAction.current === "cashout" ? (
@@ -2430,6 +2787,8 @@ export function MoveView() {
                         "Loading the cash-out fee…"
                       ) : sweepHold ? (
                         "Check the address first"
+                      ) : planActive ? (
+                        piecesReady || !perPiece ? "Cash out privately" : "Add an address for each piece"
                       ) : cashOutWhen !== "now" ? (
                         "Schedule the cash out"
                       ) : cashOutDest === "other" ? (
@@ -2438,6 +2797,27 @@ export function MoveView() {
                         "Cash out to my wallet"
                       )}
                     </button>
+                  )}
+                  {planActive && connectedOk && (
+                    <div className="-mt-1 text-center">
+                      <p className="text-[12.5px] leading-relaxed text-mute">
+                        {working
+                          ? "Keep this tab open until every piece is scheduled."
+                          : "Setting it up takes a few minutes. Keep this tab open until every piece is scheduled."}
+                      </p>
+                      {!working && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            choosePrivately(false);
+                            setCashOutWhen("now");
+                          }}
+                          className="inline-flex min-h-10 items-center text-[13px] font-medium text-foreground underline underline-offset-4"
+                        >
+                          Send it all now instead
+                        </button>
+                      )}
+                    </div>
                   )}
                   {selected?.leafIndex == null && (
                     <p className="flex flex-wrap items-center gap-x-2 text-[12.5px] text-warn">
@@ -2454,7 +2834,9 @@ export function MoveView() {
 
                   {scheduledNotice && (
                     <div className="rounded-[16px] bg-sealed-soft px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
-                      {`Cash out of ${scheduledNotice.label} scheduled for about ${new Date(scheduledNotice.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. You can close Gloam: the relay sends it then.`}
+                      {scheduledNotice.count && scheduledNotice.count > 1 && scheduledNotice.until
+                        ? `${scheduledNotice.count} pieces, ${scheduledNotice.label} in all, scheduled to go out between ${aboutTime(scheduledNotice.at)} and ${aboutTime(scheduledNotice.until).replace(/^about /, "")}. You can close Gloam: the relay sends each one then.`
+                        : `Cash out of ${scheduledNotice.label} scheduled for ${aboutTime(scheduledNotice.at)}. You can close Gloam: the relay sends it then.`}
                     </div>
                   )}
 
@@ -2466,13 +2848,7 @@ export function MoveView() {
                           <li key={n.id} className="flex items-center justify-between gap-3 py-2.5 text-[13.5px]">
                             <span className="min-w-0">
                               <span className="tnum block text-foreground">{formatAssetLabel(n.amountWei, n.asset)}</span>
-                              <span className="block truncate text-[12px] text-mute">
-                                {n.cashOut?.state === "sent"
-                                  ? "On its way"
-                                  : `About ${new Date(n.cashOut!.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
-                                {" · to "}
-                                {shortAddress(n.cashOut!.to)}
-                              </span>
+                              <span className="block truncate text-[12px] text-mute">{scheduledLine(n)}</span>
                             </span>
                             {n.cashOut?.state === "scheduled" && (
                               <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => void cancelScheduled(n)}>
@@ -2846,7 +3222,7 @@ export function MoveView() {
                   <div className="flex h-11 items-center justify-between gap-3">
                     <dt className="text-mute">Sent by</dt>
                     <dd className="truncate text-foreground">
-                      {relayOn ? "Gloam relay" : "Your wallet"}
+                      {relayOn || (mode === "cashout" && (planActive || cashOutWhen !== "now")) ? "Gloam relay" : "Your wallet"}
                     </dd>
                   </div>
                   <div className="flex h-11 items-center justify-between gap-3">
@@ -2854,8 +3230,10 @@ export function MoveView() {
                     <dd className="tnum truncate text-foreground">
                       {mode === "send" ? (
                         <SealDots n={6} className="text-foreground/60" />
-                      ) : address ? (
-                        shortAddress(address, 4)
+                      ) : planActive && perPiece && distinctTargets > 1 ? (
+                        `${distinctTargets} addresses`
+                      ) : cashOutTo ? (
+                        shortAddress(cashOutTo, 4)
                       ) : (
                         "Your wallet"
                       )}
@@ -2866,8 +3244,10 @@ export function MoveView() {
                     <dd className="tnum truncate text-foreground">
                       {mode === "send" ? (
                         <SealDots n={6} className="text-foreground/60" />
-                      ) : selected ? (
-                        formatAssetLabel(selected.amountWei, selected.asset)
+                      ) : planActive ? (
+                        `${planPieceList.length} separate amounts`
+                      ) : selected && !cashOutAmountInvalid ? (
+                        formatAssetLabel(cashOutAmount, selected.asset)
                       ) : (
                         "The full amount"
                       )}
@@ -2882,7 +3262,9 @@ export function MoveView() {
                       : relayAvailable
                         ? "Turn on Hide my wallet so your wallet stays off it too."
                         : "The amount and the person you pay stay hidden. Your wallet shows as the sender while the relay is offline."
-                    : "A cash out is a public transfer. It ends privacy for this amount."}
+                    : planActive
+                      ? "Each piece is a public transfer at its own time. Together they end privacy for this amount."
+                      : "A cash out is a public transfer. It ends privacy for this amount."}
                 </p>
               </div>
             </>

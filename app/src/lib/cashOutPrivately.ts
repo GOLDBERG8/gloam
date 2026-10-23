@@ -190,6 +190,41 @@ export function keepPiece(noteId: string) {
   updateLocalNote(noteId, { cashOutPlan: undefined });
 }
 
+// ---------------------------------------------------------------- the person's choice
+
+const PREF_KEY = "gloam.cashout.private";
+
+export type PrivateCashOutPref = {
+  /** Cash out privately when it is offered (the default), or all at once. */
+  on: boolean;
+  window: CashOutWindow;
+};
+
+const WINDOWS: readonly CashOutWindow[] = ["hour", "6h", "day"];
+
+/** What this browser last chose: privately, over about 6 hours, unless the person picked otherwise. */
+export function readPrivatePref(): PrivateCashOutPref {
+  const fallback: PrivateCashOutPref = { on: true, window: "6h" };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(PREF_KEY) ?? "null") as Partial<PrivateCashOutPref> | null;
+    return {
+      on: typeof raw?.on === "boolean" ? raw.on : fallback.on,
+      window: raw?.window && WINDOWS.includes(raw.window) ? raw.window : fallback.window,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export function savePrivatePref(patch: Partial<PrivateCashOutPref>) {
+  try {
+    window.localStorage.setItem(PREF_KEY, JSON.stringify({ ...readPrivatePref(), ...patch }));
+  } catch {
+    /* a private window: the choice lasts this visit */
+  }
+}
+
 /**
  * Schedules a piece that was split off but not scheduled, as it was planned:
  * the same address and window. The caller checks the address first, as for
