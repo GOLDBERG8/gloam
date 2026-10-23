@@ -496,3 +496,29 @@ export async function planVaultSwap(
   if (cost > available) throw new Error("The price is moving too fast. Try again in a moment.");
   return { available, amountOut, cost, leftover: available - cost, route: best.route };
 }
+
+/** How often a quote on screen is asked again. One older than two of these stops showing. */
+export const QUOTE_TTL_MS = 15_000;
+
+/** Whether a quote made at `at` may still show at `now`. */
+export function quoteFresh(at: number, now: number): boolean {
+  return now - at < 2 * QUOTE_TTL_MS;
+}
+
+/**
+ * The plan to send: priced again right before the swap, and used only if it
+ * gives more than the quote the person saw. The router buys exactly amountOut
+ * and the rest goes to the treasury, so a price that moved their way since the
+ * quote now goes to them. One that moved against them keeps what they agreed
+ * to (the router refuses it if the buffer no longer covers it), and a failed
+ * read keeps the quote.
+ */
+export async function replanVaultSwap(
+  client: PublicClient,
+  chainId: number,
+  p: { assetIn: Address; assetOut: Address; amountIn: bigint; feeBps: number },
+  quoted: SwapPlan
+): Promise<SwapPlan> {
+  const fresh = await planVaultSwap(client, chainId, p).catch(() => null);
+  return fresh && fresh.amountOut > quoted.amountOut ? fresh : quoted;
+}

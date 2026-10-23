@@ -4,6 +4,7 @@
  *  - routes: only the router's allowlisted pools, one hop or two through a shared currency
  *  - the route bytes decode as the router's PoolKey[] and the pool ids are the live ones
  *  - the cash-out fee matches the vault's math
+ *  - a quote stops showing once it is old, and the swap sends a fresher price only when it gives more
  *  - the relay refuses a swap while no router is set, and a bad asset or route before any read
  *  - with --live: a real quote on Robinhood Chain and Tempo mainnet (read-only)
  *
@@ -13,6 +14,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { createPublicClient, decodeAbiParameters, encodeAbiParameters, http, keccak256, type Address } from "viem";
 import {
+  QUOTE_TTL_MS,
   RH_SWAP_POOLS,
   SWAP_ESCROW_CODE_HASH,
   SWAP_ESCROW_INIT_CODE,
@@ -22,7 +24,9 @@ import {
   refundEscrowKey,
   isKnownRoute,
   planVaultSwap,
+  quoteFresh,
   refundAmountFor,
+  replanVaultSwap,
   routesBetween,
   vaultFeeOf,
   vaultSwapRouter,
@@ -131,6 +135,44 @@ for (const amt of [1n, 99n, 100n, 19_999n, 20_000_000n, 10n ** 18n + 7n]) {
   for (const bps of [0, 25, 100]) assert.ok(refundAmountFor(amt) <= amt - vaultFeeOf(amt, bps), `${amt} at ${bps}`);
 }
 n++;
+
+// Quote age: refreshed every 15 seconds, gone once two refreshes are missed.
+assert.equal(QUOTE_TTL_MS, 15_000);
+assert.ok(quoteFresh(1_000, 1_000));
+assert.ok(quoteFresh(1_000, 1_000 + 2 * QUOTE_TTL_MS - 1));
+assert.ok(!quoteFresh(1_000, 1_000 + 2 * QUOTE_TTL_MS), "two refreshes missed");
+assert.ok(!quoteFresh(1_000, 1_000 + 10 * 60_000), "a quote from ten minutes ago");
+n += 4;
+
+// Right before a swap goes, the price is read again (a fake Tempo exchange here).
+// The better of that and the quote is sent: a move in the person's favour goes to
+// them, not the treasury; a move against them or a failed read keeps the quote.
+{
+  const pathUSD = "0x20c0000000000000000000000000000000000000" as Address;
+  const usdce = "0x20c000000000000000000000b9537d11c60e8b50" as Address;
+  const dex = (rate: number | "down") =>
+    ({
+      readContract: async ({ functionName, args }: { functionName: string; args: readonly bigint[] }) => {
+        if (rate === "down") throw new Error("rpc down");
+        const amount = args[2]!;
+        const scaled = (a: bigint, r: number) => (a * BigInt(Math.round(r * 1e6))) / 1_000_000n;
+        if (functionName === "quoteSwapExactAmountIn") return scaled(amount, rate);
+        if (functionName === "quoteSwapExactAmountOut") return scaled(amount, 1 / rate) + 1n;
+        throw new Error(functionName);
+      },
+    }) as never;
+  const p = { assetIn: pathUSD, assetOut: usdce, amountIn: 10_000_000n, feeBps: 25 };
+  const quoted = await planVaultSwap(dex(1), 4217, p);
+  assert.equal(quoted.available, 9_975_000n);
+  assert.ok(quoted.cost <= quoted.available && quoted.leftover > 0n);
+  const better = await replanVaultSwap(dex(1.01), 4217, p, quoted);
+  assert.ok(better.amountOut > quoted.amountOut, "a better price since the quote reaches the person");
+  assert.ok(better.cost <= better.available);
+  assert.equal(await replanVaultSwap(dex(0.995), 4217, p, quoted), quoted, "a worse price keeps what they agreed to");
+  assert.equal(await replanVaultSwap(dex(1), 4217, p, quoted).then((x) => x.amountOut), quoted.amountOut);
+  assert.equal(await replanVaultSwap(dex("down"), 4217, p, quoted), quoted, "a failed read keeps the quote");
+  n += 7;
+}
 
 // The relay: refused while off, then refused on bad input before it reads anything.
 const net = getNetwork("robinhood-mainnet");

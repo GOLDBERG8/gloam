@@ -33,7 +33,15 @@ import {
   type LocalNote,
 } from "@/lib/shield";
 import { knownTokens, type OnchainToken } from "@/lib/tokens";
-import { VAULT_SWAP_ASSETS, planVaultSwap, swapBufferBps, vaultSwapRouter, type SwapPlan } from "@/lib/vaultSwap";
+import {
+  QUOTE_TTL_MS,
+  VAULT_SWAP_ASSETS,
+  planVaultSwap,
+  quoteFresh,
+  swapBufferBps,
+  vaultSwapRouter,
+  type SwapPlan,
+} from "@/lib/vaultSwap";
 import { SWAP_REFUNDED, runVaultSwap } from "@/lib/vaultSwapRun";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
 import { useNetwork } from "./NetworkProvider";
@@ -236,8 +244,9 @@ export function VaultSwapView() {
   }, [network.chainId]);
 
   // A quote counts only for the exact swap it was asked for (quoteKey), so a
-  // stale one can never be sent for a newer amount.
-  const [quote, setQuote] = useState<{ key: string; plan: SwapPlan } | null>(null);
+  // stale one can never be sent for a newer amount, and only while it is fresh
+  // (quoteFresh): an old price can't sit on screen as if it were today's.
+  const [quote, setQuote] = useState<{ key: string; plan: SwapPlan; at: number } | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -250,10 +259,27 @@ export function VaultSwapView() {
   // The flip button turns half a circle on each flip.
   const [turns, setTurns] = useState(0);
 
+  // A coarse clock for quote ages: every 5 seconds, paused while the page is hidden.
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== "hidden") setClock(Date.now());
+    };
+    const t = window.setInterval(tick, 5_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, []);
+  const refreshSlot = Math.floor(clock / QUOTE_TTL_MS);
+
   // A fresh quote whenever what is being swapped changes (after a short pause while
-  // typing). Any valid amount gets a price, even more than the balance holds, so
-  // people can see the rate before they add money; the button still says why the
-  // swap can't go. A price depends only on the tokens, the amount and the fee.
+  // typing), and again every QUOTE_TTL_MS while it shows. Any valid amount gets a
+  // price, even more than the balance holds, so people can see the rate before
+  // they add money; the button still says why the swap can't go. A price depends
+  // only on the tokens, the amount and the fee. The swap prices it once more
+  // right before it goes (lib/vaultSwapRun).
   const quoteAmount = typed !== null && !amountBad ? typed : null;
   const quoteKey =
     payAsset && toAsset && feeBps != null && quoteAmount !== null ? `${payAsset}|${toAsset}|${quoteAmount}|${feeBps}` : null;
@@ -265,10 +291,12 @@ export function VaultSwapView() {
       setQuoteError(null);
       const key = quoteKey;
       planVaultSwap(getRhPublicClient(), network.chainId, { assetIn: payAsset, assetOut: toAsset, amountIn: quoteAmount, feeBps })
-        .then((p) => live && setQuote({ key, plan: p }))
+        .then((p) => live && setQuote({ key, plan: p, at: Date.now() }))
         .catch((e) => {
           if (!live) return;
-          setQuote(null);
+          // A refresh that fails leaves a fresh price up; it stops showing by itself.
+          const now = Date.now();
+          setQuote((q) => (q && q.key === key && quoteFresh(q.at, now) ? q : null));
           setQuoteError(e instanceof Error ? e.message : "Could not get a price. Try again.");
         })
         .finally(() => live && setQuoting(false));
@@ -278,9 +306,13 @@ export function VaultSwapView() {
       window.clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- quoteKey names everything the quote reads
-  }, [quoteKey, network.chainId, busy]);
-  const shownPlan = quote && quoteKey && quote.key === quoteKey ? quote.plan : null;
-  const waitingQuote = Boolean(quoteKey) && !shownPlan && !quoteError;
+  }, [quoteKey, network.chainId, busy, refreshSlot]);
+  // While a swap runs the quote stays up as it was: the swap prices it again before it goes.
+  const shownPlan =
+    quote && quoteKey && quote.key === quoteKey && (busy || quoteFresh(quote.at, clock)) ? quote.plan : null;
+  // A refresh in flight or one that failed doesn't hide a price that still shows.
+  const priceError = shownPlan ? null : quoteError;
+  const waitingQuote = Boolean(quoteKey) && !shownPlan && !priceError;
 
   // The vault's beta deposit limits apply to what lands.
   const room =
@@ -296,7 +328,7 @@ export function VaultSwapView() {
   if (!router) return null;
 
   async function onSwap() {
-    if (!note || !toAsset || !shownPlan || !address || amount === null) return;
+    if (!note || !toAsset || !shownPlan || feeBps == null || !address || amount === null) return;
     setBusy(true);
     setError(null);
     setDone(null);
@@ -308,6 +340,7 @@ export function VaultSwapView() {
         amount,
         assetOut: toAsset,
         plan: shownPlan,
+        feeBps,
         owner: address as Address,
         pathFor: async (n) => ((await freshPath(n.commitment))?.path as PoseidonMerklePath | undefined) ?? null,
         onStatus: setStatus,
@@ -388,7 +421,7 @@ export function VaultSwapView() {
           ? { key: "over", label: "Insufficient private balance", ready: false }
           : overNote && held && payAsset
             ? { key: "note", label: `Up to ${formatAssetLabel(held.largest, payAsset)} in one swap`, ready: false }
-            : waitingQuote || quoting
+            : waitingQuote || (quoting && !shownPlan)
               ? {
                   key: "quoting",
                   label: (
@@ -399,7 +432,7 @@ export function VaultSwapView() {
                   ),
                   ready: false,
                 }
-              : quoteError
+              : priceError
                 ? { key: "noprice", label: "No price for this amount", ready: false }
                 : overRoom
                   ? { key: "room", label: "Too large for the vault right now", ready: false }
@@ -595,21 +628,21 @@ export function VaultSwapView() {
               </div>
             )}
 
-            {(!notes.length || quoteError || overRoom || relayOk === false || (note && amount !== null && amount < BigInt(note.amountWei))) && (
+            {(!notes.length || priceError || overRoom || relayOk === false || (note && amount !== null && amount < BigInt(note.amountWei))) && (
               <div className="gl-settle mt-4 space-y-2.5 px-1 text-[12.5px] leading-[1.6]">
                 {!notes.length && (
                   <p className="text-mute">
                     You can check prices now. To swap, add {assets.map(assetLabel).join(" or ")} to your private balance first, in Add.
                   </p>
                 )}
-                {quoteError && <p className="text-warn">{quoteError}</p>}
+                {priceError && <p className="text-warn">{priceError}</p>}
                 {overRoom && room != null && toAsset && (
                   <p className="text-warn">The vault takes at most {formatAssetLabel(room, toAsset)} right now. Swap a smaller amount.</p>
                 )}
                 {relayOk === false && (
                   <p className="text-warn">Swaps go through the Gloam relay, so your wallet never shows. It is off right now; try again soon.</p>
                 )}
-                {note && amount !== null && amount < BigInt(note.amountWei) && !quoteError && (
+                {note && amount !== null && amount < BigInt(note.amountWei) && !priceError && (
                   <p className="text-mute">The rest stays in your private balance: it is set aside privately first.</p>
                 )}
               </div>

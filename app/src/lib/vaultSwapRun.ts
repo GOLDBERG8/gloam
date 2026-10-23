@@ -5,8 +5,10 @@
  * quotes). A swap spends one whole note, so part of a note is first set aside
  * in its own note (lib/cashOutSplit, the same as a partial cash out). Then:
  *
- *   1. make the new note for exactly the planned amount, and a refund note in
- *      the note's own asset, and prove both shields;
+ *   1. make a refund note in the note's own asset, price the swap again (a
+ *      quote seen a minute ago may now give less than the market does; the
+ *      better of the two is used, lib/vaultSwap replanVaultSwap), then make
+ *      the new note for exactly the planned amount, and prove both shields;
  *   2. work out this swap's escrow (derived from the note spent, both new notes
  *      and the route), check it against the router's escrowFor, and prove the
  *      note's unshield to it, so nobody can change what lands;
@@ -36,6 +38,7 @@ import {
   encodeRoute,
   escrowAddress,
   refundAmountFor,
+  replanVaultSwap,
   vaultSwapAbi,
   type EscrowKey,
   type SwapPlan,
@@ -63,13 +66,16 @@ export async function runVaultSwap(args: {
   /** How much of the note to swap; below its value, the rest stays a note of its own. */
   amount: bigint;
   assetOut: Address;
+  /** The quote the person saw. Priced again before proving; the better plan is sent. */
   plan: SwapPlan;
+  /** The vault's cash-out fee the quote was made with. */
+  feeBps: number;
   owner: Address;
   /** The note's tree path, read fresh. */
   pathFor: (note: LocalNote) => Promise<PoseidonMerklePath | null>;
   onStatus: (s: string) => void;
 }): Promise<SwapResult> {
-  const { network, note, amount, plan, router } = args;
+  const { network, note, amount, router } = args;
   if (!network.pool) throw new Error("This network has no vault yet.");
   const noteWei = BigInt(note.amountWei);
   if (amount <= 0n || amount > noteWei) throw new Error("Pick an amount up to this balance.");
@@ -92,10 +98,18 @@ export async function runVaultSwap(args: {
   }
   const targetWei = BigInt(target.amountWei);
 
-  // 1. The new note and the refund note, with their shield proofs.
+  // 1. The refund note first (it doesn't depend on the price), then the price
+  //    again, as close to sending as the proofs allow: the new note and the
+  //    escrow below are bound to amountOut.
   args.onStatus("Proving privately, this takes 10 to 30 seconds…");
-  const out = await prepareBridgeNote(plan.amountOut, args.assetOut, network, args.owner);
   const back = await prepareBridgeNote(refundAmountFor(targetWei), target.asset, network, args.owner);
+  const plan = await replanVaultSwap(
+    getRhPublicClient(),
+    network.chainId,
+    { assetIn: target.asset, assetOut: args.assetOut, amountIn: targetWei, feeBps: args.feeBps },
+    args.plan
+  );
+  const out = await prepareBridgeNote(plan.amountOut, args.assetOut, network, args.owner);
 
   // 2. The escrow the unshield must name: worked out here, and checked against
   //    the router's own answer, so a wrong RPC can't send the note elsewhere.
