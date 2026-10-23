@@ -17,6 +17,7 @@ import type { CreatorFees } from "@/lib/creatorFees";
 import type { CombinedRevenue, DayRow, NetworkMetrics, OnchainMetrics, Windowed } from "@/lib/onchainMetrics";
 import type { DailyCounters, StoredEvent } from "@/lib/tractionStore";
 import type { FunnelDay } from "@/lib/funnelStore";
+import type { PeopleSide, PeopleSummary } from "@/lib/peopleStore";
 import { relayChainName } from "@/lib/bridge";
 import type { RelayVolume } from "@/lib/relayVolume";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
@@ -45,6 +46,8 @@ type MetricsPayload = {
   claimLinks?: FunnelDay[];
   /** Bridges and swaps tagged to Gloam at Relay (lib/relayVolume). */
   relay?: RelayVolume | { error: string };
+  /** Different wallets using Gloam, counted one way (lib/peopleStore). */
+  people?: PeopleSummary;
   /** Revenue switches read from env (bridge app fee). */
   revenueConfig?: { bridgeFeeBps: number | null };
   error?: string;
@@ -447,6 +450,14 @@ export function AdminDashboard() {
       .reverse();
   }, [agg, prod.daily]);
 
+  // People per day, once anything has been counted (blank before, not zero).
+  const peopleByDay = useMemo(() => {
+    const p = data?.people;
+    const side = p?.[env];
+    const counting = Boolean(p && (p.configured || (side?.all ?? 0) > 0));
+    return new Map(counting ? (side?.daily ?? []).map((d) => [d.day, d.people]) : []);
+  }, [data?.people, env]);
+
   const breakdowns = useMemo(() => {
     const groups = new Map<string, { field: string; value: string; v: number }[]>();
     for (const [key, v] of Object.entries(prod.dims)) {
@@ -768,6 +779,8 @@ export function AdminDashboard() {
               />
             </section>
 
+            <PeoplePanel people={data?.people} env={env} claims={claim.totals.link_claimed} mixedClaims={claim.mixed?.link_claimed ?? 0} />
+
             <Panel title={isMain ? (volumeDays.length < 30 ? "Money in and out by day, since launch" : "Money in and out by day, last 30 days") : "Money in and out by day, last 30 days"}>
               <VolumeChart
                 days={volumeDays}
@@ -807,9 +820,10 @@ export function AdminDashboard() {
               </Panel>
               <Panel title="Last 14 days">
                 <DataTable
-                  headers={["Day", "Active wallets", "Deposits", "Transfers", "Cash-outs", "App views", "Connects", "Proofs"]}
+                  headers={["Day", "People", "Active wallets", "Deposits", "Transfers", "Cash-outs", "App views", "Connects", "Proofs"]}
                   rows={days.map((d) => [
                     fmtDay(d.day),
+                    peopleByDay.has(d.day) ? n(peopleByDay.get(d.day)) : "",
                     n(d.chain?.activeWallets),
                     n(d.chain?.deposits),
                     n(d.chain?.transfers),
@@ -819,10 +833,11 @@ export function AdminDashboard() {
                     n(d.ev.proof_created),
                   ])}
                   empty="No days yet"
-                  minWidth={620}
+                  minWidth={680}
                 />
                 <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                  UTC days. Active wallets deposited or received a cash-out that day.
+                  UTC days. People are different wallets that connected, claimed, deposited or used the app that day.
+                  Active wallets deposited or received a cash-out that day.
                 </p>
               </Panel>
             </div>
@@ -945,6 +960,8 @@ export function AdminDashboard() {
         )}
 
         {shown === "users" && (
+          <>
+          <PeoplePanel people={data?.people} env={env} claims={claim.totals.link_claimed} mixedClaims={claim.mixed?.link_claimed ?? 0} full />
           <Panel title="Depositors (by activity)">
             <p className="mb-4 text-[14px] text-mute">
               Unique wallets that deposited into a current vault, per network. A wallet used on both networks shows twice.
@@ -975,6 +992,7 @@ export function AdminDashboard() {
               empty="No depositors yet"
             />
           </Panel>
+          </>
         )}
 
         {shown === "events" && (
@@ -1094,6 +1112,115 @@ function EnvSwitch({ env, onChange }: { env: Env; onChange: (e: Env) => void }) 
         </button>
       ))}
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------- people */
+
+const PEOPLE_ROWS: [keyof PeopleSide["byAction"], string][] = [
+  ["connect", "Connected a wallet"],
+  ["claim", "Claimed a payment"],
+  ["deposit", "Deposited"],
+  ["send", "Sent privately"],
+  ["swap", "Swapped privately"],
+  ["cashout", "Cashed out"],
+  ["payroll", "Ran payroll"],
+  ["request", "Paid a request"],
+];
+
+/**
+ * Different wallets using Gloam, for one side: everyone, and by what they did.
+ * Counted one way (lib/peopleStore): no address is kept, so there is nothing
+ * to list, only how many.
+ */
+function PeoplePanel({
+  people,
+  env,
+  claims,
+  mixedClaims,
+  full = false,
+}: {
+  people: PeopleSummary | undefined;
+  env: Env;
+  /** Claim-link claims on this side in the last 14 days (lib/funnel): claims, not people. */
+  claims: number;
+  /** Launch-day claims from before counting by network. */
+  mixedClaims: number;
+  full?: boolean;
+}) {
+  const isMain = env === "mainnet";
+  if (!people) {
+    return (
+      <Panel title="People using Gloam">
+        <p className="text-[14px] text-mute">After the next read.</p>
+      </Panel>
+    );
+  }
+  const side = people[env];
+  const rows = PEOPLE_ROWS.map(([k, label]) => ({ k: label, v: side.byAction[k] ?? 0 }));
+  const max = Math.max(1, ...rows.map((r) => r.v));
+  const bars = rows.map((r) => ({ ...r, pct: (r.v / max) * 100 }));
+  const since = people.since
+    ? new Date(people.since).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" })
+    : null;
+  const claimLine =
+    claims + mixedClaims > 0
+      ? ` Claim-link claims in the last 14 days: ${n(claims)}${mixedClaims ? `, plus ${n(mixedClaims)} on launch day from either network` : ""}. Those count claims, not people, and include claims from before wallets were counted.`
+      : "";
+  return (
+    <Panel title="People using Gloam">
+      {!people.configured && (
+        <p className="mb-5 rounded-xl bg-warn-soft px-4 py-3 text-[14px] leading-relaxed text-warn">
+          Counting is off. Set <code className="text-foreground">GLOAM_METRICS_SALT</code> on Vercel to a random secret of
+          32 or more characters (<code className="text-foreground">openssl rand -hex 32</code>) and redeploy. Keep it
+          the same from then on: a new one counts everyone again.
+        </p>
+      )}
+      {people.error && (
+        <p className="mb-5 rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger" role="alert">
+          {people.error}
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label={isMain ? "People, since launch" : "People, all time"} value={n(side.all)} sub="different wallets" />
+        <Kpi label="Today" value={n(side.today)} sub="since 00:00 UTC" />
+        <Kpi label="7 days" value={n(side.d7)} sub="UTC days, today included" />
+        <Kpi label="30 days" value={n(side.d30)} sub="UTC days, today included" />
+      </div>
+      <div className={`mt-6 grid grid-cols-1 gap-6 ${full ? "lg:grid-cols-2" : ""}`}>
+        <div>
+          <p className="t-label mb-4">By what they did, all time</p>
+          <BarChart rows={bars} />
+          <p className="mt-4 text-[13px] leading-relaxed text-mute">
+            Wallets that received a cash out: <span className="tnum text-soft">{n(side.byAction.cashout_to)}</span>, read
+            from the chain. Not added to people, since one person can cash out to several addresses; with them, people
+            would be <span className="tnum text-soft">{n(side.allWithCashoutTo)}</span>.
+          </p>
+        </div>
+        {full && (
+          <div>
+            <p className="t-label mb-4">People by day</p>
+            <DataTable
+              headers={["Day", "People"]}
+              rows={side.daily
+                .filter((d) => !isMain || d.day >= MAINNET_DAY)
+                .reverse()
+                .map((d) => [fmtDay(d.day), n(d.people)])}
+              empty="No days yet"
+              minWidth={240}
+            />
+          </div>
+        )}
+      </div>
+      <p className="mt-5 text-[13px] leading-relaxed text-mute">
+        Different wallets, {isMain ? "mainnet only" : "testnets only"}, counted one way: each address becomes a keyed
+        hash that goes into a HyperLogLog, so no address is stored and there is no list to show, only how many. Counts
+        are estimates, exact or nearly so at this size. The app counts connects and actions
+        {since ? ` since ${since} UTC` : " once counting is on"}, a few minutes after they happen and once per wallet a
+        day; depositors are also read from the chain{isMain ? " since launch" : ""}. Recording demos are not counted.
+        {claimLine}
+      </p>
+    </Panel>
   );
 }
 
