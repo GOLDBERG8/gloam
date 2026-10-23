@@ -318,6 +318,8 @@ export function SettingsView() {
   const [copied, setCopied] = useState(false);
   const [netMsg, setNetMsg] = useState<string | null>(null);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  // A backup is per wallet: with none connected, export would take every wallet's balances on this browser.
+  const backupReady = isConnected && Boolean(address);
   const [backupImport, setBackupImport] = useState("");
   const [backupPass, setBackupPass] = useState("");
   const [integrityMsg, setIntegrityMsg] = useState<string | null>(null);
@@ -572,6 +574,13 @@ export function SettingsView() {
           plus its passphrase if you set one.
           {vault.protected && " With the passkey lock on, exporting asks for your passkey."}
         </p>
+        {!backupReady && (
+          <Status>
+            Connect your wallet to back up or restore. A backup holds the private balances of the wallet you
+            connect, and a restore adds them to that wallet, so nothing is copied or restored until one is
+            connected.
+          </Status>
+        )}
 
         <label htmlFor="backup-pass" className="mt-5 block text-[13px] text-mute">
           Backup passphrase <span className="text-faint">(recommended)</span>
@@ -588,7 +597,7 @@ export function SettingsView() {
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={!isConnected}
+            disabled={!backupReady}
             onClick={async () => {
               setBackupMsg(null);
               try {
@@ -640,7 +649,7 @@ export function SettingsView() {
           </button>
           <button
             type="button"
-            disabled={!isConnected}
+            disabled={!backupReady}
             onClick={async () => {
               setBackupMsg(null);
               try {
@@ -699,7 +708,7 @@ export function SettingsView() {
           />
           <button
             type="button"
-            disabled={!backupImport.trim() || !isConnected}
+            disabled={!backupImport.trim() || !backupReady}
             onClick={() => {
               void (async () => {
                 setBackupMsg(null);
