@@ -278,16 +278,21 @@ const CLASSIFIER_MODEL = "claude-haiku-5-5";
 /** Where Gloam runs, for the classifier: testnet until mainnet is live, then both. */
 function classifierSystem(): string {
   const where = isMainnetLive() ? "on mainnet, with a testnet for practice" : "on testnet";
-  return `You decide whether Glim, the helper bot in Gloam's Telegram group, should reply to a member's message. Gloam is private stablecoin payments ${where}. Answer with exactly YES or NO.
-YES when the message asks for help (even without a question mark), describes a problem or an error, states something about how Gloam works that may be wrong, or gives product feedback the helper can usefully respond to.
-NO for greetings, hype, jokes, thanks, chat between members that needs no help, someone sharing a payment code, claim link or their Gloam address for others to use, or anything not about Gloam or wallets.`;
+  return `You decide whether Glim, the helper bot in Gloam's Telegram group, should reply to a member's message. Gloam is private stablecoin payments ${where}. Glim only helps people use Gloam; it is not the team and it stays out of everything else. Answer with exactly one word: HELP, TEAM or NO.
+HELP when the message asks how to use Gloam or $GLOAM (even without a question mark), describes a problem or an error, or states something about how Gloam works that is wrong.
+TEAM when it is a request, suggestion or question meant for the team: asking them to do or change something (an audit, a mobile app, a listing, new coins or chains, moving or changing a bot, a partnership), or asking about plans, dates or decisions only the team can make.
+NO for greetings, hype, jokes, thanks, chat between members ("anyone new here?", "who's holding?"), price, market cap, charts, predictions or comparisons with other coins, someone sharing a payment code, claim link or their Gloam address for others to use, or anything not about Gloam or wallets. When unsure, NO.`;
 }
 
-/** For a message not phrased as a question: should the helper answer it anyway? */
-export async function wantsHelper(text: string, followUp = false): Promise<boolean> {
+/** What an untagged message is: help Glim should give, an ask for the team, or nothing for Glim. */
+export type Triage = "help" | "team" | "no";
+
+/** For a message nobody aimed at Glim: should it answer, keep it for the team, or stay out? null when the check could not run. */
+export async function triage(text: string, followUp = false): Promise<Triage | null> {
   const lead = followUp ? "This message comes right after Glim answered the same person, so it may be a follow-up to Glim.\n" : "";
   const out = await askModel(classifierSystem(), `${lead}Message: ${text.slice(0, 600)}`, null, CLASSIFIER_MODEL, "check");
-  return /^\s*yes\b/i.test(out ?? "");
+  const word = /^\s*(help|team|no)\b/i.exec(out ?? "")?.[1]?.toLowerCase();
+  return word ? (word as Triage) : null;
 }
 
 /** Why there is no text: switched off, past the daily cap, the API erred (worth a retry), or no usable answer. */

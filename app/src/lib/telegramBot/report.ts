@@ -256,6 +256,7 @@ function watDayTime(ms: number): string {
 const UNANSWERED_WHY: Record<Unanswered["why"], string> = {
   limit: "it was over its answer limits",
   no_answer: "it had no answer it could post",
+  team: "it was an ask for the team, so it left it to you",
 };
 
 /**

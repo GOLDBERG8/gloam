@@ -39,8 +39,8 @@ import {
   botModel,
   systemPrompt,
   teamSystemPrompt,
+  triage,
   userPrompt,
-  wantsHelper,
   type AskInput,
   type ChatTurn,
   type ModelImage,
@@ -143,6 +143,7 @@ import {
   threadThenRemember,
   watchLockedCode,
   type Counter,
+  type Unanswered,
   tokenCardLately,
 } from "./store";
 import {
@@ -934,30 +935,43 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   const share = isShare(text);
   // their next message right after the helper answered them
   const followUp = isFollowUp(history, name, Math.floor(Date.now() / 1000));
-  let asked = !share && looksLikeQuestion(text);
-  // a member talking to Boss Duke or an admin by tag ("@dukedotsol we should..."): theirs to answer, unless it is a question
+  const isQuestion = !share && looksLikeQuestion(text);
+  // tagged, or a question on a screenshot: answered as before
+  let asked = (tagged || Boolean(ownPicture)) && isQuestion;
+  // an ask for the team ("team can you...", "get the audit done", "wen mobile app"): kept for them, not answered
+  let forTeam = false;
+  // a member talking to Boss Duke or an admin by tag ("@dukedotsol we should..."): theirs to answer, unless it is a question for Glim
   const toTeam = !tagged && tagsSomeone(msg, [...c.admins, ...c.owners.handles], c.owners.ids);
-  // no question mark, but asking for help, reporting a problem or getting Gloam wrong: a quick check decides
+  // nobody aimed it at Glim: a quick check decides whether it is help Glim should give, an ask for the
+  // team, or chatter, price talk and anything else Glim stays out of
   if (
-    !asked &&
     !tagged &&
-    !toTeam &&
     !share &&
     !ownPicture &&
-    (mayNeedHelp(text) || (followUp && wordCount(text) >= 2)) &&
-    (await hitRateLimit("tg:classify", "tg-classify", CLASSIFY_PER_MIN)).allowed &&
-    (await wantsHelper(text, followUp))
+    (isQuestion || (!toTeam && (mayNeedHelp(text) || (followUp && wordCount(text) >= 2))))
   ) {
-    asked = true;
+    const kind = (await hitRateLimit("tg:classify", "tg-classify", CLASSIFY_PER_MIN)).allowed ? await triage(text, followUp) : null;
+    // the check could not run: only an on-topic question gets an answer
+    if (kind === null) asked = isQuestion && !isVague(text, c.persona);
+    else {
+      asked = kind === "help";
+      forTeam = kind === "team" && !toTeam;
+    }
   }
   const bug = (topic === TOPIC.testers || topic === TOPIC.feedback) && looksLikeBugReport(text);
   // a screenshot in Help, Testers or Feedback with no caption, or only a few words, gets a look
   const bareShot = Boolean(ownPicture) && !tagged && !asked && SCREENSHOT_TOPICS.has(topic) && wordCount(text) <= SHORT_CAPTION_WORDS;
 
   // the question being answered is logged once: the original when tagged on it, else this one
-  const question = target ? (looksLikeQuestion(targetText) ? null : targetText) : asked ? text : null;
+  const question = target ? (looksLikeQuestion(targetText) ? null : targetText) : asked || forTeam ? text : null;
   const kept = question ? memoryText(question) : null;
   if (kept) await logQuestion(kept).catch(() => {});
+  if (forTeam && !bug) {
+    if (kept) {
+      await logUnanswered({ at: Date.now(), name, topic: topicName(topic), text: kept.slice(0, 200), link: messageLink(msg), why: "team" }).catch(() => {});
+    }
+    return;
+  }
   if (!tagged && !bug && !asked && !bareShot) return;
   // every handled album message marks the album, so a captioned first picture also covers the rest
   const albumFirst = msg.media_group_id ? await firstOfAlbum(msg.media_group_id).catch(() => true) : true;
@@ -966,7 +980,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   const saved = bug ? await saveBug(msg, from, text, topicName(topic)) : false;
   // asked or tagged and not answered: kept for the team (a saved bug report is answered by being saved,
   // and a tag with nothing to go on, like "haha thanks" to Glim, is not a question)
-  const missed = async (why: "limit" | "no_answer") => {
+  const missed = async (why: Exclude<Unanswered["why"], "team">) => {
     if (saved || !(tagged || asked)) return;
     if (!asked && !ownPicture && isVague(target ? `${targetText} ${text}` : text, c.persona)) return;
     const t = memoryText(target ? targetText || text : text) ?? (ownPicture ? "[screenshot]" : null);

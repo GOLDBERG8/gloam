@@ -228,11 +228,11 @@ export async function logEscalation(e: Escalation): Promise<void> {
 
 /**
  * A question the helper was asked (tagged, or a question in the open) but did
- * not answer: it was over its answer limits, or it had no answer it could post
+ * not answer: it was over its answer limits, it had no answer it could post
  * (the model gave nothing usable, so it stayed quiet or said it would not
- * guess). Hand-offs are escalations, not this.
+ * guess), or it was an ask meant for the team. Hand-offs are escalations, not this.
  */
-export type Unanswered = Escalation & { why: "limit" | "no_answer" };
+export type Unanswered = Escalation & { why: "limit" | "no_answer" | "team" };
 
 export async function logUnanswered(u: Unanswered): Promise<void> {
   await kv([

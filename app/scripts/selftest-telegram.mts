@@ -168,7 +168,7 @@ let chatAdmins: number[] | null = null;
 let chainHead = 0;
 const buyLogs: { transactionHash: string; blockNumber: string; data: string; topics: string[] }[] = [];
 /** What the "should I answer this?" check says. */
-let classifierReply = "NO";
+let classifierReply = "HELP";
 /** Files Telegram would serve, by file_id. */
 const files = new Map<string, Uint8Array>();
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82]);
@@ -262,7 +262,7 @@ const classifyCalls = () => calls.filter((c) => c.method === "classify");
 function reset() {
   calls.length = 0;
   modelReply = "Sure, Add privately is on Portfolio. Proofs take about 10 to 30 seconds.";
-  classifierReply = "NO";
+  classifierReply = "HELP";
   modelFailures = 0;
   photoFails = false;
   buyMode = "ok";
@@ -907,7 +907,7 @@ await test("names: wallet names and separators", () => {
 await test("implied questions and wrong claims get a quick check, banter does not", async () => {
   reset();
   const hev = user(61, "Heverie");
-  classifierReply = "YES";
+  classifierReply = "HELP";
   await handleUpdate(upd(inTopic(TOPIC.general, "Okay so on gloam itself you can't add network", hev)));
   assert.equal(classifyCalls().length, 1, "checked");
   assert.equal(sends().length, 1, "answered");
@@ -1182,14 +1182,41 @@ await test("moderation: look-alike Gloam accounts, DM lures, and the team's dele
 
 await test("a suggestion aimed at the team by tag gets no reply from Glim", async () => {
   reset();
-  classifierReply = "YES";
+  classifierReply = "HELP";
   await handleUpdate(upd(inTopic(TOPIC.general, "@duke_admin one thing we can do is rename this topic to buys and the buys topic to chat", user(950, "Kore"))));
   assert.equal(sends().length, 0, "theirs to answer");
   assert.equal(calls.filter((x) => x.method === "classify").length, 0, "not even a check");
-  // a real question tagged at the team still gets an answer
-  modelReply = "The DEX Screener profile is live, and more listings are being worked on.";
+  // a question tagged at the team about plans is theirs too
+  classifierReply = "TEAM";
   await handleUpdate(upd(inTopic(TOPIC.general, "@duke_admin are we getting more listings?", user(951, "Dras"))));
+  assert.equal(sends().length, 0, "plans are the team's to answer");
+  // a how-to question tagged at the team still gets an answer
+  classifierReply = "HELP";
+  await handleUpdate(upd(inTopic(TOPIC.general, "@duke_admin how do I turn on recovery?", user(952, "Ife"))));
   assert.equal(sends().length, 1);
+});
+
+await test("Glim stays out of chatter and price talk, and leaves asks for the team to the team", async () => {
+  reset();
+  classifierReply = "NO";
+  await handleUpdate(upd(inTopic(TOPIC.feedback, "Is there any one new to crypto here ?", user(953, "Richard"))));
+  await handleUpdate(upd(inTopic(TOPIC.feedback, "if $GLOAM were to surpass $ZEC in price, would the market start talking about it?", user(954, "Sun"))));
+  assert.equal(classifyCalls().length, 2, "each question is checked");
+  assert.equal(modelCalls().length, 0);
+  assert.equal(sends().length, 0, "no reply to chatter or price talk");
+  classifierReply = "TEAM";
+  await handleUpdate(upd(inTopic(TOPIC.feedback, "Team can you manage the buy bot from general to buy thank you.", user(955, "Fsk"))));
+  await handleUpdate(upd(inTopic(TOPIC.feedback, "Please get the outside audit done then mobile app !", user(955, "Fsk"))));
+  assert.equal(sends().length, 0, "the team answers their own asks");
+  const un = (await readLast24h()).unanswered.filter((u) => u.name === "Fsk");
+  assert.equal(un.length, 2, "both are on the team's list");
+  assert.ok(un.every((u) => u.why === "team"));
+  // the check could not run: only an on-topic question gets an answer
+  process.env.TELEGRAM_BOT_DAILY_CHECKS = "0";
+  await handleUpdate(upd(inTopic(TOPIC.help, "How do I turn on recovery?", user(956, "Ola"))));
+  await handleUpdate(upd(inTopic(TOPIC.general, "anyone here from lagos?", user(957, "Tolu"))));
+  delete process.env.TELEGRAM_BOT_DAILY_CHECKS;
+  assert.equal(sends().length, 1, "the recovery question only");
 });
 
 await test("buy alerts: every buy, spaced, with value, price, market cap and links", async () => {
@@ -1656,9 +1683,10 @@ await test("model calls stop at the daily caps; 0 turns a kind off", async () =>
   delete process.env.TELEGRAM_BOT_DAILY_ANSWERS;
 
   process.env.TELEGRAM_BOT_DAILY_CHECKS = "0";
-  classifierReply = "YES";
+  classifierReply = "HELP";
+  const checked = classifyCalls().length;
   await handleUpdate(upd(inTopic(TOPIC.general, "Okay so on gloam itself you can't add network", user(171, "Sol"))));
-  assert.equal(classifyCalls().length, 0, "no quick check past its cap");
+  assert.equal(classifyCalls().length, checked, "no quick check past its cap");
   assert.equal(sends().length, 2);
   delete process.env.TELEGRAM_BOT_DAILY_CHECKS;
 });
@@ -1974,6 +2002,7 @@ await test("counters: messages, topics, people, joins, leaves and the helper's w
   const uma = user(70, "Uma");
   const vic = user(71, "Vic");
   await handleUpdate(upd(inTopic(TOPIC.help, "How do I cash out from the vault?", uma)));
+  classifierReply = "NO";
   await handleUpdate(upd(inTopic(TOPIC.help, "thanks, that worked", uma)));
   await handleUpdate(upd(inTopic(TOPIC.general, "gm all", vic)));
   await handleUpdate(upd(inTopic(TOPIC.feedback, "DM me for support, I fix wallets", vic)));
@@ -2212,6 +2241,7 @@ await test("team chat: the context carries the report's numbers and the store's 
   modelReply = "I'll take this to Boss Duke, an admin will follow up.";
   await handleUpdate(upd(inTopic(TOPIC.help, "@glim_gloam_bot my payroll run vanished halfway", user(303, "Chi"))));
   modelReply = "Thanks, saved for the team.";
+  classifierReply = "NO";
   await handleUpdate(upd(inTopic(TOPIC.feedback, "The faucet button is broken on Tempo again", user(304, "Dami", "dami_x"))));
 
   reset();
@@ -2484,7 +2514,7 @@ await test("shares: a posted payment, claim link or address gets no reply unless
   assert.ok(!isShare("how do I make a claim link"));
 
   reset();
-  classifierReply = "YES";
+  classifierReply = "HELP";
   const ghost = user(96, "lyke");
   await handleUpdate(upd(inTopic(TOPIC.feedback, `Gloam private payment (0.0001 ETH). This is locked. Ask me for the passphrase separately.\n\ngloam1e.${"A".repeat(120)}`, ghost)));
   assert.equal(sends().length, 0, "no lecture on a share");
@@ -2549,11 +2579,11 @@ await test("follow-ups: the next message after Glim answers someone is checked, 
   await handleUpdate(upd(inTopic(TOPIC.help, "Yeah. We good for testing now?", samy)));
   assert.equal(sends().length, 1);
   // a follow-up with no question words goes to the check, which says yes
-  classifierReply = "YES";
+  classifierReply = "HELP";
   modelReply = "Grab test funds on Portfolio, add a little privately, then pay a friend from Vault > Pay.";
   await handleUpdate(upd(inTopic(TOPIC.help, "Okay sure. Lay it out for me step by step", samy)));
-  assert.equal(classifyCalls().length, 1);
-  assert.ok(String((classifyCalls()[0]!.body.messages as { content: string }[])[0]!.content).includes("follow-up to Glim"));
+  assert.equal(classifyCalls().length, 2, "the question, then the follow-up");
+  assert.ok(String((classifyCalls()[1]!.body.messages as { content: string }[])[0]!.content).includes("follow-up to Glim"));
   assert.equal(sends().length, 2);
   // small talk after an answer: the check says no, so Glim stays quiet
   classifierReply = "NO";
