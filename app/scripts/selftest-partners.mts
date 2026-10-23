@@ -619,7 +619,13 @@ await test("v1 deposits: malformed hashes refused before any RPC", async () => {
 });
 
 await test("v1 payment requests: link with the details after the #", async () => {
-  const tag = "gloamr1." + "A".repeat(60);
+  // a real Gloam address: the API decodes the key, so the prefix plus filler is refused (review finding 8)
+  const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const tag = "gloamr1." + Buffer.from(new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey))).toString("base64url");
+  const fake = await requestPost(
+    req("/api/v1/payment-requests", { method: "POST", key: secret, body: { to: "gloamr1." + "A".repeat(60), network: "robinhood", asset: "usdg" } })
+  );
+  assert.equal(fake.status, 400, "a gloamr1 prefix with filler is not an address");
   const res = await requestPost(
     req("/api/v1/payment-requests", { method: "POST", key: secret, body: { to: tag, network: "robinhood", asset: "usdg", amount: "1,250.50", note: "Invoice 042", name: "Acme" } })
   );

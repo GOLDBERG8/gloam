@@ -39,7 +39,7 @@ import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
 import { buildNotePackage, decodeNotePackage, encodeNotePackage } from "@/lib/notePackage";
 import type { PayrollNote } from "@/lib/proofs";
 import { readAmountText } from "@/lib/amountText";
-import { encryptTicketForTag, isReceiveTag } from "@/lib/receiveTag";
+import { encryptTicketForTag, isReceiveTag, isValidReceiveTag } from "@/lib/receiveTag";
 import { ticketToMemoBytes } from "@/lib/payMemo";
 import { cleanPaymentNote } from "@/lib/paymentNote";
 import { keepPaidCodes, saveBatch } from "@/lib/payrollStore";
@@ -226,8 +226,10 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
     let error: string | null = null;
     let kind: PayeeKind = "link";
     if (recipient) {
-      if (isReceiveTag(recipient)) {
+      if (isValidReceiveTag(recipient)) {
         kind = "gloam";
+      } else if (isReceiveTag(recipient)) {
+        error = "That Gloam address is incomplete or mistyped. Copy it again from their Receive page.";
       } else if (/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
         error = "That is a public wallet, paying it would show the amount. Use their Gloam address, or leave it blank for a claim link.";
       } else {

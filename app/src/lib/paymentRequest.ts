@@ -17,7 +17,7 @@
 import { zeroAddress, type Address } from "viem";
 import { getNetwork, isNetworkKey, type NetworkKey } from "./networks";
 import { PAYMENT_NOTE_MAX, cleanText } from "./paymentNote";
-import { RECEIVE_TAG_PREFIX } from "./receiveTag";
+import { isValidReceiveTag } from "./receiveTag";
 import { readAmountText } from "./amountText";
 import { shieldTokensFor, supportsNativeShield } from "./tokens";
 
@@ -99,12 +99,9 @@ export function claimNetworkProblem(
   return null;
 }
 
-const TAG_BODY = /^[A-Za-z0-9_-]{40,400}$/;
-
-/** A complete-looking Gloam address (gloamr1.<base64url key>). */
+/** A whole Gloam address (gloamr1.<base64url P-256 key>) that decodes, not just its shape. */
 export function isValidRequestTag(input: string): boolean {
-  const t = input.trim();
-  return t.startsWith(RECEIVE_TAG_PREFIX) && TAG_BODY.test(t.slice(RECEIVE_TAG_PREFIX.length));
+  return isValidReceiveTag(input);
 }
 
 /**
