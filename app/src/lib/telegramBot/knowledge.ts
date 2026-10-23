@@ -11,6 +11,10 @@
  */
 
 import { isMainnetLive, liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+import { VAULT_SWAP_V2_ROUTER } from "@/lib/vaultSwap";
+
+/** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the facts follow the switch. */
+const SWAPS_V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
 
 /** WalletConnect is on (lib/walletConnect.ts): phones without a wallet browser can use a wallet app. */
 const WALLET_APP = Boolean(process.env.NEXT_PUBLIC_WC_PROJECT_ID?.trim());
@@ -293,7 +297,9 @@ function mainnetLiveFacts(): string {
     "",
     "PRIVATE SWAPS (mainnet only, Vault > Swap; overrides any line below that says private trading is off or underway)",
     "- Private swaps are live on Robinhood Chain mainnet and Tempo mainnet, in Vault > Swap: swap straight from your private balance. They are not on the testnets (there is no swap router there), and stock tokens cannot be swapped.",
-    "- Pairs: on Robinhood Chain, USDG and $GLOAM, either way, on Uniswap v4 (usually two hops through ETH, or the direct USDG and $GLOAM pool when it pays more). On Tempo, USDC.e, pathUSD, USDT0 and OUSD, any one for another, on Tempo's stablecoin exchange.",
+    SWAPS_V2
+      ? "- Pairs: on Robinhood Chain, USDG, $GLOAM and ETH (the vault holds it as WETH), any one for another, on Uniswap v4: the app takes the route that pays the most, up to three hops. On Tempo, USDC.e, pathUSD, USDT0 and OUSD, any one for another, on Tempo's stablecoin exchange."
+      : "- Pairs: on Robinhood Chain, USDG and $GLOAM, either way, on Uniswap v4 (usually two hops through ETH, or the direct USDG and $GLOAM pool when it pays more). On Tempo, USDC.e, pathUSD, USDT0 and OUSD, any one for another, on Tempo's stablecoin exchange.",
     "- How it works, in one transaction the Gloam relay sends: the vault releases one private note to a one-time escrow made for that swap, the swap router buys an exact amount of the other token on the DEX, and the output goes back into the vault as a new private note only you know. If any step fails, nothing moves.",
     "- Private: who swapped (the relay sends it, so the wallet never shows), which balance it came from, and where the output goes next. Public: the two tokens and the two amounts, like any DEX trade. Never say a swap hides the amounts, and never call it anonymous or fully private.",
     "- Privacy tips: don't swap exactly what you deposited (a swap the same size as a recent deposit links back to it), and don't cash out exactly what a swap gave you. Send it on, or cash out a different amount.",
@@ -303,7 +309,9 @@ function mainnetLiveFacts(): string {
     "- Prices: with a wallet connected, Vault > Swap prices any amount, even before you have a private balance. To swap, add one of the swap tokens in Vault > Add first. An example on Tempo: 1 pathUSD gets about 0.9964 USDC.e. Never give a $GLOAM swap price or rate; point to Vault > Swap for the live quote.",
     "- If a swap can't finish: once a swap is sent, anyone can make it fail on purpose by sending its first step on its own. The money can't go anywhere else. It comes back to the private balance by itself as a refund, less 1%: the vault's cash-out fee and a safety margin that goes to the Gloam treasury. If a swap just didn't go through (the price moved), nothing moved: refresh in a minute, then get a new quote.",
     "- Swaps only go through the Gloam relay, never from the wallet. If the button says The Gloam relay is off, try again a bit later.",
-    "- The swap routers have no owner, no admin and no upgrade, and the vault itself did not change. They were reviewed internally, not externally audited. Their addresses are on gloam.trade/docs/private-swaps; point there instead of writing them out. Full guide: gloam.trade/docs/private-swaps.",
+    SWAPS_V2
+      ? "- The swap routers cannot be upgraded and have no function that moves money, and the vault itself did not change. On Robinhood Chain the router's owner can add a pool only with 3 days of public notice and can take one off at once, and can do nothing else. They were reviewed internally, not externally audited. Their addresses are on gloam.trade/docs/private-swaps; point there instead of writing them out. Full guide: gloam.trade/docs/private-swaps."
+      : "- The swap routers have no owner, no admin and no upgrade, and the vault itself did not change. They were reviewed internally, not externally audited. Their addresses are on gloam.trade/docs/private-swaps; point there instead of writing them out. Full guide: gloam.trade/docs/private-swaps.",
     "",
     "BUYBACKS (the current state; overrides any line below)",
     "- Buybacks have not started yet. Cash-out fees switched on with mainnet. Before the first buyback, the fees move to their own treasury wallet so every buyback can be followed on-chain; that change waits a public three-day timelock on the contracts. After it, buybacks run on a regular schedule and the team posts each one's transaction. Half of Gloam's fees are set to buy $GLOAM; half of what is bought is burned, half goes to the treasury. Never give a buyback date, amount or size, and never say buybacks are live.",

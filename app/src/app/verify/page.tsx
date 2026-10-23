@@ -28,7 +28,7 @@ import { NETWORK_KEYS, getNetwork, type ChainFamily, type GloamNetwork, type Net
 import { track } from "@/lib/track";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { useMainnetLive } from "@/components/MainnetCountdown";
-import { vaultSwapRouter } from "@/lib/vaultSwap";
+import { swapRouterFor, vaultSwapRouter } from "@/lib/vaultSwap";
 
 type Result =
   | { kind: "idle" }
@@ -152,7 +152,10 @@ function chainRows(n: GloamNetwork): Row[] {
   if (router) {
     rows.push({
       name: "Swap router",
-      what: "Swaps one note through a public DEX and back into the vault. No owner, no admin, no upgrade.",
+      what:
+        swapRouterFor(n.chainId)?.version === 2
+          ? "Swaps one note through a public DEX and back into the vault. No upgrade; its owner can only add a pool, with 3 days of public notice, or take one off."
+          : "Swaps one note through a public DEX and back into the vault. No owner, no admin, no upgrade.",
       address: router,
     });
   }
