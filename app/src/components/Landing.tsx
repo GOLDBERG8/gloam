@@ -11,6 +11,7 @@ import { PayrollLive } from "@/components/landing/PayrollLive";
 import { LiveProduct } from "@/components/landing/LiveProduct";
 import { CodeBlock } from "@/components/ui/CodeBlock";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
+import { LivePartnersStrip } from "@/components/LivePartners";
 
 /**
  * Gloam landing, the "Sealed" system. White ground, light display type, one
@@ -253,6 +254,9 @@ export function Landing() {
             })}
           </div>
         </section>
+
+        {/* partners already live on Gloam */}
+        <LivePartnersStrip />
 
         {/* thesis + signature */}
         <section id="how" className="scroll-mt-20 pb-6 pt-24 sm:pt-36">

@@ -8,6 +8,7 @@ import { SealDots } from "@/components/ui/SealDots";
 import { CodeTabs, type CodeTab } from "@/app/sdk/SdkClient";
 import { MainnetCopy } from "@/components/MainnetCountdown";
 import { MAINNET_CONFIGURED } from "@/lib/mainnet";
+import { LivePartnersSection } from "@/components/LivePartners";
 
 export const metadata: Metadata = {
   title: "Partners",
@@ -230,6 +231,9 @@ export default function PartnersPage() {
             </div>
           </div>
         </section>
+
+        {/* partners already live */}
+        <LivePartnersSection />
 
         {/* how it works */}
         <section className="mx-auto max-w-[1240px] px-6 py-20 sm:py-28">
