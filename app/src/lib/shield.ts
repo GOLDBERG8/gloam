@@ -9,6 +9,7 @@ import { getActiveNetwork } from "./networks";
 import { makeBoundNote } from "./note";
 import { getAllNotes, setAllNotes } from "./noteVault";
 import type { VaultSwapRefundInfo } from "./vaultSwap";
+import type { DelayWindow } from "./relay/scheduled";
 import { walkLogs, walkTuning } from "./leafIndex";
 import {
   activeHashScheme,
@@ -458,6 +459,13 @@ export type LocalNote = {
    */
   cashOut?: CashOutMark;
   /**
+   * A piece of a private cash out (lib/cashOutPrivately): which plan, which
+   * piece, and where and when it was meant to go. Set when the piece is split
+   * off, before anything is sent, so a piece that never got scheduled (a relay
+   * that was down, a closed tab) still shows as one and can be scheduled again.
+   */
+  cashOutPlan?: CashOutPlanTag;
+  /**
    * On a private swap's refund note (lib/vaultSwap): what finishing the refund
    * needs, if someone sends the swapped note's unshield on its own. While the
    * money waits at the swap's escrow the note stays pending, never dead.
@@ -473,6 +481,20 @@ export type CashOutMark = {
   /** Where it goes, for the note's own row. */
   to: Address;
   state: "scheduled" | "sent" | "expired" | "failed" | "cancelled";
+};
+
+/** One piece of a private cash out ("cash out privately", lib/cashOutPrivately). */
+export type CashOutPlanTag = {
+  /** The plan's id, shared by its pieces (no secret). */
+  plan: string;
+  /** This piece, from 1. */
+  piece: number;
+  /** How many pieces the plan has. */
+  of: number;
+  /** Where this piece was meant to go. */
+  to: Address;
+  /** The window it was meant to go out in. */
+  window: DelayWindow;
 };
 
 /** A cash out is waiting or on its way: the note will be spent, so it is not counted. */
@@ -656,7 +678,7 @@ export function saveLocalNote(note: LocalNote) {
 
 export function updateLocalNote(
   id: string,
-  patch: Partial<Pick<LocalNote, "leafIndex" | "txHash" | "status" | "secured" | "sweepPending" | "cashOut">>
+  patch: Partial<Pick<LocalNote, "leafIndex" | "txHash" | "status" | "secured" | "sweepPending" | "cashOut" | "cashOutPlan">>
 ) {
   if (typeof window === "undefined") return;
   const next = getAllNotes().map((n) => (n.id === id ? { ...n, ...patch } : n));
