@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { recordTractionEvent } from "@/lib/tractionStore";
+import { cleanPath, cleanRef } from "@/lib/analyticsClean";
 
 /** Events per IP per minute. A busy session sends a handful; the rest is noise. */
 const PER_IP_PER_MIN = 60;
@@ -58,20 +59,6 @@ function cleanMeta(raw: unknown): Record<string, string | number | boolean | nul
 }
 
 /**
- * Referrer as origin + path only. A query string can carry a proof
- * (/verify?proof=) or anything another site put there.
- */
-function cleanRef(raw: unknown): string | null {
-  if (typeof raw !== "string" || !raw) return null;
-  try {
-    const u = new URL(raw);
-    return `${u.origin}${u.pathname}`.slice(0, 200);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * First-party analytics intake.
  * Persists to traction store (memory + optional Upstash Redis).
  * Optional TRACTION_WEBHOOK_URL for Discord/Slack.
@@ -103,7 +90,7 @@ export async function POST(req: Request) {
 
     const event = {
       t: data.t,
-      path: typeof data.path === "string" ? data.path.slice(0, 200) : null,
+      path: cleanPath(data.path),
       ref: cleanRef(data.ref),
       meta,
       ts:
