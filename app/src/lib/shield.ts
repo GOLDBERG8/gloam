@@ -7,6 +7,7 @@ import { formatUnits, parseUnits, zeroAddress, type Address, type Hex, type Publ
 import { knownTokens } from "./tokens";
 import { getActiveNetwork } from "./networks";
 import { makeBoundNote } from "./note";
+import { readAmountText } from "./amountText";
 import { getAllNotes, setAllNotes } from "./noteVault";
 import type { VaultSwapRefundInfo } from "./vaultSwap";
 import type { DelayWindow } from "./relay/scheduled";
@@ -380,13 +381,15 @@ export function formatFeePercent(bps: number): string {
   return `${(bps / 100).toFixed(2).replace(/\.?0+$/, "")}%`;
 }
 
-/** Parse a typed amount into raw units for this asset (null when invalid). */
+/**
+ * Parse a typed amount into raw units for this asset (null when invalid). Reads
+ * through lib/amountText, so "1,25" and "-1" are refused, never turned into 125 or 1.
+ */
 export function parseAssetAmount(input: string, asset: string): bigint | null {
-  const s = input.trim().replace(/,/g, "");
-  if (!s || !/^\d*\.?\d+$/.test(s)) return null;
   const decimals = assetDecimals(asset);
-  const [a, b = ""] = s.split(".");
-  if (b.length > decimals) return null;
+  const read = readAmountText(input, decimals);
+  if (!read.ok || !read.text) return null;
+  const [a, b = ""] = read.text.split(".");
   try {
     return parseUnits(b ? `${a || "0"}.${b}` : a, decimals);
   } catch {

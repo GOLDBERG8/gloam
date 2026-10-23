@@ -18,6 +18,7 @@ import { formatEther, type Address } from "viem";
 import { ensureRhTestnetWallet, formatEth, shortAddress } from "@/lib/chain";
 import { useNetwork } from "./NetworkProvider";
 import { safeParseEther } from "@/lib/amount";
+import { AmountProblem } from "./AmountProblem";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
@@ -789,9 +790,7 @@ export function SealedTradePanel({
                     id="ss-amt"
                     inputMode="decimal"
                     value={amount}
-                    onChange={(e) =>
-                      setAmount(e.target.value.replace(/[^0-9.]/g, ""))
-                    }
+                    onChange={(e) => setAmount(e.target.value)}
                     placeholder="0"
                     className="tnum min-w-0 flex-1 bg-transparent text-[34px] font-light leading-none tracking-[-0.02em] text-foreground outline-none placeholder:text-faint"
                   />
@@ -799,6 +798,7 @@ export function SealedTradePanel({
                     {inSymbol}
                   </span>
                 </div>
+                <AmountProblem value={amount} />
               </div>
 
               <div className="space-y-2.5 rounded-[16px] bg-surface px-4 py-3.5 text-[13px]">

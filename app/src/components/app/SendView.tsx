@@ -13,6 +13,7 @@ import {
 } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { safeParseEther } from "@/lib/amount";
+import { amountTextError } from "@/lib/amountText";
 import { useEthPrice } from "@/hooks/useLiveMarkets";
 import { useTradingSettings } from "@/hooks/useTradingSettings";
 import { formatUsd } from "@/lib/markets";
@@ -118,6 +119,8 @@ export function SendView() {
 
   const maxEth = bal ? formatEth(bal.value, 6) : "0";
   const amtNum = Number(amount);
+  // "1,25" or "-1" is refused out loud, never quietly turned into 125 or 1
+  const amountProblem = amountTextError(amount, 18);
   const usdHint =
     ethUsd && Number.isFinite(amtNum) && amtNum > 0
       ? formatUsd(amtNum * ethUsd)
@@ -186,7 +189,7 @@ export function SendView() {
                 autoComplete="off"
                 placeholder="0"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                onChange={(e) => setAmount(e.target.value)}
                 className="tnum min-w-0 flex-1 bg-transparent text-[40px] font-light leading-[1.15] tracking-[-0.02em] text-foreground outline-none! placeholder:text-faint sm:text-[46px]"
                 aria-label="Amount to send"
               />
@@ -195,8 +198,8 @@ export function SendView() {
                 ETH
               </span>
             </div>
-            <p className="tnum mt-1 min-h-5 text-[13px] text-mute">
-              {usdHint ? `≈ ${usdHint}` : " "}
+            <p className={`tnum mt-1 min-h-5 text-[13px] ${amountProblem ? "text-danger" : "text-mute"}`} role={amountProblem ? "alert" : undefined}>
+              {amountProblem ?? (usdHint ? `≈ ${usdHint}` : " ")}
             </p>
           </div>
 

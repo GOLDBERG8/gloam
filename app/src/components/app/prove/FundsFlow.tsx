@@ -10,6 +10,8 @@ import {
   parseAssetAmount,
   type LocalNote,
 } from "@/lib/shield";
+import { amountTextError } from "@/lib/amountText";
+import { AmountProblem } from "../AmountProblem";
 import { shieldTokensFor } from "@/lib/tokens";
 import { isClaimedNote, isSecuredClaim } from "@/lib/claimSweep";
 import {
@@ -261,7 +263,7 @@ export function FundsFlow({ notes, empty }: { notes: LocalNote[]; empty: ReactNo
               autoComplete="off"
               value={amountText}
               onChange={(e) => {
-                setAmountText(e.target.value.replace(/[^0-9.,]/g, ""));
+                setAmountText(e.target.value);
                 setManual(null);
               }}
               placeholder="0"
@@ -281,7 +283,9 @@ export function FundsFlow({ notes, empty }: { notes: LocalNote[]; empty: ReactNo
             </button>
           </div>
           <div id={`${ids}-amt-hint`} className="mt-2">
-            {pick.kind === "short" ? (
+            {amountTextError(amountText, assetDecimals(asset)) ? (
+              <AmountProblem value={amountText} decimals={assetDecimals(asset)} />
+            ) : pick.kind === "short" ? (
               <Notice tone="warn">
                 You hold {fmt(pick.total)} {sym} privately, less than {fmt(threshold!)}. Lower the
                 amount, or add more to your vault first.

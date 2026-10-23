@@ -30,6 +30,7 @@ import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type So
 import { track } from "@/lib/track";
 import { failedBeforeSend, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
 import { useNetwork } from "./NetworkProvider";
+import { AmountProblem } from "./AmountProblem";
 
 const noopSubscribe = () => () => {};
 
@@ -960,12 +961,13 @@ function BridgeSheet({
                     autoComplete="off"
                     placeholder="0.00"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, "").replace(/^(\d*\.\d{0,2}).*$/, "$1"))}
+                    onChange={(e) => setAmount(e.target.value)}
                     className="tnum min-w-0 flex-1 bg-transparent text-[16px] text-foreground outline-none! placeholder:text-faint"
                   />
                   <TokenMark src={dest.token.logo} size={20} />
                   <span className="text-[14px] text-mute">{dest.token.symbol}</span>
                 </div>
+                <AmountProblem value={amount} decimals={2} />
                 <p className="mt-1.5 text-[12px] text-mute">
                   Paid in {token.symbol}{" "}
                   {solWallet ? `from ${solWallet.name}` : swapping ? "from this wallet" : `from this wallet on ${chain.name}`}.
@@ -985,7 +987,7 @@ function BridgeSheet({
                   autoComplete="off"
                   placeholder="0"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                  onChange={(e) => setAmount(e.target.value)}
                   className="tnum min-w-0 flex-1 bg-transparent text-[16px] text-foreground outline-none! placeholder:text-faint"
                 />
                 {swapping && live?.quote?.send.usd != null && (
@@ -994,6 +996,7 @@ function BridgeSheet({
                 <TokenMark src={token.logo} size={20} />
                 <span className="text-[14px] text-mute">{token.symbol}</span>
               </div>
+              <AmountProblem value={amount} decimals={token.decimals} />
               {swapping && gasCoin != null && (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="tnum text-[12px] text-mute">

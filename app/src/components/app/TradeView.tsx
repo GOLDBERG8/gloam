@@ -14,6 +14,7 @@ import { formatUnits, isAddress } from "viem";
 import { formatEth, shortAddress } from "@/lib/chain";
 import { useNetwork } from "./NetworkProvider";
 import { safeParseEther, safeParseUnits } from "@/lib/amount";
+import { AmountProblem } from "./AmountProblem";
 import {
   DEX_FACTORY,
   DEX_ROUTER,
@@ -935,15 +936,14 @@ export function TradeView() {
                       inputMode="decimal"
                       placeholder="0"
                       value={amount}
-                      onChange={(e) =>
-                        setAmount(e.target.value.replace(/[^0-9.]/g, ""))
-                      }
+                      onChange={(e) => setAmount(e.target.value)}
                       aria-describedby="trade-amt-unit"
                       className="tnum w-full bg-transparent text-[34px] font-light leading-none tracking-[-0.02em] text-foreground outline-none placeholder:text-faint"
                     />
                     <span id="trade-amt-unit" className="sr-only">
                       {inputMode === "usd" ? "in USD" : `in ${market.symbol}`}
                     </span>
+                    <AmountProblem value={amount} />
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12px] text-mute">
                     <span className="tnum">

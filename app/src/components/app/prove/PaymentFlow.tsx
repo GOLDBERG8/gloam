@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useId, useMemo, useState } from "react";
 import { encodeProof, provePayment } from "@/lib/proofs";
-import { assetLabel, formatAssetAmount, parseAssetAmount, type LocalNote } from "@/lib/shield";
+import { assetDecimals, assetLabel, formatAssetAmount, parseAssetAmount, type LocalNote } from "@/lib/shield";
+import { amountTextError } from "@/lib/amountText";
 import { PaymentNoteLine } from "../PaymentNote";
 import {
   AssetMark,
@@ -82,7 +83,9 @@ export function PaymentFlow({ notes }: { notes: LocalNote[] }) {
   const minAmount = reveal ? amount : parseAssetAmount(minText, asset);
   const minProblem = reveal
     ? null
-    : minAmount == null || minAmount <= 0n
+    : amountTextError(minText, assetDecimals(asset))
+      ? amountTextError(minText, assetDecimals(asset))
+      : minAmount == null || minAmount <= 0n
       ? "Enter the minimum to show"
       : minAmount > amount
         ? `Can't be more than you received (${formatAssetAmount(amount, asset)} ${sym})`
@@ -301,7 +304,7 @@ export function PaymentFlow({ notes }: { notes: LocalNote[] }) {
                   inputMode="decimal"
                   autoComplete="off"
                   value={minText}
-                  onChange={(e) => setMinText(e.target.value.replace(/[^0-9.,]/g, ""))}
+                  onChange={(e) => setMinText(e.target.value)}
                   placeholder="0"
                   aria-describedby={`${ids}-min-hint`}
                   aria-invalid={Boolean(minText) && Boolean(minProblem)}

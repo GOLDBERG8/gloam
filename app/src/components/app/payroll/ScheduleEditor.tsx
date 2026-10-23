@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { formatUnits, type Address } from "viem";
 import { TokenLogo } from "../TokenLogo";
 import { assetDecimals, formatAssetAmount, parseAssetAmount } from "@/lib/shield";
+import { amountTextError } from "@/lib/amountText";
 import { PAYROLL_TEMPLATE, draftTotal, parsePayrollCsv } from "@/lib/payroll";
 import {
   dayLabel,
@@ -142,6 +143,8 @@ export function ScheduleEditor({
           ? "Add at least one person to pay."
           : bad > 0
             ? `Fix ${bad} ${bad === 1 ? "line" : "lines"} in the list first.`
+            : amountTextError(capInput, assetDecimals(asset))
+              ? `Cap: ${amountTextError(capInput, assetDecimals(asset))}`
             : cap == null || cap <= 0n
               ? "Set a cap above zero."
               : over > 0n
@@ -380,7 +383,7 @@ export function ScheduleEditor({
               <div className="relative">
                 <input
                   value={capInput}
-                  onChange={(e) => setCapInput(e.target.value.replace(/[^\d.,]/g, ""))}
+                  onChange={(e) => setCapInput(e.target.value)}
                   inputMode="decimal"
                   placeholder="25,000"
                   aria-label={`Cap per run, in ${symbol}`}
