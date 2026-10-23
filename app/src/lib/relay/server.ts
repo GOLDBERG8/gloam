@@ -71,7 +71,7 @@ import { screenAddresses } from "@/lib/screeningServer";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
 import { forgetNonce, inSendLanes, inflightKey, takeInflight } from "@/lib/relay/inflight";
 import { serverTransport } from "@/lib/serverRpc";
-import { isKnownRoute, isSwapAsset, vaultSwapAbi, vaultSwapRouter, encodeRoute, type PoolKey } from "@/lib/vaultSwap";
+import { isKnownRoute, isSwapAsset, swapRouterFor, vaultSwapAbi, encodeRoute, type PoolKey } from "@/lib/vaultSwap";
 
 const POOL_ERRORS = [
   "ZeroCommitment",
@@ -169,6 +169,7 @@ const REVERT_MESSAGES: Record<string, string> = {
   OverDepositLimit: "The vault is not taking that much of this asset right now. Swap a smaller amount.",
   PoolNotAllowed: "This swap route is not allowed.",
   BadRoute: "This swap route is not allowed.",
+  NativeRefused: "This swap route is not allowed.",
   FeeOnTransferNotSupported: "This token cannot be swapped into the vault.",
 };
 
@@ -704,9 +705,12 @@ export async function readSpendState(net: GloamNetwork, root: Hex, nullifier: He
   return { spent: Boolean(spent), knownRoot: Boolean(knownRoot) };
 }
 
+/** The most hops any router takes (GloamVaultSwapV4b.MAX_HOPS); each router's own limit is checked after. */
+const MAX_ROUTE_HOPS = 3;
+
 function asRoute(v: unknown): PoolKey[] {
   if (v == null) return [];
-  if (!Array.isArray(v) || v.length > 2) throw new RelayError("Invalid swap route.");
+  if (!Array.isArray(v) || v.length > MAX_ROUTE_HOPS) throw new RelayError("Invalid swap route.");
   return v.map((k) => {
     const r = (k ?? {}) as Record<string, unknown>;
     const fee = Number(r.fee);
@@ -741,8 +745,11 @@ const erc20BalanceAbi = [
  * A private swap through the vault (lib/vaultSwap). The note's unshield proof
  * names the swap's escrow as `to`, an address the router derives from the new
  * note, the refund note and the route, so the relay (or anyone who copies the
- * call) cannot change where the money goes or what lands. Only the chain's
- * router, only the vault's own assets, only a route the app builds, and the
+ * call) cannot change where the money goes or what lands. Only a router the
+ * app knows on the chain (`body.router`: the one new swaps use when left out;
+ * an earlier router only for the swaps made through it, as their refunds are),
+ * only that router's assets, only a route made of that router's pools (for v2,
+ * the dry run also checks each one against its allowlist on chain), and the
  * same lock, root check and dry run as any spend. A note already spent is
  * refused, unless its money is waiting at this swap's escrow: then the call
  * puts it back as the refund note. That call (lib/vaultSwapRun
@@ -751,8 +758,11 @@ const erc20BalanceAbi = [
  * reads on that path, so the root is not checked for it.
  */
 export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unknown>) {
-  const router = vaultSwapRouter(net.chainId);
-  if (!router) throw new RelayError("Private swaps are not live on this network yet.", 400, "no_swap");
+  if (!swapRouterFor(net.chainId)) throw new RelayError("Private swaps are not live on this network yet.", 400, "no_swap");
+  const asked = body.router == null ? null : asAddress(body.router, "router");
+  const config = swapRouterFor(net.chainId, asked);
+  if (!config) throw new RelayError("That is not a Gloam swap router on this network.", 400, "swap_router");
+  const router = config.address;
   const s = (body.spend ?? {}) as Record<string, unknown>;
   const spend: SwapSpend = {
     proof: asProof(s.proof),
@@ -764,14 +774,14 @@ export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unk
   const deposit = asSwapDeposit(body.deposit);
   const refund = asSwapDeposit(body.refund);
   if (spend.asset.toLowerCase() === deposit.asset.toLowerCase()) throw new RelayError("Pick two different assets.");
-  if (!isSwapAsset(net.chainId, spend.asset) || !isSwapAsset(net.chainId, deposit.asset)) {
+  if (!isSwapAsset(net.chainId, spend.asset, router) || !isSwapAsset(net.chainId, deposit.asset, router)) {
     throw new RelayError("This asset cannot be swapped here.", 400, "swap_asset");
   }
   if (refund.asset.toLowerCase() !== spend.asset.toLowerCase() || refund.amount > spend.amount) {
     throw new RelayError("Invalid refund note.");
   }
   const route = asRoute(body.route);
-  if (!isKnownRoute(net.chainId, spend.asset, deposit.asset, route)) {
+  if (!isKnownRoute(net.chainId, spend.asset, deposit.asset, route, router)) {
     throw new RelayError(REVERT_MESSAGES.BadRoute, 400, "BadRoute");
   }
   const routeBytes = encodeRoute(route);

@@ -103,10 +103,13 @@ export async function runVaultSwap(args: {
   //    escrow below are bound to amountOut.
   args.onStatus("Proving privately, this takes 10 to 30 seconds…");
   const back = await prepareBridgeNote(refundAmountFor(targetWei), target.asset, network, args.owner);
+  if (args.plan.router.toLowerCase() !== router.toLowerCase()) {
+    throw new Error("This quote was for another swap router. Get a new quote and try again.");
+  }
   const plan = await replanVaultSwap(
     getRhPublicClient(),
     network.chainId,
-    { assetIn: target.asset, assetOut: args.assetOut, amountIn: targetWei, feeBps: args.feeBps },
+    { assetIn: target.asset, assetOut: args.assetOut, amountIn: targetWei, feeBps: args.feeBps, router },
     args.plan
   );
   const out = await prepareBridgeNote(plan.amountOut, args.assetOut, network, args.owner);
@@ -184,6 +187,7 @@ export async function runVaultSwap(args: {
   try {
     hash = await relayVaultSwap({
       chainId: network.chainId,
+      router,
       spend: { proof: proofBytes, root: fieldToBytes32(w.publicInputs.root), nullifier, asset: target.asset, amount: targetWei },
       deposit: { proof: out.proof, commitment: outNote.commitment, asset: args.assetOut, amount: plan.amountOut },
       refund: { proof: back.proof, commitment: refundNote.commitment, asset: target.asset, amount: BigInt(refundNote.amountWei) },
@@ -263,6 +267,8 @@ export async function finishVaultSwapRefund(note: LocalNote): Promise<void> {
   });
   const hash = await relayVaultSwap({
     chainId: note.chainId,
+    // the router this swap went through, which may not be the one new swaps use now
+    router: info.router,
     spend: { proof: UNUSED_PROOF, root: UNUSED_ROOT, nullifier: from.nullifier, asset: info.assetIn, amount: BigInt(info.amountIn) },
     deposit: { proof: UNUSED_PROOF, commitment: info.out.commitment, asset: info.out.asset, amount: BigInt(info.out.amount) },
     refund: { proof: proofBytes, commitment: note.commitment, asset: note.asset, amount: BigInt(note.amountWei) },
