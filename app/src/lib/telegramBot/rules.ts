@@ -859,8 +859,14 @@ const CLAIM_LINK_RE = new RegExp(`${NOT_URL}*?(?:#|%23)claim(?:=|%3D)([A-Za-z0-9
 /** A payment request link: to=gloamr1... in the fragment or the query. */
 const REQUEST_LINK_RE = new RegExp(`${NOT_URL}*?[#?&]to(?:=|%3D)gloamr1\\.[A-Za-z0-9_-]{20,}${NOT_URL}*`, "gi");
 /** A bare code. Real ones run to dozens or hundreds of characters; "gloamr1." in a sentence is not one. */
-// Links write the dot after the prefix as "=" (older ones "-"), so a code cut from one is still caught.
-const RAW_CODE_RE = /(?<![A-Za-z0-9])gloam(r1|2t|1e|1)[.=-][A-Za-z0-9_=-]{20,}/g;
+// Links write the dot after the prefix as "=" (older ones "-", launch-day ones "%2E"), so a code cut
+// from one is still caught.
+const RAW_CODE_RE = /(?<![A-Za-z0-9])gloam(r1|2t|1e|1)(?:[.=-]|%2[Ee])[A-Za-z0-9_=-]{20,}/g;
+/**
+ * What a chat app leaves of a plain code it cut at "gloam1": the base64 JSON body ("eyJ..."), maybe
+ * after "%2E", ".", "=" or "-". The claim box takes it as the code, so it is masked as one.
+ */
+const BARE_BODY_RE = /(?<![A-Za-z0-9_-])(?:%2[Ee]|[.=-])?eyJ[A-Za-z0-9_-]{100,}/g;
 const RAW_KIND: Record<string, CodeKind> = { r1: "address", "2t": "sealed", "1e": "locked", "1": "plain" };
 
 /** What a claim link carries: a locked or sealed code keeps its own rules. */
@@ -892,10 +898,14 @@ function sweepCodes(text: string, kinds: Set<CodeKind>, labels: boolean): string
       return labels ? CODE_LABEL.request_link : " ";
     });
   }
-  return t.replace(RAW_CODE_RE, (_m, p: string) => {
+  t = t.replace(RAW_CODE_RE, (_m, p: string) => {
     const kind = RAW_KIND[p]!;
     kinds.add(kind);
     return labels ? CODE_LABEL[kind] : " ";
+  });
+  return t.replace(BARE_BODY_RE, () => {
+    kinds.add("plain");
+    return labels ? CODE_LABEL.plain : " ";
   });
 }
 

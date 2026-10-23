@@ -28,6 +28,7 @@
  */
 import assert from "node:assert/strict";
 import { claimLinkFor } from "../src/lib/claimLink";
+import { buildNotePackage, encodeNotePackage, paymentCodeIn } from "../src/lib/notePackage";
 
 process.env.GLOAM_PARTNERS_STORE = "memory";
 delete process.env.UPSTASH_REDIS_REST_URL;
@@ -681,6 +682,38 @@ await test("codes: each format is told apart", () => {
   assert.equal(scanCodes(`${LOCKED} phrase is Gloam`).rest.trim(), "phrase is Gloam");
   for (const k of [["plain"], ["claim_link"]] as const) assert.ok(hasBearerCode(new Set(k)));
   for (const k of [["address"], ["sealed"], ["locked"], ["request_link"]] as const) assert.ok(!hasBearerCode(new Set(k)));
+});
+
+await test("codes: what a chat app leaves of a cut code is masked too, since the claim box takes it", () => {
+  // A real plain code: its body is base64 JSON ("eyJ..."), so it survives a cut at "gloam1".
+  const code = encodeNotePackage(
+    buildNotePackage({
+      pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194",
+      asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      amountWei: "25000000",
+      secret: `0x${"ab".repeat(31)}`,
+      commitment: `0x${"cd".repeat(32)}`,
+    } as Parameters<typeof buildNotePackage>[0])
+  );
+  const body = code.slice("gloam1.".length);
+  for (const [label, form] of [
+    ["the dot written %2E", `gloam1%2E${body}`],
+    ["the dot written %2e", `gloam1%2e${body}`],
+    ["WhatsApp's leftover after a cut link", `%2E${body}`],
+    ["the body alone", body],
+    ["the body after a dot", `.${body}`],
+    ["the body after a hyphen", `-${body}`],
+  ] as const) {
+    assert.equal(paymentCodeIn(form), code, `${label}: the claim box reads it as the code`);
+    const scan = scanCodes(`can someone help me claim this? ${form} thanks`);
+    assert.ok(!scan.masked.includes(body.slice(0, 40)), `${label}: masked`);
+    assert.equal(scan.masked, "can someone help me claim this? [plain payment code] thanks", label);
+    assert.ok(hasBearerCode(scan.kinds), `${label}: a bearer code`);
+  }
+  // Short base64 and words that start the same are left alone.
+  for (const t of ["I said eyJ to him", "token eyJhbGciOiJIUzI1NiJ9 is short", "gloam1%2E short"]) {
+    assert.equal(scanCodes(t).masked, t, t);
+  }
 });
 
 await test("codes: words about codes are not codes", () => {
