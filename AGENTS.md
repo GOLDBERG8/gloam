@@ -7,8 +7,8 @@ Tagline: private by default, provable on demand. Hero line: private money on pub
 - Lead with stablecoin payments, payroll and agent payments, on Tempo and Robinhood Chain mainnets (beta, real money). The testnets are the free practice network with test funds.
 - Why the tech fits: a payment has one owner, so the owner proves it on their own device with zero-knowledge proofs and nobody else holds a key. Committee systems (Zama FHE, Arcium MPC) and operator systems (Tempo Zones) suit shared secrets, not single-owner payments.
 - Not new cryptography: the Zcash-lineage pool. New, as far as our research found: the payroll total proof, proofs scoped to one reader with an expiry (`context` input), and private payments for agents (MPP method proposal, x402, MCP with spending limits).
-- Stock tokens: Robinhood Chain testnet only, held and sent privately there. Private trade is built and switched off on every network (the mainnet pool has no swap code) while we build a new engine for private trading. No dates.
-- Never claim "first" or "only". Mainnet is live in beta: say it handles real money, has beta deposit limits, was reviewed internally (20 October 2026) and that an external audit is planned. Never say "audited". Never say private trading is live. $GLOAM: facts only (a mainnet pool asset on Robinhood Chain; half of Gloam's fees buy it back). Say "no admin withdraw, timelocked rule changes", not "no admin" or "trustless".
+- Stock tokens: Robinhood Chain testnet only, held and sent privately there. Private swaps are live on Robinhood Chain and Tempo mainnet: a swap goes from the private balance through a one-time escrow to a public DEX and back. Who swapped stays private; the pair and the amounts are public. The old sealed trade stays retired.
+- Never claim "first" or "only". Mainnet is live in beta: say it handles real money, has beta deposit limits, was reviewed internally (20 October 2026) and that an external audit is planned. Never say "audited". Never say a swap hides its amounts, or call it anonymous or untraceable. $GLOAM: facts only (a mainnet pool asset on Robinhood Chain; half of Gloam's fees buy it back). Say "no admin withdraw, timelocked rule changes", not "no admin" or "trustless".
 - Comparison and honest gaps: `/docs/compare`, `/docs/privacy-model`, `/docs/production`.
 
 ## Canonical
@@ -33,7 +33,7 @@ Mainnet (final keys, beta deposit limits: 500 per deposit and 25,000 total per s
 - Proofs of funds, payment and payroll totals, checked at `/verify`
 - Agent payments over x402 and MPP, MCP server with spending limits
 - Stock tokens held and sent privately on the Robinhood Chain testnet (testnet only)
-- Private trade (sealedSwap) is built but switched off on every network while we build a new engine for private trading
+- Private swaps from the private balance on both mainnets (routers 0x34AB06208586A737Bf1607fa996Bc9162271c52d on Robinhood Chain, 0xfCa1887e77f738ef9C5751974b3f3873d029F2DC on Tempo); the old sealed trade stays retired
 - App root: `app/` · never revive `docs.gloam.trade`
 
 ## Audits
