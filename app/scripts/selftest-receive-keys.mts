@@ -181,14 +181,16 @@ await test("a padded sealed ticket opens to the same payment in the app and in t
   assert.equal(await rt.decryptTicketWithLocalTag(sealed), code);
   const inApp = await decodeNotePackage(sealed, undefined, { tryTagDecrypt: true });
   assert.deepEqual([inApp.amountWei, inApp.secret, inApp.commitment, inApp.note], [pack.amountWei, pack.secret, pack.commitment, "rent"]);
-  // what an app or SDK reads straight out of AES-GCM: the code, then spaces up to the step
+  // the SDK opens it to the code, with the padding already off
   const { current } = await rt.exportReceiveKeys();
   const opened = await sdk.openSealedTicket(sealed, current!.privateJwk);
-  assert.equal(opened.length, 512);
-  assert.equal(opened.trimEnd(), code);
+  assert.equal(opened, code);
   const inSdk = sdk.decodeNotePackage(opened);
   assert.deepEqual([inSdk.amountWei, inSdk.secret, inSdk.commitment, inSdk.note], [pack.amountWei, pack.secret, pack.commitment, "rent"]);
-  assert.equal((await decodeNotePackage(opened)).commitment, pack.commitment, "the app's decoder trims it too");
+  // what a reader gets straight out of AES-GCM: the code, then spaces up to the step
+  const raw = code.padEnd(512, " ");
+  assert.equal((await decodeNotePackage(raw)).commitment, pack.commitment, "the app's decoder trims it");
+  assert.equal(sdk.decodeNotePackage(raw).commitment, pack.commitment, "and so does the SDK's");
 });
 
 console.log(`\n${passed} receive-key checks passed`);
