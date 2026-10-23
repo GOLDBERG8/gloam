@@ -375,17 +375,22 @@ contract VaultSwapV4bTest is VaultSwapReviewTest {
         _v2().removePool(_id(direct));
     }
 
-    /// The deploy script's pools are the app's (lib/vaultSwap RH_SWAP_POOLS_V2, checked by
-    /// selftest-vault-swap against the same ids), sorted as v4 keys must be.
+    /// The deploy script's pools are the app's (lib/vaultSwap RH_SWAP_POOLS_V2): both must equal
+    /// the fixture, in order (selftest-vault-swap checks the app's side), sorted as v4 keys
+    /// must be, with no pool twice.
     function test_v2_deploy_script_pools_are_the_apps() public {
         PoolKey[] memory p = new DeployVaultSwapV4b().pools();
-        bytes4[7] memory ids =
-            [bytes4(0x3b0cbf06), 0xc5f37371, 0xe5b1e488, 0x24107d15, 0x387bf619, 0x84bd4e2d, 0x9200eb96];
+        bytes32[] memory ids = vm.parseJsonBytes32Array(vm.readFile("test/fixtures/vault-swap-v2-pools.json"), ".poolIds");
         assertEq(p.length, ids.length);
         for (uint256 i = 0; i < p.length; i++) {
-            assertEq(bytes4(_id(p[i])), ids[i]);
+            assertEq(_id(p[i]), ids[i]);
             assertLt(uint160(p[i].currency0), uint160(p[i].currency1));
+            assertTrue(p[i].hooks != 0x958541C0Ce2E1A158309f7d1b141963eDa31C880, "banned hook");
+            for (uint256 j = 0; j < i; j++) assertTrue(ids[j] != ids[i], "a pool twice");
         }
+        // and the router takes them all at deploy
+        GloamVaultSwapV4b r = GloamVaultSwapV4b(payable(address(_newRouter(p))));
+        for (uint256 i = 0; i < p.length; i++) assertTrue(r.allowedPool(ids[i]));
     }
 
     // ═════════════════════════════════════════════════════════════ ETH through WETH
