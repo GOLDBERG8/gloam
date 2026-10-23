@@ -2,7 +2,7 @@
 
 **Private stablecoin payments for apps and agents on Robinhood Chain and Tempo, as a package.**
 
-Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain or Tempo. Live on mainnet (beta) with the trusted setup's final keys, and on testnet for free practice. Real zero-knowledge proofs, no proving stack to build from scratch.
+Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain or Tempo. Live on Robinhood Chain and Tempo mainnet (beta), on the trusted setup's final keys. Real zero-knowledge proofs, no proving stack to build from scratch.
 
 [![npm version](https://img.shields.io/npm/v/@gloamtrade/sdk?color=0B0C0E&label=npm)](https://www.npmjs.com/package/@gloamtrade/sdk)
 [![license](https://img.shields.io/npm/l/@gloamtrade/sdk?color=0B0C0E)](https://github.com/cryptoduke01/gloam/blob/main/LICENSE)
@@ -47,7 +47,7 @@ The Gloam vault app is the reference implementation, not a special case. The sam
 
 ## What you can build
 
-- **Shielded balances.** Deposit stablecoins (USDG on Robinhood Chain; USDC.e, pathUSD, USDT0 or OUSD on Tempo) or $GLOAM into a private balance only the holder can see or spend. On testnet you can also practice with test ETH and stock tokens.
+- **Shielded balances.** Deposit stablecoins (USDG on Robinhood Chain; USDC.e, pathUSD, USDT0 or OUSD on Tempo) or $GLOAM into a private balance only the holder can see or spend.
 - **Private payments.** Send inside the vault to a receive tag, with on-chain encrypted discovery through the payment-message board on every network, mainnet included. No public transfer, no visible amount.
 - **Cash out.** Unshield back to a public balance with a browser- or node-generated Groth16 proof.
 - **Selective disclosure.** Let a holder prove one balance to a chosen party, an auditor or a counterparty, revealing nothing else. Provable, not a dark pool.
@@ -274,7 +274,7 @@ await wallet.writeContract({
 // Hand send.paymentNote to the recipient; keep send.changeNote.
 ```
 
-Private payments are free and have no limit. The testnets also have an on-chain encrypted memo board (`GloamPayMemo`) so a recipient can find a payment with their Gloam address; the mainnet pools have none at launch, so hand the payment note over directly or seal it to the payee's receive tag.
+Private payments are free and have no limit. Every network, mainnet included, has an encrypted payment board (`GloamPayMemo`), so a recipient finds a payment with their Gloam address; see [Take payments and read their notes](#take-payments-and-read-their-notes).
 
 ## Selective disclosure
 
