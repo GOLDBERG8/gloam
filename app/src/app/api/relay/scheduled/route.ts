@@ -64,7 +64,7 @@ function fail(e: unknown) {
 /**
  * Schedule a cash out the relay sends later: the same body as a relayed cash
  * out ({ chainId, proof, root, nullifier, asset, to, amount }) plus
- * { window: "hour" | "6h" }. It is checked and dry-run now; the send time is
+ * { window: "hour" | "6h" | "day" }. It is checked and dry-run now; the send time is
  * drawn at random inside the window. Returns { id, sendAfter, to }. Asking
  * again for the same spend returns the job already waiting; asking with
  * another address (or amount) is a 409 already_scheduled with that job.
@@ -76,7 +76,7 @@ export async function POST(req: Request) {
     if (!body || typeof body !== "object") throw new RelayError("Invalid request.");
     const window = body.window as DelayWindow;
     if (typeof window !== "string" || !Object.hasOwn(DELAY_WINDOWS, window)) {
-      throw new RelayError("Pick within an hour or within 6 hours.");
+      throw new RelayError("Pick within an hour, 6 hours or a day.");
     }
     const net = networkForChain(body.chainId);
     const ip = clientIp(req);

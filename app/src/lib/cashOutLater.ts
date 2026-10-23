@@ -21,8 +21,10 @@ import { noteNullifierPoseidon } from "./notePoseidon";
 import { fieldToHex, hexToField } from "./poseidon";
 import { getRhPublicClient } from "./rhClient";
 import { shieldPoolAbi, updateLocalNote, type CashOutMark, type LocalNote } from "./shield";
+import type { DelayWindow } from "./relay/scheduled";
 
-export type CashOutWindow = "hour" | "6h";
+/** The windows the relay offers (lib/relay/scheduled DELAY_WINDOWS): about an hour, 6 hours or a day. */
+export type CashOutWindow = DelayWindow;
 
 export type CashOutJobView = {
   id: string;
