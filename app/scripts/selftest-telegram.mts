@@ -1236,7 +1236,7 @@ await test("a suggestion aimed at the team by tag gets no reply from Glim", asyn
   assert.equal(sends().length, 1);
 });
 
-await test("Glim stays out of chatter and price talk, and leaves asks for the team to the team", async () => {
+await test("Glim stays out of chatter and price talk, and notes asks for the team once", async () => {
   reset();
   classifierReply = "NO";
   await handleUpdate(upd(inTopic(TOPIC.feedback, "Is there any one new to crypto here ?", user(953, "Richard"))));
@@ -1247,16 +1247,21 @@ await test("Glim stays out of chatter and price talk, and leaves asks for the te
   classifierReply = "TEAM";
   await handleUpdate(upd(inTopic(TOPIC.feedback, "Team can you manage the buy bot from general to buy thank you.", user(955, "Fsk"))));
   await handleUpdate(upd(inTopic(TOPIC.feedback, "Please get the outside audit done then mobile app !", user(955, "Fsk"))));
-  assert.equal(sends().length, 0, "the team answers their own asks");
+  assert.equal(modelCalls().length, 0, "the team answers their own asks");
+  assert.equal(sends().length, 1, "one note, not one per ask");
+  assert.ok(String(sends()[0]!.body.text).startsWith("That one's for the team, Fsk."));
   const un = (await readLast24h()).unanswered.filter((u) => u.name === "Fsk");
   assert.equal(un.length, 2, "both are on the team's list");
   assert.ok(un.every((u) => u.why === "team"));
+  // a factual question about buybacks or the treasury is help, not price talk
+  const rules = String((classifyCalls()[0]!.body.system as { text: string }[])[0]!.text);
+  assert.ok(rules.includes("a question about buybacks or the treasury is HELP"));
   // the check could not run: only an on-topic question gets an answer
   process.env.TELEGRAM_BOT_DAILY_CHECKS = "0";
   await handleUpdate(upd(inTopic(TOPIC.help, "How do I turn on recovery?", user(956, "Ola"))));
   await handleUpdate(upd(inTopic(TOPIC.general, "anyone here from lagos?", user(957, "Tolu"))));
   delete process.env.TELEGRAM_BOT_DAILY_CHECKS;
-  assert.equal(sends().length, 1, "the recovery question only");
+  assert.equal(sends().length, 2, "the note and the recovery question only");
 });
 
 await test("buy alerts: every buy, spaced, with value, price, market cap and links", async () => {
