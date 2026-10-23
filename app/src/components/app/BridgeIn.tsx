@@ -74,7 +74,10 @@ type PrivateStage =
       hash: Hex | null;
       unsure: boolean;
       at: number;
-      /** A Solana send we couldn't confirm, past its transaction's life: it can no longer land. */
+      /**
+       * A Solana send we couldn't confirm, past its transaction's life, that Relay
+       * hasn't seen: most likely never sent. Not proof, so its note is kept.
+       */
       expired?: boolean;
     }
   | { kind: "landed"; quote: PrivateBridgeQuote }
@@ -464,8 +467,10 @@ function BridgeSheet({
   }, [sentPriv, config, network.chainId, once]);
 
   // A Solana transaction is good for about a minute. One we couldn't confirm
-  // that Relay still hasn't seen after two and a half can never land, so the
-  // person may start over (and its note can go).
+  // that Relay still hasn't seen after two and a half most likely never went
+  // out, so the person may start over. Its note stays saved, out of the
+  // balance: Relay not seeing it (or a status read that failed) is no proof,
+  // and if it lands after all the sync counts it (lib/claimSweep).
   useEffect(() => {
     if (!sentPriv?.unsure || !sentPriv.quote.solanaTx || sentPriv.expired) return;
     const left = Math.max(0, sentPriv.at + 150_000 - Date.now());
@@ -1116,9 +1121,7 @@ function BridgeSheet({
               backToNetwork();
             }}
             onGiveUp={() => {
-              if (priv.kind === "sent" && priv.expired && status?.stage !== "moving" && status?.stage !== "done") {
-                dropUnsentNote(priv.note.id);
-              }
+              // The note is kept: a payment Relay fills late still lands in it.
               reset();
             }}
           />
@@ -1423,7 +1426,7 @@ function PrivateProgress({
               : relay === "waiting"
                 ? stage.unsure
                   ? stage.expired
-                    ? `${stage.payer} didn't send it, so nothing moved. Start over to try again.`
+                    ? `Relay hasn't seen a payment from ${stage.payer}, so it most likely didn't go out. If it did, it shows in your private balance by itself. Start over to try again.`
                     : `Checking whether ${stage.payer} sent it…`
                   : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
                 : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
