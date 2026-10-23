@@ -106,8 +106,8 @@ export async function queueJoiners(joiners: Joiner[]): Promise<number> {
 
 /**
  * The members to welcome now, oldest first, or null while the last welcome is
- * under ten minutes old or nobody is waiting. Taking a batch starts the next
- * ten minutes.
+ * under an hour old or nobody is waiting. Taking a batch starts the next
+ * hour.
  */
 export async function takeWelcomeBatch(): Promise<Joiner[] | null> {
   const [slot] = await kv([["SET", COOLDOWN, "1", "EX", WELCOME_EVERY_SEC, "NX"]]);
