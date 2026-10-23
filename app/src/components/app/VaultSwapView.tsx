@@ -110,7 +110,9 @@ function useUsdMarks(chainId: number, assets: readonly Address[]): Record<string
     );
     if (!ids.length) return;
     let live = true;
-    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(",")}&vs_currencies=usd`)
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(",")}&vs_currencies=usd`, {
+      signal: AbortSignal.timeout(5_000),
+    })
       .then((r) => (r.ok ? r.json() : null))
       .then((j: Record<string, { usd?: number }> | null) => {
         for (const id of ids) {

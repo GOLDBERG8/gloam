@@ -142,7 +142,10 @@ function usePrices(): { prices: Prices | null; waiting: boolean } {
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null) as Promise<{ ethUsd?: number | null; markets?: { address?: string; mark?: number }[] } | null>;
     const ids = COINGECKO_PRICED.map((t) => t.coingecko).join(",");
-    const gecko = fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`)
+    // display only: a slow CoinGecko never holds the other prices back
+    const gecko = fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
+      signal: AbortSignal.timeout(5_000),
+    })
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null) as Promise<Record<string, { usd?: number }> | null>;
     void Promise.all([markets, gecko]).then(([d, g]) => {
