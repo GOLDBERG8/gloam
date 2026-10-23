@@ -408,8 +408,8 @@ export function VaultSwapView() {
                     : { key: "swap", label: "Swap privately", ready: Boolean(shownPlan && relayOk === true) };
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-[520px] flex-col gap-4 lg:mx-0">
-      <div className="gl-card w-full min-w-0 p-4 sm:p-6">
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="gl-card min-w-0 p-5 sm:p-7">
         <div className="flex items-center justify-between gap-3 px-1 pb-5">
           <p className="t-title text-foreground">Swap</p>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-1 text-[12px] font-medium text-sealed">
@@ -638,7 +638,10 @@ export function VaultSwapView() {
         )}
       </div>
 
-      <PrivacyNotes venue={venue} />
+      <aside className="min-w-0 space-y-4">
+        <ExplorerCard />
+        <PrivacyNotes venue={venue} />
+      </aside>
 
       {picker && (
         <TokenPicker
@@ -851,6 +854,39 @@ function TokenPicker({
  * What stays private, what is public, and what happens if a swap can't finish.
  * Kept in full, folded under the swap: the one-line summary always shows.
  */
+/** What anyone can see of a private swap, laid out like the Pay tab's card. */
+function ExplorerCard() {
+  return (
+    <div className="gl-card p-5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[13px] text-mute">What the explorer shows</p>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-0.5 text-[12px] font-medium text-sealed">
+          <LockIcon />
+          Private
+        </span>
+      </div>
+      <dl className="mt-3 divide-y divide-line text-[14px]">
+        <div className="flex h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Swapped by</dt>
+          <dd className="truncate text-foreground">Gloam relay</dd>
+        </div>
+        <div className="flex h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Your wallet</dt>
+          <dd className="truncate text-foreground">Never shows</dd>
+        </div>
+        <div className="flex h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Tokens and amounts</dt>
+          <dd className="truncate text-foreground">Public</dd>
+        </div>
+        <div className="flex h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Lands in</dt>
+          <dd className="truncate text-foreground">Your private balance</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 function PrivacyNotes({ venue }: { venue: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -864,10 +900,10 @@ function PrivacyNotes({ venue }: { venue: string }) {
         <span className="min-w-0">
           <span className="flex items-center gap-2 font-medium text-foreground">
             <LockIcon />
-            What stays private
+            Good to know
           </span>
           <span className="mt-1 block text-[13px] text-mute">
-            Who swapped stays private. The amounts and tokens are public, like any trade on {venue}.
+            How to keep a swap from linking back to you.
           </span>
         </span>
         <Chevron open={open} />
