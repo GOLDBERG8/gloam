@@ -23,6 +23,7 @@ import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient } from "@/lib/rhClient";
 import { track } from "@/lib/track";
+import { countPerson } from "@/lib/people";
 import { shieldTokensFor, supportsNativeShield } from "@/lib/tokens";
 import {
   NATIVE_ASSET,
@@ -581,6 +582,7 @@ export function PayrollView() {
       });
       setActive({ ...done });
       if (done.status === "done") {
+        if (done.rows.some((r) => r.status === "paid")) countPerson("payroll", address, network.testnet);
         // How many and where, never amounts or names.
         track("payroll_run_finished", {
           people: done.rows.filter((r) => r.status === "paid").length,

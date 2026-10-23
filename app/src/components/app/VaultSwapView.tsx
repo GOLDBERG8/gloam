@@ -44,6 +44,7 @@ import {
 } from "@/lib/vaultSwap";
 import { SWAP_REFUNDED, runVaultSwap } from "@/lib/vaultSwapRun";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
+import { countPerson } from "@/lib/people";
 import { useNetwork } from "./NetworkProvider";
 import { TokenLogo } from "./TokenLogo";
 import { WalletMenu } from "./WalletMenu";
@@ -347,6 +348,7 @@ export function VaultSwapView() {
         pathFor: async (n) => ((await freshPath(n.commitment))?.path as PoseidonMerklePath | undefined) ?? null,
         onStatus: setStatus,
       });
+      if (!refunded) countPerson("swap", address, network.testnet);
       setDone(
         refunded ? SWAP_REFUNDED : `Swapped. ${formatAssetLabel(outNote.amountWei, outNote.asset)} is in your private balance.`
       );

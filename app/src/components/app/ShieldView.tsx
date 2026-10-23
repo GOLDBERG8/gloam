@@ -42,6 +42,7 @@ import { DevKeysBanner } from "./DevKeysBanner";
 import { BridgeInCard } from "./BridgeIn";
 import { RefreshIcon } from "./VaultHealth";
 import { BRIDGE_DESTINATIONS, bridgeVisible } from "@/lib/bridge";
+import { countPerson } from "@/lib/people";
 
 type TxKind = "shield" | "approve" | "pull" | null;
 type AssetChoice = "eth" | string; // eth | token id
@@ -376,6 +377,7 @@ export function ShieldView() {
     void refetchTok();
     void refetchAllow();
     void refetchPool();
+    countPerson("deposit", address, network.testnet);
     void import("@/lib/track").then(({ track }) => {
       track("shield_success", {
         asset: sentLabel.replace(/[\d.]+/g, "").trim().slice(0, 16) || "asset",
@@ -406,6 +408,7 @@ export function ShieldView() {
     pendingNote,
     pendingKind,
     address,
+    network.testnet,
     assetAddress,
     sentLabel,
     refreshNotes,

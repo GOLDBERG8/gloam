@@ -139,6 +139,7 @@ import {
   scheduledLine,
 } from "./PrivateCashOut";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
+import { countPerson } from "@/lib/people";
 import { WalletMenu } from "./WalletMenu";
 import { AfterClaimNext } from "./AfterClaimNext";
 import { ClaimSafetyLine } from "./ClaimSafetyLine";
@@ -505,6 +506,9 @@ export function MoveView() {
         if (pendingClaimLink.current) countLinkCreated();
         pendingClaimLink.current = false;
         countSendAfterClaim();
+        // someone using Gloam (lib/people): sent later with the day's other actions, never with the payment
+        countPerson("send", address, network.testnet);
+        if (payTrack.current?.request) countPerson("request", address, network.testnet);
         // The payment landed: keep its code under Sent links, encrypted in this
         // browser, so a lost code is not lost money (removed again if a heads-up posts).
         const link = pendingLink.current;
@@ -515,6 +519,8 @@ export function MoveView() {
           void saveSentLink(link).catch(() => undefined);
         }
       }
+
+      if (pendingAction.current === "cashout") countPerson("cashout", address, network.testnet);
 
       if (pendingAction.current === "send" && payTrack.current) {
         const t = payTrack.current;
@@ -629,7 +635,7 @@ export function MoveView() {
       setBusy(false);
       setStatus(null);
     })();
-  }, [isSuccess, txHash, network.chainId, refreshNotes, refreshTree, writeContract]);
+  }, [isSuccess, txHash, network.chainId, network.testnet, address, refreshNotes, refreshTree, writeContract]);
 
   // Wallet reject / tx fail: drop ephemeral payment secrets
   useEffect(() => {
@@ -987,6 +993,7 @@ export function MoveView() {
         // money already has a cash out waiting, the note shows that one).
         const job = await scheduleNoteCashOut(target, call, cashOutWhen as CashOutWindow);
         spentNoteId.current = null;
+        countPerson("cashout", address, network.testnet);
         setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(target.amountWei, target.asset) });
         setCashOutInput("");
         refreshNotes();
@@ -1158,6 +1165,7 @@ export function MoveView() {
             : `${done} ${r.error ?? ""} The rest is safe in your private balance.`.replace(/\s+/g, " ")
         );
       }
+      if (r.jobs.length > 0) countPerson("cashout", address, network.testnet);
       void import("@/lib/track").then(({ track }) => {
         track("unshield_private", {
           window: planWindow,
@@ -1537,6 +1545,7 @@ export function MoveView() {
         track("claim_secure", { reason: r.status, relay: relayOn, chainId: network.chainId });
       });
       outcome = r.status;
+      if (r.status === "swept") countPerson("claim", address, network.testnet);
       if (r.status === "swept" && r.freshNote) {
         const fresh = loadLocalNotes(address).find(
           (n) => n.commitment.toLowerCase() === r.freshNote!.commitment.toLowerCase()
