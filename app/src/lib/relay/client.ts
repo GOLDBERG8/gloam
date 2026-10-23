@@ -67,8 +67,11 @@ export class RelaySubmitError extends Error {
   }
 }
 
-async function post(body: Record<string, unknown>): Promise<Hex> {
-  if (readDemo()) return demoRelay(body);
+/** What the relay answers a send: the hash, and for a transfer the payment's memo ticket. */
+type RelayReply = { hash: Hex; memoTicket?: string | null };
+
+async function post(body: Record<string, unknown>): Promise<RelayReply> {
+  if (readDemo()) return { hash: await demoRelay(body) };
   let res: Response;
   try {
     res = await fetch("/api/relay", {
@@ -79,24 +82,52 @@ async function post(body: Record<string, unknown>): Promise<Hex> {
   } catch {
     throw new RelaySubmitError("Could not reach the relay. Check your connection.", "network");
   }
-  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; hash?: Hex; error?: string; code?: string };
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    hash?: Hex;
+    memoTicket?: string | null;
+    error?: string;
+    code?: string;
+  };
   if (!res.ok || !json.ok || !json.hash) {
     throw new RelaySubmitError(json.error ?? "The relay could not submit this payment.", json.code ?? "error");
   }
-  return json.hash;
+  return { hash: json.hash, memoTicket: json.memoTicket };
 }
 
-export function relayTransfer(p: {
+/**
+ * Memo tickets from this tab's relayed transfers, by payment commitment. The
+ * relay hands one back with each transfer (lib/relay/server memoTicket); sent
+ * with that payment's message, it gets the payer's own few, which strangers
+ * copying the public commitment can't use up. Memory only: a message posted
+ * after a reload goes without one and shares the strangers' allowance.
+ */
+const memoTickets = new Map<string, string>();
+const MEMO_TICKETS_MAX = 500;
+
+function keepMemoTicket(commitment: Hex, ticket: unknown) {
+  if (typeof ticket !== "string" || !ticket) return;
+  if (memoTickets.size >= MEMO_TICKETS_MAX) {
+    const oldest = memoTickets.keys().next().value;
+    if (oldest !== undefined) memoTickets.delete(oldest);
+  }
+  memoTickets.set(commitment.toLowerCase(), ticket);
+}
+
+export async function relayTransfer(p: {
   chainId: number;
   proof: Hex;
   root: Hex;
   nullifier: Hex;
   commitments: readonly [Hex, Hex];
 }): Promise<Hex> {
-  return post({ action: "transfer", ...p });
+  const { hash, memoTicket } = await post({ action: "transfer", ...p });
+  // commitments[0] is the payment, the one its heads-up is for
+  keepMemoTicket(p.commitments[0], memoTicket);
+  return hash;
 }
 
-export function relayUnshield(p: {
+export async function relayUnshield(p: {
   chainId: number;
   proof: Hex;
   root: Hex;
@@ -105,22 +136,24 @@ export function relayUnshield(p: {
   to: Address;
   amount: bigint;
 }): Promise<Hex> {
-  return post({ action: "unshield", ...p });
+  return (await post({ action: "unshield", ...p })).hash;
 }
 
 /** A private swap through the vault (lib/vaultSwap). Only the relay ever submits one. */
-export function relayVaultSwap(p: {
+export async function relayVaultSwap(p: {
   chainId: number;
   spend: { proof: Hex; root: Hex; nullifier: Hex; asset: Address; amount: bigint };
   deposit: { proof: Hex; commitment: Hex; asset: Address; amount: bigint };
   refund: { proof: Hex; commitment: Hex; asset: Address; amount: bigint };
   route: readonly PoolKey[];
 }): Promise<Hex> {
-  return post({ action: "swap", ...p });
+  return (await post({ action: "swap", ...p })).hash;
 }
 
-export function relayMemo(p: { chainId: number; paymentCommitment: Hex; memo: Hex }): Promise<Hex> {
-  return post({ action: "memo", ...p });
+/** A payment's heads-up, with its memo ticket when this tab relayed the payment. */
+export async function relayMemo(p: { chainId: number; paymentCommitment: Hex; memo: Hex }): Promise<Hex> {
+  const ticket = memoTickets.get(p.paymentCommitment.toLowerCase());
+  return (await post({ action: "memo", ...p, ...(ticket ? { ticket } : {}) })).hash;
 }
 
 /** Wait for a relayed tx on the active network. */

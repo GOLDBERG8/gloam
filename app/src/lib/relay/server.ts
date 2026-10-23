@@ -30,7 +30,9 @@
  *     memos carry no public address, so there is nothing to screen
  *   - per-sender and per-network rate limits, shared across instances (the
  *     network cap counts only transactions actually sent), and a few relayed
- *     payment messages per payment
+ *     payment messages per payment: the payer's own (with the memo ticket the
+ *     transfer handed back), each partner key's, and one small allowance that
+ *     everyone else shares, none of them kept by IP
  *
  * Submission is free for the user on every network, mainnet included: the relay
  * pays the gas. A relay fee would need its own public output inside the circuit,
@@ -39,7 +41,9 @@
  *
  * Key: GLOAM_RELAYER_PRIVATE_KEY (server env only, never NEXT_PUBLIC_). With no
  * key set the relay reports itself disabled and the app falls back to wallet
- * submission.
+ * submission. GLOAM_RELAY_MEMO_SECRET (server only, 32 characters or more)
+ * signs the memo tickets; unset, no tickets go out and every payment message
+ * but a partner key's shares the small allowance.
  */
 import {
   BaseError,
@@ -54,6 +58,7 @@ import {
   type PublicClient,
 } from "viem";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
+import { createHmac, timingSafeEqual } from "crypto";
 import {
   NETWORK_KEYS,
   getNetwork,
@@ -266,9 +271,10 @@ const PER_IP = 400;
 /** Transactions the relay actually sends per network per hour. Refused requests never count. */
 const PER_NETWORK_HOURLY = 5_000;
 /**
- * Relayed payment messages per payment per day: from one sender (one is
- * needed, the rest covers retries), and from everyone together, so nobody can
- * spend the relay's gas posting junk for payments that are already in the vault.
+ * Relayed payment messages per payment per day: for the payer, who holds the
+ * payment's memo ticket, and for each partner key (one is needed, the rest
+ * covers retries), and for everyone else together, so nobody can spend the
+ * relay's gas posting junk for payments that are already in the vault.
  */
 const MEMOS_PER_PAYMENT = 3;
 const MEMOS_PER_PAYMENT_ALL = 10;
@@ -278,6 +284,47 @@ export async function checkRateLimit(requester: string): Promise<void> {
   if (!(await hitRateLimit(requester, "relay-ip", PER_IP, Date.now(), WINDOW_SEC)).allowed) {
     throw new RelayError("Too many requests from this device. Wait a few minutes.", 429, "rate_limit");
   }
+}
+
+// ---------------------------------------------------------------- memo tickets
+
+/** Shortest GLOAM_RELAY_MEMO_SECRET taken; anything shorter counts as unset (a ticket in hand lets anyone guess at it offline). */
+const MEMO_SECRET_MIN = 32;
+let warnedShortSecret = false;
+
+function memoSecret(): string | null {
+  const s = process.env.GLOAM_RELAY_MEMO_SECRET?.trim();
+  if (!s) return null;
+  if (s.length < MEMO_SECRET_MIN) {
+    if (!warnedShortSecret) console.warn("gloam_relay_memo_secret_short", JSON.stringify({ min: MEMO_SECRET_MIN }));
+    warnedShortSecret = true;
+    return null;
+  }
+  return s;
+}
+
+/**
+ * The payer's ticket for a payment's message: HMAC-SHA256 under
+ * GLOAM_RELAY_MEMO_SECRET of the chain and the payment commitment, base64url.
+ * The relay hands it back with the transfer it relayed, so only whoever sent
+ * that transfer through it holds one, and their heads-up gets its own few
+ * messages that strangers can't use up (commitments are public on chain).
+ * Null when the secret is unset or too short: then nobody holds a ticket and
+ * every message but a partner key's shares the strangers' allowance.
+ */
+export function memoTicket(chainId: number, commitment: string): string | null {
+  const secret = memoSecret();
+  if (!secret) return null;
+  return createHmac("sha256", secret).update(`${chainId}:${commitment.toLowerCase()}`).digest("base64url");
+}
+
+function memoTicketOk(chainId: number, commitment: Hex, ticket: unknown): boolean {
+  if (typeof ticket !== "string" || ticket.length > 64) return false;
+  const want = memoTicket(chainId, commitment);
+  if (!want) return false;
+  const a = Buffer.from(ticket);
+  const b = Buffer.from(want);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** One relay transaction on this network, counted only once it passed every check and the dry run. */
@@ -764,8 +811,13 @@ export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unk
   return submitSpend(net, { kind: "swap", router, args: [spend, deposit, refund, routeBytes] }, precheck);
 }
 
-/** `requester` is who asks (an IP, or `key:<id>` for the API), for the per-sender message limit. */
-export async function relayMemo(net: GloamNetwork, body: Record<string, unknown>, requester = "unknown") {
+/**
+ * `body.ticket` is the payment's memo ticket (memoTicket) from the transfer's
+ * response. `requester` is `key:<id>` for the partner API, which gets its own
+ * few messages per payment; the app's route passes none, so no IP is ever
+ * kept next to a payment.
+ */
+export async function relayMemo(net: GloamNetwork, body: Record<string, unknown>, requester?: string) {
   if (!net.payMemo) throw new RelayError("Payment messages are not live on this network yet.", 400, "no_memo");
   const commitment = asBytes32(body.paymentCommitment, "payment");
   const memo = asMemo(body.memo);
@@ -778,13 +830,19 @@ export async function relayMemo(net: GloamNetwork, body: Record<string, unknown>
   })) as boolean;
   if (!seen) throw new RelayError("That payment is not in the vault yet. Wait for it to confirm.", 409, "not_seen");
   // The memo board takes any number of messages per payment, and each relayed
-  // one is gas the relay pays: a few per payment from one sender, and a ceiling
-  // for everyone, so a payment's message can't be crowded out by one other sender.
-  const payment = `memo:${net.chainId}:${commitment.toLowerCase()}`;
+  // one is gas the relay pays. The payer (with the ticket) and each partner key
+  // get a few of their own; everyone else shares one small allowance, which a
+  // stranger can use up but never the payer's. Keys name the payment and who
+  // holds it, never an IP, and use no ":" (lib/mcpRemote/rateLimit reads a key
+  // with colons as an IPv6 address and keeps only its first four groups).
+  const payment = `memo|${net.chainId}|${commitment.toLowerCase()}`;
   const now = Date.now();
-  const mine = await hitRateLimit(`${payment}:${requester}`, "relay-memo", MEMOS_PER_PAYMENT, now, 86_400);
-  const all = mine.allowed ? await hitRateLimit(payment, "relay-memo-all", MEMOS_PER_PAYMENT_ALL, now, 86_400) : mine;
-  if (!mine.allowed || !all.allowed) {
+  const hit = memoTicketOk(net.chainId, commitment, body.ticket)
+    ? await hitRateLimit(`${payment}|payer`, "relay-memo", MEMOS_PER_PAYMENT, now, 86_400)
+    : requester?.startsWith("key:")
+      ? await hitRateLimit(`${payment}|key|${requester.slice(4).replace(/:/g, "|")}`, "relay-memo", MEMOS_PER_PAYMENT, now, 86_400)
+      : await hitRateLimit(payment, "relay-memo-all", MEMOS_PER_PAYMENT_ALL, now, 86_400);
+  if (!hit.allowed) {
     throw new RelayError("A message for this payment was already sent.", 409, "memo_sent");
   }
   return submit(net, { kind: "memo", args: [commitment, memo] });

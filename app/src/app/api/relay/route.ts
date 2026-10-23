@@ -3,6 +3,7 @@ import { clientIp } from "@/lib/mcpRemote/rateLimit";
 import {
   RelayError,
   checkRateLimit,
+  memoTicket,
   networkForChain,
   relayMemo,
   relayStatus,
@@ -27,26 +28,30 @@ export async function GET() {
  * Submit an already-proven private action through the Gloam relay.
  * Body: { chainId, action: "transfer" | "unshield" | "memo" | "swap", ...args }
  * Returns { ok: true, hash } as soon as the transaction is sent; the client
- * waits for the receipt itself.
+ * waits for the receipt itself. A transfer also returns `memoTicket` for its
+ * payment (commitments[0]), null when the relay has no memo secret: sent back
+ * as `ticket` with that payment's memo, it gets the payer's own few messages.
  */
 export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body || typeof body !== "object") throw new RelayError("Invalid request.");
     const net = networkForChain(body.chainId);
-    const ip = clientIp(req);
-    await checkRateLimit(ip);
+    await checkRateLimit(clientIp(req));
 
     let hash: `0x${string}`;
     switch (body.action) {
-      case "transfer":
+      case "transfer": {
         hash = await relayTransfer(net, body);
-        break;
+        // relayTransfer checked commitments[0] is a bytes32
+        const payment = (body.commitments as string[])[0]!;
+        return NextResponse.json({ ok: true, hash, memoTicket: memoTicket(net.chainId, payment) });
+      }
       case "unshield":
         hash = await relayUnshield(net, body);
         break;
       case "memo":
-        hash = await relayMemo(net, body, ip);
+        hash = await relayMemo(net, body);
         break;
       case "swap":
         hash = await relayVaultSwap(net, body);

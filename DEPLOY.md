@@ -52,6 +52,7 @@ Mainnet pools are not env vars. After each mainnet deploy (runbook: [`contracts/
 | --- | --- |
 | `GLOAM_RPC_URL_4663` | A private Robinhood Chain mainnet RPC. The server tries it first, then the public `https://rpc.mainnet.chain.robinhood.com` |
 | `GLOAM_RPC_URL_4217` | A private Tempo mainnet RPC. The server tries it first, then the public `https://rpc.tempo.xyz` |
+| `GLOAM_RELAY_MEMO_SECRET` | 32 or more random characters (`openssl rand -base64 32`). Signs the memo ticket the relay hands back with each private send, so the payer's heads-up gets its own few relayed messages. Unset, every relayed message but a partner key's shares one small allowance per payment, which a stranger can use up for a day |
 
 Never put these behind `NEXT_PUBLIC_`. The same `GLOAM_RPC_URL_<chainId>` works for the testnets.
 

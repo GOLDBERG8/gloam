@@ -14,6 +14,10 @@
  *    private RPC that took it and never answered) is reported maybe_sent and
  *    never sent again, with the public RPC never handed the raw send; only a
  *    real nonce or replacement refusal from the node is retried, once
+ *  - payment messages: a relayed transfer hands back a memo ticket for its
+ *    payment, the payer's ticketed message gets through after 40 strangers
+ *    have tried, partner keys keep their own few, the app client keeps the
+ *    ticket and sends it, no secret means no ticket, and no limit keys on an IP
  *  - cash outs to the vault or the memo board are refused before any chain
  *    call, on the server, in the shared check the app uses, and in the SDK
  *
@@ -38,10 +42,12 @@ const {
   RELAY_MEMO_MAX_BYTES,
   RelayError,
   asMemo,
+  memoTicket,
   relayMemo,
   relayTransfer,
   relayUnshield,
 } = await import("../src/lib/relay/server");
+const relayClient = await import("../src/lib/relay/client");
 const { INFLIGHT_TTL_SEC, inflightKey, takeInflight } = await import("../src/lib/relay/inflight");
 const { CASH_OUT_TO_BOARD_MESSAGE, CASH_OUT_TO_VAULT_MESSAGE, cashOutTargetProblem } = await import(
   "../src/lib/cashOutTarget"
@@ -170,6 +176,10 @@ function answer(r: RpcReq): { result?: unknown; error?: { code: number; message:
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = (typeof input === "string" ? input : input instanceof URL ? input.href : input.url).replace(/\/$/, "");
+  // the app's relay client (lib/relay/client) posts here: hand it to the route itself
+  if (url === "/api/relay") {
+    return relayPost(new Request("http://localhost/api/relay", { method: init?.method ?? "GET", headers: { "Content-Type": "application/json", "x-forwarded-for": "198.51.100.200" }, body: init?.body }));
+  }
   const via = url === RPC.replace(/\/$/, "") ? "public" : url === PRIVATE_RPC ? "private" : null;
   if (!via) throw new Error(`selftest: no network (${url})`);
   const body = JSON.parse(String(init?.body)) as RpcReq | RpcReq[];
@@ -501,6 +511,133 @@ await test("sendOnce: the public backup answers reads but never gets a raw send"
     await assert.rejects(reads.request({ method: "eth_sendRawTransaction", params: [raw] }));
     assert.deepEqual(sends, ["private", "public"]);
   });
+});
+
+// ---------------------------------------------------------------- payment message tickets (M-2, L-3)
+
+const MEMO_SECRET = "selftest-memo-secret-" + "x".repeat(32);
+/** A fresh payment commitment per case, so message counts from one case never touch another. */
+function payment(): Hex {
+  n++;
+  return `0x${(0xc000_0000 + n).toString(16).padStart(64, "0")}` as Hex;
+}
+const memoBody = (c: Hex, extra: Record<string, unknown> = {}) => ({ chainId: net.chainId, action: "memo", paymentCommitment: c, memo: memoOf(64), ...extra });
+const transferTo = (c: Hex) => ({ chainId: net.chainId, action: "transfer", ...transferBody(nullifier()), commitments: [c, H32] });
+
+async function post(ip: string, body: unknown) {
+  const res = await relayPost(req("http://localhost/api/relay", body, ip));
+  return { status: res.status, json: (await res.json()) as { ok: boolean; code?: string; hash?: Hex; memoTicket?: string | null } };
+}
+
+function withMemoSecret(secret: string | undefined) {
+  if (secret === undefined) delete process.env.GLOAM_RELAY_MEMO_SECRET;
+  else process.env.GLOAM_RELAY_MEMO_SECRET = secret;
+}
+
+await test("memo ticket: a relayed transfer hands back one for its payment, and only for it", async () => {
+  withMemoSecret(MEMO_SECRET);
+  reset();
+  const pay = payment();
+  const { status, json } = await post("203.0.113.9", transferTo(pay));
+  assert.equal(status, 200);
+  assert.equal(json.hash, TX_HASH);
+  assert.ok(json.memoTicket && /^[A-Za-z0-9_-]{43}$/.test(json.memoTicket), "a 32-byte base64url ticket");
+  assert.equal(json.memoTicket, memoTicket(net.chainId, pay));
+  assert.equal(memoTicket(net.chainId, pay.toUpperCase().replace("0X", "0x")), json.memoTicket, "any case");
+  assert.notEqual(memoTicket(net.chainId, payment()), json.memoTicket);
+  assert.notEqual(memoTicket(net.chainId + 1, pay), json.memoTicket);
+});
+
+await test("memo DoS: 40 strangers can't block the payer's ticketed heads-up", async () => {
+  withMemoSecret(MEMO_SECRET);
+  reset();
+  const pay = payment();
+  const ticket = (await post("203.0.113.9", transferTo(pay))).json.memoTicket!;
+  let accepted = 0;
+  for (let i = 0; i < 40; i++) {
+    const r = await post(`198.51.100.${i + 1}`, memoBody(pay));
+    if (r.status === 200) accepted++;
+    else assert.deepEqual([r.status, r.json.code], [409, "memo_sent"]);
+  }
+  assert.equal(accepted, 10, "strangers share a small allowance per payment");
+  // a made-up ticket, or another payment's, is a stranger's
+  assert.equal((await post("198.51.100.99", memoBody(pay, { ticket: memoTicket(net.chainId, payment()) }))).status, 409);
+  assert.equal((await post("198.51.100.99", memoBody(pay, { ticket: "A".repeat(43) }))).status, 409);
+  assert.equal((await post("198.51.100.99", memoBody(pay, { ticket: 42 }))).status, 409);
+  // the payer's own few, from any IP
+  for (const ip of ["203.0.113.9", "203.0.113.10", "2001:db8::1"]) {
+    const r = await post(ip, memoBody(pay, { ticket }));
+    assert.equal(r.status, 200);
+    assert.equal(r.json.hash, TX_HASH);
+  }
+  assert.equal((await post("203.0.113.9", memoBody(pay, { ticket }))).status, 409, "and only a few");
+});
+
+await test("partner keys keep their own few per payment, apart from strangers and each other", async () => {
+  withMemoSecret(MEMO_SECRET);
+  reset();
+  const pay = payment();
+  const body = { paymentCommitment: pay, memo: memoOf(64) };
+  for (let i = 0; i < 10; i++) assert.equal(await relayMemo(net, body), TX_HASH);
+  await assert.rejects(relayMemo(net, body), isRelayError("memo_sent", 409));
+  for (const key of ["key:key_a1b2", "key:key_c3d4"]) {
+    for (let i = 0; i < 3; i++) assert.equal(await relayMemo(net, body, key), TX_HASH);
+    await assert.rejects(relayMemo(net, body, key), isRelayError("memo_sent", 409));
+  }
+});
+
+await test("no memo limit keys on the poster's IP", async () => {
+  withMemoSecret(MEMO_SECRET);
+  reset();
+  const counts = (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate!;
+  const memoKeys = () => [...counts.keys()].filter((k) => /:relay-memo(?:-all)?:/.test(k));
+  const before = new Set(memoKeys());
+  const added = () => memoKeys().filter((k) => !before.has(k)).length;
+  const ips = ["198.51.100.1", "198.51.100.2", "2a01:4f8:c17:1234::1", "2a01:dead:beef::1"];
+  const pay = payment();
+  for (const ip of ips) await post(ip, memoBody(pay));
+  // strangers: one shared count, whoever posted from where
+  assert.equal(added(), 1);
+  const ticket = memoTicket(net.chainId, pay)!;
+  for (const ip of ips) await post(ip, memoBody(pay, { ticket }));
+  // and one for the payer
+  assert.equal(added(), 2);
+});
+
+await test("app client: keeps the transfer's ticket and sends it with that payment's message", async () => {
+  withMemoSecret(MEMO_SECRET);
+  reset();
+  const pay = payment();
+  // strangers used up the shared allowance first
+  for (let i = 0; i < 10; i++) await relayMemo(net, { paymentCommitment: pay, memo: memoOf(64) });
+  const sent = await relayClient.relayTransfer({ chainId: net.chainId, proof: PROOF, root: H32, nullifier: nullifier(), commitments: [pay, H32] });
+  assert.equal(sent, TX_HASH);
+  assert.equal(await relayClient.relayMemo({ chainId: net.chainId, paymentCommitment: pay, memo: memoOf(64) }), TX_HASH);
+  // a payment this browser never relayed has no ticket: a stranger's share, used up here
+  const other = payment();
+  for (let i = 0; i < 10; i++) await relayMemo(net, { paymentCommitment: other, memo: memoOf(64) });
+  await assert.rejects(
+    relayClient.relayMemo({ chainId: net.chainId, paymentCommitment: other, memo: memoOf(64) }),
+    (e: unknown) => e instanceof relayClient.RelaySubmitError && e.code === "memo_sent"
+  );
+});
+
+await test("no secret: no ticket is handed out, and everyone but partner keys shares the small allowance", async () => {
+  for (const secret of [undefined, "", "too-short-to-trust"]) {
+    withMemoSecret(secret);
+    reset();
+    const pay = payment();
+    assert.equal(memoTicket(net.chainId, pay), null);
+    assert.equal((await post("203.0.113.9", transferTo(pay))).json.memoTicket, null);
+    // a ticket made with the secret once set opens nothing now
+    withMemoSecret(MEMO_SECRET);
+    const old = memoTicket(net.chainId, pay);
+    withMemoSecret(secret);
+    for (let i = 0; i < 10; i++) assert.equal((await post(`198.51.100.${i + 1}`, memoBody(pay, { ticket: old }))).status, 200);
+    assert.equal((await post("203.0.113.9", memoBody(pay, { ticket: old }))).status, 409);
+    assert.equal(await relayMemo(net, { paymentCommitment: pay, memo: memoOf(64) }, "key:key_a1b2"), TX_HASH);
+  }
+  withMemoSecret(undefined);
 });
 
 // ---------------------------------------------------------------- cash out to the vault
