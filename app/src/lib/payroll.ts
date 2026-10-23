@@ -42,7 +42,7 @@ import { readAmountText } from "@/lib/amountText";
 import { encryptTicketForTag, isReceiveTag, isValidReceiveTag } from "@/lib/receiveTag";
 import { ticketToMemoBytes } from "@/lib/payMemo";
 import { cleanPaymentNote } from "@/lib/paymentNote";
-import { keepPaidCodes, saveBatch } from "@/lib/payrollStore";
+import { keepPaidCodes, loadStoredRun, saveBatch } from "@/lib/payrollStore";
 import { markPrivatePaid } from "@/lib/firstPayment";
 import { countLinkCreated } from "@/lib/funnel";
 import {
@@ -432,23 +432,100 @@ async function commitmentSeen(client: PublicClient, pool: Address, commitment: H
   })) as boolean;
 }
 
+/** Shown when another tab is paying this run right now. */
+export const RUN_ELSEWHERE =
+  "This run is going in another tab. Let it finish there, or close that tab and try again in a few minutes.";
+const RUN_LOCK = "gloam-payroll-run-";
+const RUN_LEASE = "gloam.payroll.running.";
+/** Where Web Locks are missing: a run's lease in localStorage, renewed while it runs. */
+const LEASE_MS = 3 * 60_000;
+
+type RunLocks = {
+  request: <T>(name: string, opts: { ifAvailable: boolean }, fn: (lock: unknown) => Promise<T>) => Promise<T>;
+};
+
+/**
+ * Only one tab pays a given run at a time (a second click in the same tab
+ * too). With Web Locks the lock goes when the tab does; without them a lease
+ * in localStorage stands in, renewed while the run goes and dropped when it
+ * ends or the page closes.
+ */
+async function holdRun<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const locks = (globalThis.navigator as { locks?: RunLocks } | undefined)?.locks;
+  if (locks?.request) {
+    return locks.request(RUN_LOCK + id, { ifAvailable: true }, async (lock) => {
+      if (!lock) throw new Error(RUN_ELSEWHERE);
+      return fn();
+    });
+  }
+  if (typeof window === "undefined") return fn();
+  const key = RUN_LEASE + id;
+  const at = Number(window.localStorage.getItem(key));
+  if (at && Date.now() - at < LEASE_MS) throw new Error(RUN_ELSEWHERE);
+  const renew = () => window.localStorage.setItem(key, String(Date.now()));
+  const drop = () => window.localStorage.removeItem(key);
+  renew();
+  const beat = setInterval(renew, LEASE_MS / 6);
+  window.addEventListener("pagehide", drop);
+  try {
+    return await fn();
+  } finally {
+    clearInterval(beat);
+    window.removeEventListener("pagehide", drop);
+    drop();
+  }
+}
+
+/** Make `row` the stored copy, field for field. */
+function takeStored(row: PayrollRow, stored: PayrollRow) {
+  for (const k of Object.keys(row)) if (!(k in stored)) delete (row as Record<string, unknown>)[k];
+  Object.assign(row, stored);
+}
+
+/** The stored copy has moved on from this one: paid, given up, or holding a payment this copy doesn't know. */
+function movedOn(row: PayrollRow, stored: PayrollRow): boolean {
+  if (stored.status === "paid" || stored.status === "failed") return stored.status !== row.status;
+  return Boolean(stored.spendNullifier) && stored.spendNullifier !== row.spendNullifier;
+}
+
 /**
  * Run (or resume) a payroll batch. Mutates and persists `batch` as it goes and
  * reports every change through deps.onUpdate. Resolves when every row is paid
  * or failed, or when stopped / out of funds / waiting on the chain (batch.status
  * says which).
+ *
+ * `batch` may be an old copy (a second tab, a page left open): the run is held
+ * for this tab only (RUN_ELSEWHERE otherwise) and starts from the stored rows,
+ * so a person paid or sent to elsewhere is settled from that record, never paid
+ * again from another note.
  */
-export async function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<PayrollBatch> {
+export function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<PayrollBatch> {
+  return holdRun(batch.id, () => runHeld(batch, deps));
+}
+
+async function runHeld(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<PayrollBatch> {
   const { client } = deps;
   const emit = async () => {
     deps.onUpdate({ ...batch, rows: batch.rows.map((r) => ({ ...r })) });
     await saveBatch(batch);
   };
+  // Every change is saved before anything is sent, so the stored rows are the truth.
+  const stored = await loadStoredRun(batch.id);
+  if (stored) {
+    const byId = new Map(stored.rows.map((r) => [r.id, r]));
+    for (const row of batch.rows) {
+      const s = byId.get(row.id);
+      if (s) takeStored(row, s);
+    }
+  }
   batch.status = "running";
   await emit();
 
   try {
     for (const row of batch.rows) {
+      // Read again before each person, in case another tab got past the lock.
+      const now = (await loadStoredRun(batch.id))?.rows.find((r) => r.id === row.id);
+      if (now && movedOn(row, now)) takeStored(row, now);
       if (row.status === "paid" || row.status === "failed") continue;
       if (deps.shouldStop()) throw new PayrollStop();
 
@@ -649,6 +726,20 @@ async function samePaymentWitness(
   };
 }
 
+/**
+ * The first of `notes` the vault has not seen spent. One spent elsewhere (another
+ * tab, another device) is retired here instead of paying with it. A read that
+ * fails lets the note through: the vault refuses a spent note anyway.
+ */
+async function unspentNote(batch: PayrollBatch, client: PublicClient, notes: LocalNote[]): Promise<LocalNote | undefined> {
+  for (const n of notes) {
+    const nullifier = fieldToBytes32(await noteNullifierPoseidon(hexToField(n.secret), hexToField(n.commitment)));
+    if ((await isSpent(client, batch.pool, nullifier).catch(() => false)) !== true) return n;
+    updateLocalNote(n.id, { status: "recovered" });
+  }
+  return undefined;
+}
+
 async function payRow(
   batch: PayrollBatch,
   row: PayrollRow,
@@ -668,9 +759,13 @@ async function payRow(
     // again exactly as it was. Otherwise a new one is built.
     let note: LocalNote | undefined;
     if (!row.spendNullifier) {
-      note = fundingNotes(batch.employer, batch.asset, tree)
-        .filter((n) => BigInt(n.amountWei) >= amount)
-        .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1))[0];
+      note = await unspentNote(
+        batch,
+        deps.client,
+        fundingNotes(batch.employer, batch.asset, tree)
+          .filter((n) => BigInt(n.amountWei) >= amount)
+          .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1))
+      );
       if (!note) {
         batch.status = "needs_funds";
         row.status = "queued";
