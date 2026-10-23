@@ -58,25 +58,6 @@ export function roundDownToWhole(amountWei: bigint, decimals: number): bigint {
   return (amountWei / unit) * unit;
 }
 
-/**
- * Whether `amountWei` sits within 1% of money that came into this browser's
- * balance in the last day (a deposit, or a payment received): a cash out of
- * the same size is easy to match to it.
- */
-export function matchesRecentIncoming(amountWei: bigint, notes: LocalNote[], asset: string, now = Date.now()): boolean {
-  if (amountWei <= BigInt(0)) return false;
-  const since = now - 24 * 60 * 60 * 1000;
-  return notes.some((n) => {
-    if (n.asset.toLowerCase() !== asset.toLowerCase() || n.createdAt < since) return false;
-    // Change from a send, and this browser's own cash-out splits, are not money coming in.
-    if (n.id.startsWith("chg-") || n.id.startsWith("co-")) return false;
-    const v = BigInt(n.amountWei || "0");
-    if (v <= BigInt(0)) return false;
-    const diff = v > amountWei ? v - amountWei : amountWei - v;
-    return diff * BigInt(100) <= v;
-  });
-}
-
 /** The tree path for a note once it is in the vault, read fresh from the chain. */
 export async function freshPath(commitment: Hex): Promise<{ leafIndex: number; path: PoseidonMerklePath } | null> {
   for (let i = 0; i < 4; i++) {

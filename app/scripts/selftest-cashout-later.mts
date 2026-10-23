@@ -23,9 +23,9 @@
  *
  * Then the browser side: what each job status means for the note (nextMark),
  * and that a waiting cash out is out of the balance while one that came back
- * is spendable again. A different amount (lib/cashOutSplit): the recent-amount
- * match, Round it, and the rule for keeping the split's notes when the first
- * step may have gone out.
+ * is spendable again. A different amount (lib/cashOutSplit): the amount match
+ * (now lib/cashOutPlan), Round it, and the rule for keeping the split's notes
+ * when the first step may have gone out.
  *
  * fetch is stubbed for the relay's chain calls (an in-process fake node);
  * anything else fails. Relay keys are throwaways made here.
@@ -61,7 +61,8 @@ const {
   scheduleJob,
 } = await import("../src/lib/relay/scheduled");
 const { markFor, nextMark, reconcileCashOuts, releaseGoneCashOut } = await import("../src/lib/cashOutLater");
-const { matchesRecentIncoming, roundDownToWhole, splitMaybeSent, splitNotes } = await import("../src/lib/cashOutSplit");
+const { roundDownToWhole, splitMaybeSent, splitNotes } = await import("../src/lib/cashOutSplit");
+const { findCashOutLink } = await import("../src/lib/cashOutPlan");
 const { activeSpendableNotes, cashOutPending, saveLocalNote } = await import("../src/lib/shield");
 const { getActiveNetwork, getNetwork } = await import("../src/lib/networks");
 const { getAllNotes } = await import("../src/lib/noteVault");
@@ -512,21 +513,25 @@ await test("Round it rounds down to whole units", () => {
   assert.equal(roundDownToWhole(1_500_000_000_000_000_000n, 18), 1_000_000_000_000_000_000n);
 });
 
-await test("an amount within 1% of money that came in the last day is flagged", () => {
+await test("an amount within 1% of money that came in the last 30 days is flagged (lib/cashOutPlan)", () => {
   const now = T0;
+  const DAY = 24 * 3_600_000;
   const inc = (id: string, amountWei: string, ageMs: number, asset = ASSET) =>
     ({ id, amountWei, asset, createdAt: now - ageMs }) as LocalNote;
-  const notes = [inc("dep-1", "100000000", 60_000)];
-  assert.equal(matchesRecentIncoming(100_000_000n, notes, ASSET, now), true, "exact");
-  assert.equal(matchesRecentIncoming(99_000_000n, notes, ASSET, now), true, "1% under");
-  assert.equal(matchesRecentIncoming(101_000_000n, notes, ASSET, now), true, "1% over");
-  assert.equal(matchesRecentIncoming(98_900_000n, notes, ASSET, now), false, "past 1%");
-  assert.equal(matchesRecentIncoming(100_000_000n, notes, ASSET.toUpperCase(), now), true, "asset case");
-  assert.equal(matchesRecentIncoming(100_000_000n, notes, TO, now), false, "another asset");
-  assert.equal(matchesRecentIncoming(100_000_000n, [inc("dep-2", "100000000", 25 * 3_600_000)], ASSET, now), false, "older than a day");
-  assert.equal(matchesRecentIncoming(100_000_000n, [inc("chg-1", "100000000", 60_000)], ASSET, now), false, "change is not money in");
-  assert.equal(matchesRecentIncoming(100_000_000n, [inc("co-1", "100000000", 60_000)], ASSET, now), false, "own split is not money in");
-  assert.equal(matchesRecentIncoming(0n, notes, ASSET, now), false);
+  // a deposit days ago, so only the amount lines it up (a deposit hours old is flagged whatever its amount)
+  const notes = [inc(`${T0}-0xd1`, "100000000", 2 * DAY)];
+  const flagged = (amount: bigint, ns = notes, asset: string = ASSET) => findCashOutLink(amount, ns, asset, now) !== null;
+  assert.equal(flagged(100_000_000n), true, "exact");
+  assert.equal(flagged(99_000_000n), true, "1% under");
+  assert.equal(flagged(101_000_000n), true, "1% over");
+  assert.equal(flagged(98_900_000n), false, "past 1%");
+  assert.equal(flagged(100_000_000n, notes, ASSET.toUpperCase()), true, "asset case");
+  assert.equal(flagged(100_000_000n, notes, TO), false, "another asset");
+  assert.equal(flagged(100_000_000n, [inc(`${T0}-0xd2`, "100000000", 31 * DAY)]), false, "older than 30 days");
+  assert.equal(flagged(100_000_000n, [inc("chg-1", "100000000", DAY)]), false, "change is not money in");
+  assert.equal(flagged(100_000_000n, [inc("co-1", "100000000", DAY)]), false, "own split is not money in");
+  assert.equal(flagged(100_000_000n, [inc("imp-1", "100000000", DAY)]), true, "a payment received is");
+  assert.equal(flagged(0n), false);
 });
 
 await test("the split keeps its notes unless the first step surely never went out", () => {
