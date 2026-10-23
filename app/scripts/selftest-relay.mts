@@ -637,6 +637,41 @@ await test("app client: keeps the transfer's ticket and sends it with that payme
   );
 });
 
+await test("app client: a heads-up the relay's node has not seen yet is tried again, other refusals are not", async () => {
+  reset();
+  const keep = { ...relayClient.MEMO_NOT_SEEN_RETRY };
+  relayClient.MEMO_NOT_SEEN_RETRY.delayMs = 0;
+  const real = globalThis.fetch;
+  let refusals = 0;
+  let memoPosts = 0;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.endsWith("/api/relay") && init?.body && String(init.body).includes('"action":"memo"')) {
+      memoPosts++;
+      if (refusals > 0) {
+        refusals--;
+        return new Response(JSON.stringify({ ok: false, error: "That payment is not in the vault yet.", code: "not_seen" }), { status: 409 });
+      }
+    }
+    return real(input, init);
+  }) as typeof fetch;
+  try {
+    refusals = 2;
+    assert.equal(await relayClient.relayMemo({ chainId: net.chainId, paymentCommitment: payment(), memo: memoOf(64) }), TX_HASH);
+    assert.equal(memoPosts, 3, "two not_seen answers, then it goes");
+    memoPosts = 0;
+    refusals = 5;
+    await assert.rejects(
+      relayClient.relayMemo({ chainId: net.chainId, paymentCommitment: payment(), memo: memoOf(64) }),
+      (e: unknown) => e instanceof relayClient.RelaySubmitError && e.code === "not_seen"
+    );
+    assert.equal(memoPosts, 3, "three tries at most");
+  } finally {
+    globalThis.fetch = real;
+    Object.assign(relayClient.MEMO_NOT_SEEN_RETRY, keep);
+  }
+});
+
 await test("no secret: no ticket is handed out, and everyone but partner keys shares the small allowance", async () => {
   for (const secret of [undefined, "", "too-short-to-trust"]) {
     withMemoSecret(secret);

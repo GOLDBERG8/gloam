@@ -559,17 +559,21 @@ export function PayrollView() {
                 chainId: network.chainId,
               }),
         submitMemo: memoOn
-          ? (m) =>
-              useRelay
-                ? relayMemo({ chainId: network.chainId, ...m })
-                : writeContractAsync({
-                    address: payMemoAddress()!,
-                    abi: payMemoAbi,
-                    functionName: "postMemo",
-                    args: [m.paymentCommitment, m.memo],
-                    gas: gasFor(network.chainId, MEMO_GAS_LIMIT),
-                    chainId: network.chainId,
-                  })
+          ? (m) => {
+              const fromWallet = () =>
+                writeContractAsync({
+                  address: payMemoAddress()!,
+                  abi: payMemoAbi,
+                  functionName: "postMemo",
+                  args: [m.paymentCommitment, m.memo],
+                  gas: gasFor(network.chainId, MEMO_GAS_LIMIT),
+                  chainId: network.chainId,
+                });
+              // Heads-ups go through the relay whenever it is up: no wallet prompt per person. A run sent
+              // from the wallet may fall back to it; a hidden run never posts from the wallet.
+              if (!relayAvailable) return fromWallet();
+              return relayMemo({ chainId: network.chainId, ...m }).catch((e) => (useRelay ? Promise.reject(e) : fromWallet()));
+            }
           : null,
         waitForTx: (h: Hex) => waitForTx(h),
         onUpdate: (b) => setActive(b),
