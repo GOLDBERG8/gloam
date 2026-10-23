@@ -174,8 +174,9 @@ export async function runVaultSwap(args: {
     sweepPending: true,
     vaultSwap: refundInfo,
   };
-  saveLocalNote(outNote);
-  saveLocalNote(refundNote);
+  // on disk and read back before the swap is sent, or nothing is sent
+  await saveLocalNote(outNote);
+  await saveLocalNote(refundNote);
   const dropBoth = () => {
     dropUnsentNote(outNote.id);
     dropUnsentNote(refundNote.id);

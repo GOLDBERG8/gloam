@@ -307,7 +307,7 @@ export async function secureClaim(
     prove: env.prove,
     chain: env.chain,
     // Saved before anything is sent: if this tab closes, this is the only copy.
-    beforeSubmit: (out) => {
+    beforeSubmit: async (out) => {
       fresh = {
         id: `${SECURED_PREFIX}${Date.now()}`,
         chainId: note.chainId,
@@ -328,7 +328,8 @@ export async function secureClaim(
         // The payer's note stays with the money.
         ...(note.note ? { note: note.note } : {}),
       };
-      saveLocalNote(fresh);
+      // on disk and read back before the move is sent, or nothing is sent
+      await saveLocalNote(fresh);
     },
     submit: (intent) => {
       const args = transferCallArgs(intent);

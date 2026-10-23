@@ -180,8 +180,9 @@ export async function splitNote(args: SplitArgs): Promise<{ part: LocalNote; cha
   const change: LocalNote | null =
     made.change && args.changeTag ? { ...made.change, cashOutPlan: args.changeTag } : made.change;
   // Both are money: kept before anything is sent, out of the balance until they land.
-  saveLocalNote({ ...part, sweepPending: true });
-  if (change) saveLocalNote({ ...change, sweepPending: true });
+  // on disk and read back before anything is sent, or nothing is sent
+  await saveLocalNote({ ...part, sweepPending: true });
+  if (change) await saveLocalNote({ ...change, sweepPending: true });
   const dropBoth = () => {
     dropUnsentNote(part.id);
     if (change) dropUnsentNote(change.id);

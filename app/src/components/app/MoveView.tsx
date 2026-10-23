@@ -1378,7 +1378,7 @@ export function MoveView() {
       // before anything is sent. The change waits out of the balance until the
       // chain shows it (lib/claimSweep settles it if this tab never hears back);
       // the code goes under Sent links. A send that surely never went out drops both.
-      if (pendingChange.current) saveLocalNote({ ...pendingChange.current, sweepPending: true });
+      if (pendingChange.current) await saveLocalNote({ ...pendingChange.current, sweepPending: true });
       if (pendingLink.current) await saveSentLink(pendingLink.current).catch(() => undefined);
       keptBeforeSend.current = {
         changeId: pendingChange.current?.id ?? null,
