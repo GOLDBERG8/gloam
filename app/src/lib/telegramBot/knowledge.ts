@@ -299,7 +299,7 @@ function mainnetLiveFacts(): string {
     "PRIVATE SWAPS (mainnet only, Vault > Swap; overrides any line below that says private trading is off or underway)",
     SWAPS_V2
       ? "- Private swaps are live on Robinhood Chain mainnet and Tempo mainnet, in Vault > Swap: swap straight from your private balance. They are not on the testnets (there is no swap router there)."
-      : "- Private swaps are live on Robinhood Chain mainnet and Tempo mainnet, in Vault > Swap: swap straight from your private balance. They are not on the testnets (there is no swap router there), and stock tokens cannot be swapped.",
+      : "- Private swaps are live on Robinhood Chain mainnet and Tempo mainnet, in Vault > Swap: swap straight from your private balance. They are not on the testnets (there is no swap router there). Stock tokens can't be swapped yet: swaps into 28 more Robinhood Chain tokens, stock tokens and ETH included, are coming, and the vault limits for them are already queued on-chain behind the public 3-day timelock. Never give a date.",
     SWAPS_V2
       ? "- Pairs: on Robinhood Chain, USDG, $GLOAM, ETH (the vault holds it as WETH), USDe, U, cbBTC, VIRTUAL, PONS, CASHCAT and 20 Robinhood stock tokens (SPY, NVDA, TSLA, AMZN, SPCX, CRCL, META, MSTR, GOOGL, AAPL, MSFT, PLTR, AMD, COIN, AMC, HIMS, INTC, TSM, GLD, MU), any one for another, on Uniswap v4: the app takes the route that pays the most, up to three hops. Thin pools move the price; the app warns when a swap moves it by 1% or more. On Tempo, USDC.e, pathUSD, USDT0 and OUSD, any one for another, on Tempo's stablecoin exchange."
       : "- Pairs: on Robinhood Chain, USDG and $GLOAM, either way, on Uniswap v4 (usually two hops through ETH, or the direct USDG and $GLOAM pool when it pays more). On Tempo, USDC.e, pathUSD, USDT0 and OUSD, any one for another, on Tempo's stablecoin exchange.",
@@ -379,7 +379,7 @@ function liveSwaps(): [string, string][] {
     ["- It runs on two testnets:", "- Its two testnets, free practice with play money:"],
     [
       "Private trading is built but switched off on-chain while the team builds a new engine for it, because trading mixes many people's orders and needs its own design. It is underway; never promise a date.",
-      "The old private trade (sealed swaps) is retired and stays off. On mainnet, private swaps replaced it: see PRIVATE SWAPS. Stock tokens cannot be swapped.",
+      "The old private trade (sealed swaps) is retired and stays off. On mainnet, private swaps replaced it: see PRIVATE SWAPS. Stock tokens can't be swapped yet: swaps into 28 more Robinhood Chain tokens, stock tokens and ETH included, are coming, and the vault limits for them are already queued on-chain behind the public 3-day timelock. Never give a date.",
     ],
     ["Only a cash out has a fee: 0.25% of the amount goes to Gloam.", "A cash out has a fee: 0.25% of the amount goes to Gloam, and a private swap pays the same fee (see PRIVATE SWAPS)."],
     [
