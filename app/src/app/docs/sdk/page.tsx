@@ -349,11 +349,12 @@ const { proofBytes, publicSignals } = await prover(circomInput);`}</code>
         <code>{`import {
   mainnetNetwork, generateReceiveKey, buildPaymentRequestLink,
   scanIncomingPayments, openIncomingPayment, notePackageToExport,
-  sweepReceivedNote, sweepChainFromClient, relaySubmitter,
+  sweepReceivedNote, sweepChainFromClient, relaySubmitter, findRequestAsset,
 } from "@gloamtrade/sdk";
 
 const net = mainnetNetwork("robinhood")!;
 const key = await generateReceiveKey();       // keep key.privateJwk secret
+const usdg = findRequestAsset(net, "USDG")!;  // the token you credit
 
 const link = buildPaymentRequestLink({
   payTo: key.tag, network: net, asset: "USDG", amount: "25", note: "agent:42",
@@ -373,7 +374,8 @@ for (const p of payments) {
     submit: relaySubmitter(),
     beforeSubmit: (fresh) => saveNote(fresh),  // persist before it is sent
   });
-  if (r.final) creditAgent(p.note, p.amountWei);
+  // Anyone can pay in any token the vault takes: credit only the one you priced in.
+  if (r.final && p.asset.toLowerCase() === usdg.address.toLowerCase()) creditAgent(p.note, p.amountWei);
 }`}</code>
       </pre>
       <p>

@@ -21,14 +21,16 @@
  * fallback for a sealed code (gloam2t.…) a payer hands over directly.
  */
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createPublicClient, formatUnits, http } from "viem";
+import { fileURLToPath } from "node:url";
+import { createPublicClient, formatUnits, http, type Hex } from "viem";
 import {
   artifactProver,
   buildPaymentRequestLink,
   circuitArtifactFiles,
   ceremonyForChainId,
+  findRequestAsset,
   generateReceiveKey,
   GLOAM_ARTIFACTS_URL,
   mainnetNetwork,
@@ -46,6 +48,12 @@ import {
 
 const network = mainnetNetwork("robinhood")!; // or mainnetNetwork("tempo")
 const client = createPublicClient({ chain: network.chain, transport: http(network.rpcUrl) });
+const chain = sweepChainFromClient(client, { pool: network.pool, fromBlock: network.deployBlock });
+
+// The token you credit. Anyone can pay your address in any token the vault takes,
+// and an amount is in that token's base units (GLOAM has 18 decimals, USDG 6), so
+// only a payment in this token is credited, read with its decimals.
+const CREDIT_ASSET = findRequestAsset(network, "USDG")!; // on Tempo: "USDC.e", "pathUSD", "USDT0" or "OUSD"
 
 // ── 1. Your receive key ─────────────────────────────────────────────────────────
 // Make it once and keep it in your secrets store. Losing it means you cannot open
@@ -63,7 +71,7 @@ function topUpLink(key: ReceiveKey, agentId: string, amountUsdg?: string): strin
   return buildPaymentRequestLink({
     payTo: key.tag,
     network,
-    asset: "USDG", // on Tempo: "USDC.e", "pathUSD", "USDT0" or "OUSD"
+    asset: CREDIT_ASSET.symbol,
     amount: amountUsdg, // leave out to let the user choose
     note: `agent:${agentId}`, // at most 80 characters, only your key reads it
     name: "Your service",
@@ -90,55 +98,97 @@ async function transferProver() {
 }
 
 // ── Your own records (replace with your database) ───────────────────────────────
-const credited = new Set<string>(); // payment commitments already credited
+const settled = new Set<string>(); // payment commitments secured and dealt with
 async function saveFreshNote(fresh: NoteExport) {
   // The fresh note's secret IS the money once the payment is secured. Persist it
   // durably before anything is sent; if the process dies after sending, this is
   // the only copy.
   await writeFile(`notes/${fresh.commitment}.json`, JSON.stringify(fresh));
 }
-async function creditAgent(agentId: string, amountWei: string, payment: IncomingPayment) {
-  console.log(`Credit agent ${agentId}: ${formatUnits(BigInt(amountWei), 6)} USDG (payment ${payment.commitment})`);
+async function creditAgent(agentId: string, amount: string, payment: IncomingPayment) {
+  console.log(`Credit agent ${agentId}: ${amount} ${CREDIT_ASSET.symbol} (payment ${payment.commitment})`);
+}
+
+/** What a secured payment credits: the agent and the amount, or why it credits nothing. */
+export function creditFor(payment: IncomingPayment): { agentId: string; amount: string } | { skip: string } {
+  if (payment.asset.toLowerCase() !== CREDIT_ASSET.address.toLowerCase()) {
+    return { skip: `it is in ${findRequestAsset(network, payment.asset)?.symbol ?? payment.asset}, not ${CREDIT_ASSET.symbol}` };
+  }
+  const agentId = payment.note?.startsWith("agent:") ? payment.note.slice("agent:".length) : "";
+  if (!agentId) return { skip: "it has no agent note" };
+  return { agentId, amount: formatUnits(BigInt(payment.amountWei), CREDIT_ASSET.decimals) };
+}
+
+/** A payment found but not finished yet. Keep it with `from`: openIncomingPayment rebuilds it from the code. */
+interface Unfinished {
+  sealedTicket: string;
+  /** Fresh notes already sent for it: a sweep that did not confirm may still land. */
+  fresh: Hex[];
 }
 
 // ── 4. Secure, then credit ──────────────────────────────────────────────────────
-async function secureAndCredit(payment: IncomingPayment, prove: Awaited<ReturnType<typeof transferProver>>) {
-  if (credited.has(payment.commitment)) return;
-  const agentId = payment.note?.startsWith("agent:") ? payment.note.slice("agent:".length) : null;
-  if (!agentId) {
-    console.log(`Payment ${payment.commitment} has no agent note. Secure it, then sort it out by hand.`);
-  }
+/** Returns true once the payment is finished (secured and dealt with, or known not yours); false to try again. */
+async function secureAndCredit(payment: IncomingPayment, prove: Awaited<ReturnType<typeof transferProver>>, pending: Unfinished): Promise<boolean> {
+  if (settled.has(payment.commitment)) return true;
+  const sweptEarlier = async () => {
+    for (const c of pending.fresh) if (await chain.isCommitmentSeen(c)) return true;
+    return false;
+  };
 
   // Until it is secured, the payer (who made the payment's secret) could still
   // spend it back. sweepReceivedNote moves it into a note only you know, through
   // the Gloam relay, so your server needs no gas and never shows up on chain.
-  const result = await sweepReceivedNote({
-    note: await notePackageToExport(payment.notePackage),
-    poolAddress: network.pool,
-    chainId: network.chainId,
-    prove,
-    chain: sweepChainFromClient(client, { pool: network.pool, fromBlock: network.deployBlock }),
-    submit: relaySubmitter(),
-    beforeSubmit: (fresh) => saveFreshNote(fresh),
-  });
-
-  if (result.final) {
-    credited.add(payment.commitment);
-    if (agentId) await creditAgent(agentId, payment.amountWei, payment);
-    return;
+  let final = await sweptEarlier();
+  if (!final) {
+    const result = await sweepReceivedNote({
+      note: await notePackageToExport(payment.notePackage),
+      poolAddress: network.pool,
+      chainId: network.chainId,
+      prove,
+      chain,
+      submit: relaySubmitter(),
+      beforeSubmit: async (fresh) => {
+        await saveFreshNote(fresh);
+        pending.fresh.push(fresh.commitment);
+      },
+    });
+    // already_spent can also mean an earlier sweep of yours landed in the meantime.
+    final = result.final || (result.status === "already_spent" && (await sweptEarlier()));
+    if (!final) {
+      console.log(`Not credited (${result.status}): ${result.reason ?? ""}`);
+      // already_spent: the payer took it back first. bad_note: not a real payment. Nothing to credit, ever.
+      // not_settled, failed or unconfirmed: try again on the next pass.
+      return result.status === "already_spent" || result.status === "bad_note";
+    }
   }
-  // already_spent: the payer took it back first, or it was secured before. Credit nothing.
-  // not_settled, failed or unconfirmed: keep the payment and try again on the next pass.
-  console.log(`Not credited yet (${result.status}): ${result.reason ?? ""}`);
+
+  settled.add(payment.commitment);
+  const credit = creditFor(payment);
+  if ("skip" in credit) console.log(`Payment ${payment.commitment} is secured but not credited: ${credit.skip}. Sort it out by hand.`);
+  else await creditAgent(credit.agentId, credit.amount, payment);
+  return true;
 }
 
 // ── 3a. Where a board exists: watch for payments ────────────────────────────────
 async function watch(key: ReceiveKey) {
   const prove = await transferProver();
-  let from: bigint | undefined; // persist this between restarts
+  // Persist both between restarts: where the scan got to, and the payments it
+  // found that are not finished. Moving `from` past a payment whose sweep did not
+  // finish would drop it for good.
+  let from: bigint | undefined;
+  const unfinished = new Map<string, Unfinished>(); // by payment commitment
   for (;;) {
+    for (const [commitment, pending] of unfinished) {
+      const check = await openIncomingPayment({ client, network, receiveKey: key, sealedTicket: pending.sealedTicket });
+      if (check.status === "not_in_vault_yet") continue;
+      if (await secureAndCredit(check.payment, prove, pending)) unfinished.delete(commitment);
+    }
     const { payments, scannedTo } = await scanIncomingPayments({ client, network, receiveKey: key, fromBlock: from });
-    for (const p of payments) await secureAndCredit(p, prove);
+    for (const p of payments) {
+      if (unfinished.has(p.commitment)) continue;
+      const pending: Unfinished = { sealedTicket: p.sealedTicket, fresh: [] };
+      if (!(await secureAndCredit(p, prove, pending))) unfinished.set(p.commitment, pending);
+    }
     from = scannedTo + 1n;
     await new Promise((r) => setTimeout(r, 30_000));
   }
@@ -149,20 +199,28 @@ export async function handleCode(key: ReceiveKey, sealedCode: string) {
   const check = await openIncomingPayment({ client, network, receiveKey: key, sealedTicket: sealedCode });
   if (check.status === "already_spent") return "This payment was already claimed.";
   if (check.status === "not_in_vault_yet") return "This payment has not landed yet. Try again in a minute.";
-  await secureAndCredit(check.payment, await transferProver());
-  return `Received ${formatUnits(BigInt(check.payment.amountWei), 6)} for ${check.payment.note ?? "no note"}.`;
+  const finished = await secureAndCredit(check.payment, await transferProver(), { sealedTicket: check.payment.sealedTicket, fresh: [] });
+  if (!finished) return "This payment is not secured yet. Try again in a minute.";
+  if (!settled.has(check.payment.commitment)) return "This payment was taken back by the payer, or is not a real payment. Nothing was credited.";
+  const credit = creditFor(check.payment);
+  return "skip" in credit ? `Secured, not credited: ${credit.skip}.` : `Received ${credit.amount} ${CREDIT_ASSET.symbol} for agent ${credit.agentId}.`;
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────────
-const key = await loadReceiveKey();
-await mkdir("notes", { recursive: true });
-console.log("Your Gloam address:", key.tag);
-console.log("Top-up link for agent 42:", topUpLink(key, "42", "25"));
+async function main() {
+  const key = await loadReceiveKey();
+  await mkdir("notes", { recursive: true });
+  console.log("Your Gloam address:", key.tag);
+  console.log("Top-up link for agent 42:", topUpLink(key, "42", "25"));
 
-if (payMemoBoardFor(network.chainId)) {
-  await watch(key);
-} else {
-  console.log(`${network.label} has no payment-message board: pass the codes payers hand over to handleCode().`);
-  const code = process.argv[2]; // npx tsx receive-and-credit.ts gloam2t.…
-  if (code) console.log(await handleCode(key, code));
+  if (payMemoBoardFor(network.chainId)) {
+    await watch(key);
+  } else {
+    console.log(`${network.label} has no payment-message board: pass the codes payers hand over to handleCode().`);
+    const code = process.argv[2]; // npx tsx receive-and-credit.ts gloam2t.…
+    if (code) console.log(await handleCode(key, code));
+  }
 }
+
+// Runs when the file is run, not when something imports creditFor from it.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
