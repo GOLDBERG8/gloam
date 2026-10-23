@@ -342,6 +342,11 @@ function bugThanks(name: string): string {
   return `Thanks ${name}, saved for the team, and I'll make sure Boss Duke sees it. An admin will take a look. Steps, a screenshot or a transaction link make you everyone's favourite tester.`;
 }
 
+/** The reply to an ask only the team can answer: noted, not answered. */
+function teamNoted(name: string): string {
+  return `That one's for the team, ${name}. I've passed it on, and they'll pick it up here.`;
+}
+
 function bugNotSaved(name: string): string {
   return `Thanks ${name}. I couldn't save that just now, so please post it in the Feedback topic or email hello@gloam.trade, and an admin will take a look.`;
 }
@@ -938,7 +943,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   const isQuestion = !share && looksLikeQuestion(text);
   // tagged, or a question on a screenshot: answered as before
   let asked = (tagged || Boolean(ownPicture)) && isQuestion;
-  // an ask for the team ("team can you...", "get the audit done", "wen mobile app"): kept for them, not answered
+  // an ask for the team ("team can you...", "get the audit done", "wen mobile app"): kept for them, with a one-line note
   let forTeam = false;
   // a member talking to Boss Duke or an admin by tag ("@dukedotsol we should..."): theirs to answer, unless it is a question for Glim
   const toTeam = !tagged && tagsSomeone(msg, [...c.admins, ...c.owners.handles], c.owners.ids);
@@ -969,6 +974,15 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   if (forTeam && !bug) {
     if (kept) {
       await logUnanswered({ at: Date.now(), name, topic: topicName(topic), text: kept.slice(0, 200), link: messageLink(msg), why: "team" }).catch(() => {});
+    }
+    // one line so the ask doesn't look ignored, once per person per conversation
+    if (!(await handedOffLately(chatId, from.id).catch(() => true)) && (await withinLimits(from.id))) {
+      const note = teamNoted(name);
+      if (await sendMessage(chatId, note, { threadId, replyTo: msg.message_id })) {
+        await markHandOff(chatId, from.id).catch(() => {});
+        await markReplied(msg.message_id).catch(() => {});
+        await remember(chatId, topic, { n: c.persona, t: note, b: 1, a: Math.floor(Date.now() / 1000) }).catch(() => {});
+      }
     }
     return;
   }
