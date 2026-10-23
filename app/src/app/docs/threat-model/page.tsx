@@ -168,10 +168,11 @@ export default function DocsThreatModelPage() {
       </p>
       <p>
         <strong>Price moves.</strong> The swap asks a little below the quote (0.5% on
-        Robinhood Chain, 0.1% on Tempo). You receive exactly the amount shown or nothing.
-        A trader who moves the price before the swap lands can take up to that buffer,
-        which would otherwise go to the treasury. Past the buffer, the swap reverts and
-        nothing moves.
+        Robinhood Chain, 0.1% on Tempo). The app prices the swap again just before it goes
+        and binds the new note to an exact amount: the better of that price and the quote
+        the person saw. The router delivers exactly that amount or nothing. A trader who
+        moves the price before the swap lands can take up to the buffer, which would
+        otherwise go to the treasury. Past the buffer, the swap reverts and nothing moves.
       </p>
       <p>
         <strong>A swap made to fail.</strong>{" "}

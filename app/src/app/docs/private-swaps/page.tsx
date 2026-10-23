@@ -168,8 +168,8 @@ export default function DocsPrivateSwapsPage() {
         <li>
           <strong>Price buffer, 0.5% on Robinhood Chain and 0.1% on Tempo.</strong>{" "}
           The swap asks for a little less than the quote, so a small price move
-          before it lands does not make it fail. You receive exactly the amount
-          shown. Whatever the trade does not use goes to the Gloam treasury.
+          before it lands does not make it fail. Whatever the trade does not use
+          goes to the Gloam treasury.
         </li>
         <li>
           <strong>Pool fees</strong> are already in the quoted price.
@@ -180,8 +180,15 @@ export default function DocsPrivateSwapsPage() {
       </ul>
       <p>
         Open <strong>Details</strong> under the rate to see each part before
-        you swap: what you receive exactly, the vault fee, the price buffer,
-        the route, and who sends it.
+        you swap: what you receive, the vault fee, the price buffer, the route,
+        and who sends it.
+      </p>
+      <p>
+        The amount shown is the least you get. The quote refreshes every 15
+        seconds, and the app prices the swap once more just before it goes. If
+        the price moved your way, you get the better amount. If it moved
+        against you by more than the buffer, the swap does not go through and
+        nothing moves.
       </p>
       <p>
         Beta deposit limits apply to what lands, because the new note is a
