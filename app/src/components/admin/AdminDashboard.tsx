@@ -1171,9 +1171,10 @@ function PeoplePanel({
     <Panel title="People using Gloam">
       {!people.configured && (
         <p className="mb-5 rounded-xl bg-warn-soft px-4 py-3 text-[14px] leading-relaxed text-warn">
-          Counting is off. Set <code className="text-foreground">GLOAM_METRICS_SALT</code> on Vercel to a random secret of
-          32 or more characters (<code className="text-foreground">openssl rand -hex 32</code>) and redeploy. Keep it
-          the same from then on: a new one counts everyone again.
+          Counting is off. Set <code className="text-foreground">GLOAM_RELAY_MEMO_SECRET</code> or{" "}
+          <code className="text-foreground">GLOAM_METRICS_SALT</code> on Vercel to a random secret of 32 or more
+          characters (<code className="text-foreground">openssl rand -hex 32</code>) and redeploy. Keep it the same
+          from then on: a new one counts everyone again.
         </p>
       )}
       {people.error && (

@@ -16,8 +16,11 @@
  * who deposited, and cash-out destinations get a count of their own that is
  * not added to everyone, since one person can cash out to several addresses.
  *
- * Without GLOAM_METRICS_SALT (at least 32 characters) nothing is counted. The
- * salt is a server variable, so a browser bundle never has it.
+ * The salt is GLOAM_METRICS_SALT (at least 32 characters). Unset, it is derived
+ * from GLOAM_RELAY_MEMO_SECRET, HMAC-SHA256(memo secret, "gloam-people-salt-v1"),
+ * so counting runs without one more secret to set; the memo secret can't be
+ * worked back from it. With neither, nothing is counted. Both are server
+ * variables, so a browser bundle never has them.
  */
 import { createHmac } from "crypto";
 import { kv, kvBackend, type KvBackend, type KvCommand } from "./partnersKv";
@@ -61,7 +64,10 @@ export type PeopleSummary = {
 
 function salt(): string | null {
   const s = process.env.GLOAM_METRICS_SALT?.trim();
-  return s && s.length >= MIN_SALT ? s : null;
+  if (s && s.length >= MIN_SALT) return s;
+  // the relay's memo secret, which mainnet already has, under its own label
+  const memo = process.env.GLOAM_RELAY_MEMO_SECRET?.trim();
+  return memo && memo.length >= MIN_SALT ? createHmac("sha256", memo).update("gloam-people-salt-v1").digest("hex") : null;
 }
 
 export function peopleConfigured(): boolean {

@@ -259,6 +259,7 @@ await test("rate limits: 20 a minute and 60 an hour from one address", async () 
 await test("no salt, or a short one: nothing is counted and the endpoint still answers 204", async () => {
   resetMemoryKv();
   delete process.env.GLOAM_METRICS_SALT;
+  delete process.env.GLOAM_RELAY_MEMO_SECRET;
   assert.equal((await post({ w: wallet(1), env: "mainnet", a: ["connect"] })).status, 204);
   process.env.GLOAM_METRICS_SALT = "too-short";
   assert.equal((await post({ w: wallet(1), env: "mainnet", a: ["connect"] })).status, 204);
@@ -267,6 +268,26 @@ await test("no salt, or a short one: nothing is counted and the endpoint still a
   assert.equal(r.mainnet.all, 0);
   assert.equal(memDump().includes("gloam:people"), false, "not even a counter is made");
   process.env.GLOAM_METRICS_SALT = SALT;
+});
+
+await test("no salt but the relay's memo secret: counting runs on a key derived from it", async () => {
+  resetMemoryKv();
+  delete process.env.GLOAM_METRICS_SALT;
+  const memo = "m".repeat(40);
+  process.env.GLOAM_RELAY_MEMO_SECRET = memo;
+  try {
+    assert.equal(store.peopleConfigured(), true);
+    assert.equal((await post({ w: wallet(1), env: "mainnet", a: ["connect"] })).status, 204);
+    assert.equal((await store.readPeople()).mainnet.all, 1);
+    const dump = memDump();
+    assert.equal(dump.includes(memo), false, "the memo secret is never stored");
+    assert.equal(dump.includes(store.personCode(memo, wallet(1))), false, "and isn't the key used");
+    process.env.GLOAM_RELAY_MEMO_SECRET = "short";
+    assert.equal(store.peopleConfigured(), false, "a short memo secret counts as unset");
+  } finally {
+    delete process.env.GLOAM_RELAY_MEMO_SECRET;
+    process.env.GLOAM_METRICS_SALT = SALT;
+  }
 });
 
 await test("a recording-demo build counts nothing", async () => {
