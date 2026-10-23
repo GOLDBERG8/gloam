@@ -28,6 +28,8 @@ export const metadata: Metadata = {
     description: "Governance, buybacks from Gloam's fees, private holding and first access. Live on Robinhood Chain.",
     images: ["/media/gloam-token-poster.jpg"],
   },
+  // without this, /token takes the site's X card, and Telegram showed that instead of the poster
+  twitter: { card: "summary_large_image", images: ["/media/gloam-token-poster.jpg"] },
 };
 
 /* ---------- the facts ---------- */

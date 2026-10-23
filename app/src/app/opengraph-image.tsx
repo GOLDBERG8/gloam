@@ -8,7 +8,11 @@ export const contentType = "image/png";
 
 const asset = (f: string) => join(process.cwd(), "src/assets/og", f);
 
-/** Share card: an ink panel, the headline in Aeonik Light, the courier etching below. */
+/**
+ * Share card: an ink panel, the headline in Aeonik Light, the courier etching below.
+ * The card's URL carries a hash of this file, and Telegram and X keep a card by its URL,
+ * so a redesign that only swaps assets needs a change here to reach previews already cached.
+ */
 export default async function OpenGraphImage() {
   const [light, medium, etching] = await Promise.all([
     readFile(asset("Aeonik-Light.ttf")),
