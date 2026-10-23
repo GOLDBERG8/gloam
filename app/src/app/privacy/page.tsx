@@ -227,6 +227,15 @@ export default function PrivacyPage() {
         replaced with labels before any text is sent.
       </p>
       <p>
+        <strong>Raeto.</strong>{" "}For a plain text question in the group, Glim
+        first asks Raeto (raeto.cc), a partner service, which of its models
+        should write the answer. Raeto gets the text of that one message, up to
+        600 characters, and nothing else: no name, no earlier messages and no
+        pictures. A message with a payment code, a claim link, a Gloam address,
+        a 0x address or something that looks like a seed phrase or key is never
+        sent to Raeto.
+      </p>
+      <p>
         <strong>What Glim keeps.</strong>{" "}In our database, Glim keeps the last
         few messages of each topic (first name and text) for about six hours,
         so follow-ups make sense. It keeps bug reports for the team: your
@@ -317,6 +326,7 @@ export default function PrivacyPage() {
           counts.
         </li>
         <li>Anthropic: writing Glim&apos;s answers and daily summary.</li>
+        <li>Raeto: choosing which model writes Glim&apos;s answers in the group.</li>
         <li>Telegram: runs the group and delivers its messages to Glim.</li>
         <li>Chainalysis: sanctions checks, when we turn them on.</li>
         <li>
