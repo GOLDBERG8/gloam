@@ -243,11 +243,16 @@ export function relayPublicClient(net: GloamNetwork): PublicClient {
   return c;
 }
 
+/**
+ * A send goes out once, to one RPC: no retry, and never replayed on the public
+ * backup (lib/serverRpc sendOnce). A copy of a send the node already took can
+ * only revert, or come back as a nonce clash that hides the first one.
+ */
 function walletFor(net: GloamNetwork, account: PrivateKeyAccount) {
   return createWalletClient({
     account,
     chain: net.chain,
-    transport: serverTransport(net, { timeout: 30_000, retryCount: 1 }),
+    transport: serverTransport(net, { timeout: 30_000, retryCount: 0 }, { sendOnce: true }),
   });
 }
 
@@ -356,6 +361,19 @@ function revertName(err: unknown): string | null {
 }
 
 /**
+ * What the node said about a failed call, and nothing else. viem's full
+ * message also lists the request (its nonce, gas and data), so a test on it
+ * matches words the node never said: every failed send names a "nonce".
+ */
+function nodeSaid(err: unknown): string {
+  if (err instanceof BaseError) return `${err.shortMessage} ${err.details ?? ""}`;
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** A refusal over the nonce itself: nothing was taken, and the next nonce from the chain fixes it. */
+const NONCE_CLASH = /nonce too (?:low|high)|nonce provided for the transaction|replacement|underpriced/i;
+
+/**
  * A failed call, in plain words. `code` is for anything else: "check_failed"
  * when the dry run failed (nothing was sent), "rpc" when the node refused the
  * send itself (it may still have been taken, so callers treat it as maybe sent).
@@ -363,7 +381,7 @@ function revertName(err: unknown): string | null {
 function explain(err: unknown, fallback: string, code: "rpc" | "check_failed" = "rpc"): RelayError {
   const name = revertName(err);
   if (name && REVERT_MESSAGES[name]) return new RelayError(REVERT_MESSAGES[name], 422, name);
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = nodeSaid(err);
   if (/insufficient funds|gas required exceeds/i.test(msg)) {
     return new RelayError("The relay is out of gas. Send from your wallet for now.", 503, "relay_empty");
   }
@@ -514,16 +532,19 @@ async function submit(net: GloamNetwork, call: Call, onMaybeSent?: () => void): 
       return out.value;
     } catch (e) {
       if (e instanceof RelayError) throw e;
-      const msg = e instanceof Error ? e.message : "";
-      // the kept nonce and the chain disagree: start again from the chain, once.
-      // Never on "already known": the node holds this very transaction, so it went
-      // out, and a second one would only revert and hide the first.
-      if (attempt === 0 && usedLane && !/already known/i.test(msg) && /nonce|replacement|underpriced/i.test(msg)) {
+      // A send the node may have taken (a timeout, a dropped connection, "already
+      // known") is never sent again: a second one would only revert and hide the first.
+      const failure = sendFailure(e);
+      if (failure.code === "maybe_sent") {
+        onMaybeSent?.();
+        throw failure;
+      }
+      // The node refused it over the nonce: the kept nonce and the chain disagree.
+      // Start again from the chain, once.
+      if (attempt === 0 && usedLane && NONCE_CLASH.test(nodeSaid(e))) {
         await forgetNonce(usedLane);
         continue;
       }
-      const failure = sendFailure(e);
-      if (failure.code === "maybe_sent") onMaybeSent?.();
       throw failure;
     }
   }

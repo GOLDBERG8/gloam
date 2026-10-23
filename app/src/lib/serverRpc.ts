@@ -10,12 +10,25 @@ import type { GloamNetwork } from "./networks";
 
 type Net = Pick<GloamNetwork, "chainId" | "chain">;
 
+/** The calls that put a signed transaction out. */
+const SEND_METHODS = ["eth_sendRawTransaction", "eth_sendRawTransactionSync"];
+
 function privateRpc(net: Net): string | null {
   return process.env[`GLOAM_RPC_URL_${net.chainId}`]?.trim() || null;
 }
 
-export function serverTransport(net: Net, config: HttpTransportConfig = {}): Transport {
+/**
+ * `sendOnce` is for the relay's sends: a signed transaction goes to one RPC
+ * only. The public backup still answers reads, but never gets a raw send the
+ * private RPC may already have taken, since a second copy could only revert or
+ * come back as a nonce clash that looks like nothing went out. The fallback
+ * also takes `retryCount` from `config` then, instead of its own default of 3.
+ */
+export function serverTransport(net: Net, config: HttpTransportConfig = {}, opts: { sendOnce?: boolean } = {}): Transport {
   const pub = net.chain.rpcUrls.default.http[0]!;
   const priv = privateRpc(net);
-  return priv && priv !== pub ? fallback([http(priv, config), http(pub, config)]) : http(pub, config);
+  if (!priv || priv === pub) return http(pub, config);
+  if (!opts.sendOnce) return fallback([http(priv, config), http(pub, config)]);
+  const backup = http(pub, { ...config, methods: { exclude: SEND_METHODS } });
+  return fallback([http(priv, config), backup], { retryCount: config.retryCount });
 }

@@ -10,12 +10,16 @@
  *    refused with a 409, the spent check runs before the dry run on sends and
  *    cash outs, the lock is dropped when nothing went out and kept once
  *    something did (or may have)
+ *  - a send that may have reached a node (a dropped connection, a 502, a
+ *    private RPC that took it and never answered) is reported maybe_sent and
+ *    never sent again, with the public RPC never handed the raw send; only a
+ *    real nonce or replacement refusal from the node is retried, once
  *  - cash outs to the vault or the memo board are refused before any chain
  *    call, on the server, in the shared check the app uses, and in the SDK
  *
  * fetch is stubbed for the whole run: chain calls go to an in-process fake
- * that answers the few JSON-RPC methods the relay uses, and anything else
- * fails. The relay key is a throwaway made here. Nothing reaches any host.
+ * that answers the few JSON-RPC methods the relay uses, at the chain's public
+ * RPC and at a made-up private one, and anything else fails. The relay key is a throwaway made here. Nothing reaches any host.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-relay.mts
  */
@@ -30,6 +34,7 @@ process.env.GLOAM_RELAYER_PRIVATE_KEY = generatePrivateKey();
 
 const {
   IN_FLIGHT_MESSAGE,
+  MAYBE_SENT_MESSAGE,
   RELAY_MEMO_MAX_BYTES,
   RelayError,
   asMemo,
@@ -42,6 +47,7 @@ const { CASH_OUT_TO_BOARD_MESSAGE, CASH_OUT_TO_VAULT_MESSAGE, cashOutTargetProbl
   "../src/lib/cashOutTarget"
 );
 const { POST: relayPost } = await import("../src/app/api/relay/route");
+const { serverTransport } = await import("../src/lib/serverRpc");
 const { getNetwork } = await import("../src/lib/networks");
 const { buildNotePackage, encodeNotePackage } = await import("../src/lib/notePackage");
 const { encryptTicketForTag } = await import("../src/lib/receiveTag");
@@ -82,8 +88,20 @@ function nullifier(): Hex {
 
 // ---------------------------------------------------------------- fake chain
 
-const chain = { spent: false, known: true, seen: true, send: "ok" as "ok" | "reject" | "drop" };
+/**
+ * How the node answers a raw send: "ok"; "reject" (out of gas); "drop" (the
+ * connection drops, the node may have it); "http502"; "known" (the node already
+ * holds it); "nonce_once" (a real nonce clash on the first send, then ok);
+ * "private_took" (the private RPC takes it and the connection drops, then the
+ * public RPC, where it already landed, calls it a nonce too low).
+ */
+type SendMode = "ok" | "reject" | "drop" | "http502" | "known" | "nonce_once" | "private_took";
+const chain = { spent: false, known: true, seen: true, send: "ok" as SendMode };
 const calls: string[] = [];
+/** Which RPC got each raw send. */
+const sends: ("public" | "private")[] = [];
+const PRIVATE_RPC = "https://private-rpc.selftest.invalid";
+const NONCE_TOO_LOW = { code: -32000, message: "nonce too low: address 0x0000000000000000000000000000000000000000, tx: 0 state: 1" };
 const SEL = {
   spent: toFunctionSelector("spent(bytes32)"),
   isKnownRoot: toFunctionSelector("isKnownRoot(bytes32)"),
@@ -141,6 +159,9 @@ function answer(r: RpcReq): { result?: unknown; error?: { code: number; message:
     }
     case "eth_sendRawTransaction":
       if (chain.send === "reject") return { error: { code: -32000, message: "insufficient funds for gas * price + value" } };
+      if (chain.send === "known") return { error: { code: -32000, message: "already known" } };
+      if (chain.send === "nonce_once" && sends.length === 1) return { error: NONCE_TOO_LOW };
+      if (chain.send === "private_took") return { error: NONCE_TOO_LOW };
       return { result: TX_HASH };
     default:
       return { error: { code: -32601, message: `fake chain: ${r.method} not handled` } };
@@ -148,15 +169,19 @@ function answer(r: RpcReq): { result?: unknown; error?: { code: number; message:
 }
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (url.replace(/\/$/, "") !== RPC.replace(/\/$/, "")) throw new Error(`selftest: no network (${url})`);
+  const url = (typeof input === "string" ? input : input instanceof URL ? input.href : input.url).replace(/\/$/, "");
+  const via = url === RPC.replace(/\/$/, "") ? "public" : url === PRIVATE_RPC ? "private" : null;
+  if (!via) throw new Error(`selftest: no network (${url})`);
   const body = JSON.parse(String(init?.body)) as RpcReq | RpcReq[];
   const list = Array.isArray(body) ? body : [body];
   for (const r of list) calls.push(r.method === "eth_call" ? `eth_call:${callName(r)}` : r.method);
+  const isSend = list.some((r) => r.method === "eth_sendRawTransaction");
+  if (isSend) sends.push(via);
   // A dropped connection on the send: the node may or may not have the transaction.
-  if (chain.send === "drop" && list.some((r) => r.method === "eth_sendRawTransaction")) {
+  if (isSend && (chain.send === "drop" || (chain.send === "private_took" && via === "private"))) {
     throw new TypeError("fetch failed");
   }
+  if (isSend && chain.send === "http502") return new Response("bad gateway", { status: 502 });
   const out = list.map((r) => ({ jsonrpc: "2.0", id: r.id, ...answer(r) }));
   return new Response(JSON.stringify(Array.isArray(body) ? out : out[0]), {
     status: 200,
@@ -173,6 +198,18 @@ function callName(r: RpcReq): string {
 function reset(state: Partial<typeof chain> = {}) {
   Object.assign(chain, { spent: false, known: true, seen: true, send: "ok" }, state);
   calls.length = 0;
+  sends.length = 0;
+}
+
+/** Runs `fn` with GLOAM_RPC_URL set for the test network, so relay sends go to the private RPC first. */
+async function withPrivateRpc(fn: () => Promise<void>) {
+  const name = `GLOAM_RPC_URL_${net.chainId}`;
+  process.env[name] = PRIVATE_RPC;
+  try {
+    await fn();
+  } finally {
+    delete process.env[name];
+  }
 }
 
 /** True when nobody holds the lock for this spend (takes it and lets it go again). */
@@ -395,12 +432,75 @@ await test("cash out: once sent, the lock holds; spent check came before the dry
   await assert.rejects(relayUnshield(net, unshieldBody(nul, CLEAN)), isRelayError("in_flight", 409));
 });
 
-await test("a send that may have gone out (dropped connection) keeps the lock", async () => {
+await test("a send that may have gone out (dropped connection) is maybe_sent, sent once, and keeps the lock", async () => {
   reset({ send: "drop" });
   const nul = nullifier();
-  await assert.rejects(relayTransfer(net, transferBody(nul)), (e: unknown) => e instanceof RelayError);
-  assert.ok(calls.includes("eth_sendRawTransaction"));
+  await assert.rejects(relayTransfer(net, transferBody(nul)), isRelayError("maybe_sent", 502, MAYBE_SENT_MESSAGE));
+  // viem's message lists the request, "nonce" included: that is no reason to send a second copy
+  assert.deepEqual(sends, ["public"]);
   assert.equal(await lockFree(nul), false);
+});
+
+await test("a 502 on the send is maybe_sent and never sent again", async () => {
+  reset({ send: "http502" });
+  const nul = nullifier();
+  await assert.rejects(relayTransfer(net, transferBody(nul)), isRelayError("maybe_sent", 502, MAYBE_SENT_MESSAGE));
+  assert.deepEqual(sends, ["public"]);
+  assert.equal(await lockFree(nul), false);
+});
+
+await test("'already known' means the node holds it: maybe_sent, never sent again", async () => {
+  reset({ send: "known" });
+  const nul = nullifier();
+  await assert.rejects(relayTransfer(net, transferBody(nul)), isRelayError("maybe_sent", 502, MAYBE_SENT_MESSAGE));
+  assert.deepEqual(sends, ["public"]);
+  assert.equal(await lockFree(nul), false);
+});
+
+await test("a real nonce clash from the node is retried once from the chain's nonce", async () => {
+  reset({ send: "nonce_once" });
+  const nul = nullifier();
+  assert.equal(await relayTransfer(net, transferBody(nul)), TX_HASH);
+  assert.deepEqual(sends, ["public", "public"]);
+  // the second send read the nonce from the chain again
+  assert.ok(calls.lastIndexOf("eth_getTransactionCount") > calls.indexOf("eth_sendRawTransaction"));
+});
+
+await test("private RPC took the send and dropped: never replayed on the public RPC, maybe_sent, lock kept", async () => {
+  await withPrivateRpc(async () => {
+    reset({ send: "private_took" });
+    const nul = nullifier();
+    await assert.rejects(relayTransfer(net, transferBody(nul)), isRelayError("maybe_sent", 502, MAYBE_SENT_MESSAGE));
+    assert.deepEqual(sends, ["private"]);
+    assert.equal(await lockFree(nul), false);
+  });
+});
+
+await test("sendOnce: the public backup answers reads but never gets a raw send", async () => {
+  await withPrivateRpc(async () => {
+    reset({ send: "private_took" });
+    const raw = ("0x" + "02".repeat(100)) as Hex;
+    const once = serverTransport(net, { retryCount: 0 }, { sendOnce: true })({ chain: net.chain });
+    await assert.rejects(once.request({ method: "eth_sendRawTransaction", params: [raw] }));
+    assert.deepEqual(sends, ["private"]);
+    // reads still fall back: the private RPC is down for reads too here, and the public one answers
+    const down = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.startsWith(PRIVATE_RPC)) throw new TypeError("fetch failed");
+      return down(input, init);
+    }) as typeof fetch;
+    try {
+      assert.equal(await once.request({ method: "eth_chainId" }), toHex(net.chainId));
+    } finally {
+      globalThis.fetch = down;
+    }
+    // without sendOnce (server reads), the public RPC stays a full backup
+    sends.length = 0;
+    const reads = serverTransport(net, { retryCount: 0 })({ chain: net.chain });
+    await assert.rejects(reads.request({ method: "eth_sendRawTransaction", params: [raw] }));
+    assert.deepEqual(sends, ["private", "public"]);
+  });
 });
 
 // ---------------------------------------------------------------- cash out to the vault
