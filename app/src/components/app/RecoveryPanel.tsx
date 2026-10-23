@@ -179,8 +179,13 @@ export function RecoverySettingsCard() {
       <header className="max-sm:px-5 max-sm:pt-5 sm:px-6 sm:pt-6">
         <h2 className="text-[17px] text-foreground">Recovery</h2>
         <p className="mt-1 max-w-[62ch] text-[13.5px] leading-relaxed text-mute">
-          Get your private balance back on any device, just by signing in. Gloam keeps an encrypted copy that only your
-          wallet or passkey can open. We can&apos;t read it.
+          Get your private balance back on any device, just by signing in. Your browser encrypts a copy before it leaves,
+          and only your wallet or passkey can open it. We can&apos;t read it.
+        </p>
+        <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-faint">
+          The copy holds your private notes, your receive keys, payment links you sent that haven&apos;t been claimed
+          yet (with their codes) and payroll runs still on their way. It stays until you turn recovery off, which
+          deletes it. Anyone with your recovery signature or passkey could open it, so only sign on gloam.trade.
         </p>
       </header>
       <div className="mt-2 divide-y divide-line pb-1 max-sm:px-5 max-sm:pb-4 sm:px-6 sm:pb-5">

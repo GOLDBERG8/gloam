@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="October 21, 2026">
+    <LegalLayout title="Privacy Policy" updated="October 23, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -172,14 +172,28 @@ export default function PrivacyPage() {
       </p>
       <h2>8. Recovery backups</h2>
       <p>
-        If you turn on recovery, your browser encrypts your private balance
-        (the notes it can spend and its receive keys) with a key made from
-        your wallet&apos;s signature or your passkey, and stores only that
-        encrypted copy on our servers. We can&apos;t read it, and it is filed
-        under an id that doesn&apos;t reveal your wallet. It stays until you
-        turn recovery off in Settings, which deletes it. Anyone who gets your
-        recovery signature or passkey could open your backup, so only sign the
-        recovery message on gloam.trade.
+        If you turn on recovery, your browser encrypts a copy of what it holds
+        for you and stores only that encrypted copy on our servers. The copy
+        contains:
+      </p>
+      <ul>
+        <li>the private notes you can spend (your private balance);</li>
+        <li>your receive keys, which open payments sent to your Gloam address;</li>
+        <li>
+          the payment links you sent and have not seen claimed, which can
+          include the payment codes inside them;
+        </li>
+        <li>payroll runs that still have payments on their way.</li>
+      </ul>
+      <p>
+        It is encrypted in your browser, before it leaves, with a key made
+        from your wallet&apos;s signature or your passkey. We can&apos;t read
+        it, and it is filed under an id that doesn&apos;t reveal your wallet.
+        It is replaced each time your browser backs up, and it stays until you
+        turn recovery off in Settings, which deletes it from our servers. We
+        don&apos;t delete it on a schedule. Anyone who gets your recovery
+        signature or passkey could open your backup and spend what is in it,
+        so only sign the recovery message on gloam.trade.
       </p>
       <h2>9. Tester applications</h2>
       <p>
