@@ -173,7 +173,9 @@ export function VaultSwapView() {
   const [toPick, setToPick] = useState<Address | null>(null);
   const payAsset: Address | null =
     (payPick && holdings.has(payPick.toLowerCase()) ? payPick : null) ??
-    (notes[0]?.asset as Address | undefined) ??
+    // The first held token in the list's order (the dollar first), not the
+    // largest raw amount: 18-decimal GLOAM would always outrank 6-decimal USDG.
+    assets.find((a) => holdings.has(a.toLowerCase())) ??
     null;
   const toAsset: Address | null =
     (toPick && payAsset && !same(toPick, payAsset) ? toPick : null) ??
