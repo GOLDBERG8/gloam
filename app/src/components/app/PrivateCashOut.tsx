@@ -242,6 +242,11 @@ export function SpreadOver({
         Each piece goes out at its own random time in that window, sent by the Gloam relay so your wallet stays out of
         it. Once they are scheduled you can close Gloam.
       </p>
+      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+        Each proof shows roughly when it was made, so pieces made together can be grouped. While Gloam is open it
+        remakes them, last shortly before each one goes. A piece that goes out while Gloam is closed shows when it was
+        last made.
+      </p>
     </div>
   );
 }
