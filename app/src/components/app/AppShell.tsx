@@ -152,13 +152,14 @@ export function AppShell({
   actions?: ReactNode;
 }) {
   const pathname = usePathname();
-  const { network } = useNetwork();
+  const { network, settled: networkSettled } = useNetwork();
   const [open, setOpen] = useState(false);
 
   // Tokenized-stock Markets only exists on Robinhood Chain testnet. On Tempo
-  // and on the mainnets the product is private payments, so it drops out.
+  // and on the mainnets the product is private payments, so it drops out. It
+  // waits for this browser's network, so a mainnet visitor never sees it flash.
   const isTempo = network.family === "tempo";
-  const navItems = nav.filter((item) => !(!network.stocks && item.robinhoodOnly));
+  const navItems = nav.filter((item) => !(item.robinhoodOnly && (!networkSettled || !network.stocks)));
   const shownSubtitle = isTempo && subtitleTempo ? subtitleTempo : subtitle;
 
   useEffect(() => {
@@ -297,7 +298,9 @@ export function AppShell({
         <footer className="mx-auto w-full max-w-[1120px] px-4 pb-8 sm:px-8">
           <div className="flex flex-col gap-3 border-t border-line pt-5 text-[12.5px] text-mute sm:flex-row sm:items-center sm:justify-between">
             <p>
-              {!network.testnet
+              {!networkSettled
+                ? "Gloam. Not investment, legal or tax advice."
+                : !network.testnet
                 ? `Gloam on ${network.label} mainnet. Beta software with real money. Not investment, legal or tax advice.`
                 : isTempo
                   ? "Gloam on Tempo testnet. Private stablecoin payments for people and agents. Play money only."

@@ -24,7 +24,7 @@ function assetLine(n: GloamNetwork): string {
 }
 
 export function NetworkSelector() {
-  const { network, setNetworkKey } = useNetwork();
+  const { network, setNetworkKey, settled } = useNetwork();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const nets = allNetworks();
@@ -54,18 +54,29 @@ export function NetworkSelector() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Network: ${network.label}. Change network`}
+        aria-label={settled ? `Network: ${network.label}. Change network` : "Change network"}
         className={`flex h-[52px] w-full items-center gap-3 rounded-full pl-2 pr-4 text-left text-foreground transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 ${
           open ? "bg-surface-2" : "bg-surface"
         }`}
       >
-        <TokenLogo id={network.family} symbol={network.label} size={34} />
+        {settled ? (
+          <TokenLogo id={network.family} symbol={network.label} size={34} />
+        ) : (
+          <span className="h-[34px] w-[34px] shrink-0 rounded-full bg-surface-2" aria-hidden />
+        )}
+        {/* Until this browser's network is read, a neutral line: never a testnet label that flips to mainnet. */}
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-medium leading-tight">
-            {network.label}
+            {settled ? network.label : "Network"}
           </span>
           <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">
-            {network.testnet ? (MAINNET_ENABLED ? "Testnet · test funds" : "Testnet") : "Mainnet · real money"}
+            {!settled
+              ? "\u00a0"
+              : network.testnet
+                ? MAINNET_ENABLED
+                  ? "Testnet · test funds"
+                  : "Testnet"
+                : "Mainnet · real money"}
           </span>
         </span>
         <svg

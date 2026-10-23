@@ -9,8 +9,9 @@ import { MAINNET_ENABLED, NETWORK_KEYS, getNetwork } from "@/lib/networks";
 import { useNetwork } from "./NetworkProvider";
 
 export function TestFundsNotice() {
-  const { network, setNetworkKey } = useNetwork();
-  if (!MAINNET_ENABLED || !network.testnet) return null;
+  const { network, setNetworkKey, settled } = useNetwork();
+  // Not before this browser's network is known: a mainnet visitor never sees it flash.
+  if (!settled || !MAINNET_ENABLED || !network.testnet) return null;
   const mainnets = NETWORK_KEYS.map(getNetwork).filter((n) => !n.testnet);
   // The same chain's mainnet when it has a pool, else the other one.
   const target = mainnets.find((n) => n.family === network.family) ?? mainnets[0];

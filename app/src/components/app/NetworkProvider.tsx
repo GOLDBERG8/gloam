@@ -34,6 +34,12 @@ interface NetworkContextValue {
   network: GloamNetwork;
   networkKey: NetworkKey;
   setNetworkKey: (key: NetworkKey) => void;
+  /**
+   * False on the first render, before this browser's choice (or the mainnet
+   * default) is read. The server can't know it, so labels that name the network
+   * (testnet or mainnet) show a neutral placeholder until then, not a guess.
+   */
+  settled: boolean;
 }
 
 const NetworkContext = createContext<NetworkContextValue | null>(null);
@@ -53,10 +59,12 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   // Start from the default for a stable first render, then hydrate from storage
   // on mount to avoid an SSR/client mismatch.
   const [networkKey, setKey] = useState<NetworkKey>(DEFAULT_NETWORK_KEY);
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     const stored = readStored();
     if (stored !== networkKey) setKey(stored);
+    setSettled(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -81,8 +89,8 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   };
 
   const value = useMemo<NetworkContextValue>(
-    () => ({ network: getNetwork(networkKey), networkKey, setNetworkKey }),
-    [networkKey]
+    () => ({ network: getNetwork(networkKey), networkKey, setNetworkKey, settled }),
+    [networkKey, settled]
   );
 
   return (
@@ -98,5 +106,6 @@ export function useNetwork(): NetworkContextValue {
     network: getNetwork(DEFAULT_NETWORK_KEY),
     networkKey: DEFAULT_NETWORK_KEY,
     setNetworkKey: () => {},
+    settled: true,
   };
 }
