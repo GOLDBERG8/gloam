@@ -24,6 +24,15 @@
  * the encrypted store before it has been merged into the cache. Writes run one
  * at a time, and while a passkey vault is locked they wait for the unlock (the
  * page warns before closing with a write still waiting).
+ *
+ * Several tabs share one store. Each write runs under a cross-tab lock (Web
+ * Locks, with a re-read-before-write check where those are missing), reads
+ * what is on disk, and merges this tab's notes into it instead of replacing it,
+ * so two tabs saving at once both keep their notes. A note this tab removed is
+ * recorded (by id only) so the merge does not bring it back. A write resolves
+ * only once the new blob is on disk and reads back the same; when the browser
+ * refuses it (storage full, private mode) it rejects with NoteSaveError, so a
+ * deposit or payment is never sent with a secret that was not saved.
  */
 import type { LocalNote } from "./shield";
 import { readDemo } from "./demoFlag";
@@ -45,6 +54,11 @@ const UNREADABLE_KEY = "gloam.shield.notes.unreadable.v1";
 /** Locked data set aside by "start over" (lost passkey). Kept, never deleted. */
 const ARCHIVE_PREFIX = "gloam.vault.archive.";
 const ENC_PREFIX = "gloamenc1:";
+/** Ids of notes removed on this browser, so a merge from another tab does not bring them back. */
+const REMOVED_KEY = "gloam.shield.notes.removed.v1";
+const REMOVED_KEEP = 1000;
+/** The Web Lock every tab takes around a notes write. */
+const WRITE_LOCK = "gloam-notes-write";
 const DB_NAME = "gloam-vault";
 const STORE = "keys";
 const KEY_ID = "note-aes-256";
@@ -221,9 +235,100 @@ async function decrypt(blob: string): Promise<string> {
 
 /* ------------------------------------------------------------ writes */
 
+/** A notes write the browser refused or did not keep. Nothing that depends on it should be sent. */
+export class NoteSaveError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      "This browser couldn't save your private balance, so nothing was sent. Free up some space or leave private browsing, then try again. A backup in Settings keeps a copy safe."
+    );
+    this.name = "NoteSaveError";
+    if (cause !== undefined) (this as { cause?: unknown }).cause = cause;
+  }
+}
+
+/** Removed ids not yet written, and ids this tab added back since (they win over an old removal). */
+const pendingRemoved = new Set<string>();
+const pendingAdded = new Set<string>();
+
+function readRemoved(): Map<string, number> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(REMOVED_KEY) ?? "[]");
+    const out = new Map<string, number>();
+    if (Array.isArray(raw)) for (const r of raw) if (r && typeof r.id === "string") out.set(r.id, Number(r.at) || 0);
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Runs `fn` while no other tab is writing notes. Without Web Locks, `fn` re-checks the blob itself. */
+function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = (globalThis.navigator as { locks?: { request: (n: string, f: () => Promise<T>) => Promise<T> } } | undefined)
+    ?.locks;
+  return locks?.request ? locks.request(WRITE_LOCK, fn) : fn();
+}
+
+/** What is on disk now, or null when it cannot be read (then this tab's copy is written as before). */
+async function readDiskNotes(raw: string | null): Promise<LocalNote[] | null> {
+  if (!raw) return [];
+  if (!raw.startsWith(ENC_PREFIX)) return parseNotes(raw);
+  try {
+    return parseNotes(await decrypt(raw));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge this tab's notes into what is on disk and write the result, under the
+ * cross-tab lock. Resolves only once the blob is stored and reads back the same.
+ */
 async function writeBlob(): Promise<void> {
-  const enc = await encrypt(JSON.stringify(cache));
-  localStorage.setItem(NOTES_KEY, enc);
+  await withWriteLock(async () => {
+    for (let attempt = 0; ; attempt++) {
+      // a snapshot: notes saved in this tab while this write runs go in the next one
+      const mine = cache;
+      const gone = new Set(pendingRemoved);
+      const back = new Set(pendingAdded);
+      const raw = localStorage.getItem(NOTES_KEY);
+      const disk = await readDiskNotes(raw);
+      const removed = readRemoved();
+      for (const id of gone) removed.set(id, Date.now());
+      for (const id of back) removed.delete(id);
+      let merged: LocalNote[];
+      if (disk) {
+        const byId = new Map<string, LocalNote>();
+        for (const n of disk) if (!removed.has(n.id)) byId.set(n.id, n);
+        // this tab's copy wins for the notes it holds
+        for (const n of mine) if (!removed.has(n.id)) byId.set(n.id, n);
+        merged = [...byId.values()];
+      } else {
+        merged = mine;
+      }
+      const enc = await encrypt(JSON.stringify(merged));
+      // Without a lock, another tab may have written while this one encrypted: merge again.
+      if (localStorage.getItem(NOTES_KEY) !== raw && attempt < 5) continue;
+      const removedList = [...removed.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, REMOVED_KEEP)
+        .map(([id, at]) => ({ id, at }));
+      try {
+        localStorage.setItem(NOTES_KEY, enc);
+        localStorage.setItem(REMOVED_KEY, JSON.stringify(removedList));
+      } catch (e) {
+        throw new NoteSaveError(e);
+      }
+      if (localStorage.getItem(NOTES_KEY) !== enc) throw new NoteSaveError();
+      for (const id of gone) pendingRemoved.delete(id);
+      for (const id of back) pendingAdded.delete(id);
+      // Pick up what other tabs saved or removed, keeping everything this tab changed since.
+      const have = new Set(cache.map((n) => n.id));
+      const fromOthers = merged.filter((n) => !have.has(n.id) && !pendingRemoved.has(n.id));
+      const keep = cache.filter((n) => !removed.has(n.id) || pendingAdded.has(n.id));
+      if (fromOthers.length || keep.length !== cache.length) cache = [...keep, ...fromOthers];
+      return;
+    }
+  });
 }
 
 /** Queue work behind every earlier write (and behind the unlock). */
@@ -333,16 +438,37 @@ export function getAllNotes(): LocalNote[] {
   return cache;
 }
 
-/** Replace the cache and persist it encrypted (after ensuring unlock). */
-export function setAllNotes(next: LocalNote[]): void {
-  if (readDemo()) return setDemoNotes(next);
+/**
+ * Replace the cache and persist it encrypted (after ensuring unlock). The
+ * returned promise settles once the notes are on disk: await it before sending
+ * anything whose secret is in `next`. It rejects with NoteSaveError when the
+ * browser refuses the write; callers that don't await it lose nothing new (the
+ * failure stays caught here).
+ */
+export function setAllNotes(next: LocalNote[]): Promise<void> {
+  if (readDemo()) {
+    setDemoNotes(next);
+    return Promise.resolve();
+  }
+  const before = new Set(cache.map((n) => n.id));
+  const after = new Set(next.map((n) => n.id));
+  for (const id of before) if (!after.has(id)) {
+    pendingRemoved.add(id);
+    pendingAdded.delete(id);
+  }
+  for (const id of after) if (!before.has(id)) {
+    pendingAdded.add(id);
+    pendingRemoved.delete(id);
+  }
   cache = next;
-  if (typeof window === "undefined") return;
-  void enqueue(async () => {
+  if (typeof window === "undefined") return Promise.resolve();
+  const saved = enqueue(async () => {
     await unlockNoteVault();
     await writeBlob();
     for (const fn of savedListeners) fn();
   });
+  saved.catch(() => undefined);
+  return saved;
 }
 
 /**
