@@ -17,6 +17,11 @@
  *   keyrec:<id>        -> the full record (name, display, dates, hash)
  *   partnerkeys:<pid>  -> set of key ids
  *   keyused:<id>       -> last use, ms
+ *   keylock:<id>       -> short lock while a key is rotated or revoked
+ *
+ * A lookup trusts key:<hash> only when keyrec:<id> still holds that hash and
+ * is not revoked, so an index entry left behind by an interrupted or
+ * concurrent change can never let a secret through.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import type { GloamNetwork } from "./networks";
@@ -235,36 +240,67 @@ export async function createApiKey(args: {
   return { key: viewOf(rec, null), secret };
 }
 
-/** New secret for the same key; the old secret stops working at once. */
+/** How long a rotate or revoke may hold a key's lock before it lapses on its own. */
+const KEY_LOCK_SEC = 15;
+
+/**
+ * Runs `fn` while holding the key's lock, so two changes to one key never
+ * read the same record and write over each other. Waits up to `waitMs`
+ * for a lock someone else holds, then refuses.
+ */
+async function withKeyLock<T>(keyId: string, waitMs: number, fn: () => Promise<T>): Promise<T> {
+  const lock = k("keylock", keyId);
+  const token = randomId("lk");
+  const deadline = Date.now() + waitMs;
+  while ((await kv1(["SET", lock, token, "NX", "EX", KEY_LOCK_SEC])) !== "OK") {
+    if (Date.now() >= deadline) throw new ApiKeyError("This key is being changed. Try again in a moment.", 409, "busy");
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  try {
+    return await fn();
+  } finally {
+    // release only our own lock; if it lapsed and someone else holds it now, leave theirs
+    if ((await kv1(["GET", lock]).catch(() => null)) === token) await kv1(["DEL", lock]).catch(() => {});
+  }
+}
+
+/** New secret for the same key; the old secret stops working at once. One rotation at a time per key. */
 export async function rotateApiKey(args: {
   partnerId: string;
   keyId: string;
   pepper: string;
 }): Promise<{ key: ApiKeyView; secret: string }> {
-  const rec = await ownRecord(args.partnerId, args.keyId);
-  if (rec.revokedAt !== null) throw new ApiKeyError("This key was revoked. Make a new one.", 409, "revoked");
-  const secret = generateApiKey(rec.env);
-  const hash = hashApiKey(secret, args.pepper);
-  const next: ApiKeyRecord = { ...rec, hash, display: displayKey(secret), rotatedAt: Date.now() };
-  const index: KeyIndex = { id: rec.id, partnerId: rec.partnerId, env: rec.env };
-  await kv([
-    ["DEL", k("key", rec.hash)],
-    ["SET", k("key", hash), JSON.stringify(index)],
-    ["SET", k("keyrec", rec.id), JSON.stringify(next)],
-    ["DEL", k("keyused", rec.id)],
-  ]);
-  return { key: viewOf(next, null), secret };
+  return withKeyLock(args.keyId, 0, async () => {
+    const rec = await ownRecord(args.partnerId, args.keyId);
+    if (rec.revokedAt !== null) throw new ApiKeyError("This key was revoked. Make a new one.", 409, "revoked");
+    const secret = generateApiKey(rec.env);
+    const hash = hashApiKey(secret, args.pepper);
+    const next: ApiKeyRecord = { ...rec, hash, display: displayKey(secret), rotatedAt: Date.now() };
+    const index: KeyIndex = { id: rec.id, partnerId: rec.partnerId, env: rec.env };
+    // the record moves to the new hash first: from then on the old secret fails its lookup check
+    const [setRec, setIndex] = await kv([
+      ["SET", k("keyrec", rec.id), JSON.stringify(next)],
+      ["SET", k("key", hash), JSON.stringify(index), "NX"],
+      ["DEL", k("key", rec.hash)],
+      ["DEL", k("keyused", rec.id)],
+    ]);
+    if (setRec !== "OK" || setIndex !== "OK") throw new ApiKeyError("Could not rotate the key. Try again.", 500, "internal");
+    return { key: viewOf(next, null), secret };
+  });
 }
 
+/** Stops a key for good. Waits briefly for a rotation in flight, so a revoke is never lost to one. */
 export async function revokeApiKey(args: { partnerId: string; keyId: string }): Promise<ApiKeyView> {
-  const rec = await ownRecord(args.partnerId, args.keyId);
-  if (rec.revokedAt !== null) return viewOf(rec, null);
-  const next: ApiKeyRecord = { ...rec, revokedAt: Date.now() };
-  await kv([
-    ["DEL", k("key", rec.hash)],
-    ["SET", k("keyrec", rec.id), JSON.stringify(next)],
-  ]);
-  return viewOf(next, null);
+  return withKeyLock(args.keyId, 5_000, async () => {
+    const rec = await ownRecord(args.partnerId, args.keyId);
+    if (rec.revokedAt !== null) return viewOf(rec, null);
+    const next: ApiKeyRecord = { ...rec, revokedAt: Date.now() };
+    await kv([
+      ["SET", k("keyrec", rec.id), JSON.stringify(next)],
+      ["DEL", k("key", rec.hash)],
+    ]);
+    return viewOf(next, null);
+  });
 }
 
 export async function renameApiKey(args: { partnerId: string; keyId: string; name: string }): Promise<ApiKeyView> {
@@ -278,11 +314,21 @@ export async function renameApiKey(args: { partnerId: string; keyId: string; nam
 
 export type AuthedKey = { id: string; partnerId: string; env: KeyEnv };
 
-/** The key behind a secret, or null when it is unknown, malformed or revoked. */
+/**
+ * The key behind a secret, or null when it is unknown, malformed or revoked.
+ * The index entry only counts if the key's record still holds this exact hash
+ * and is not revoked; a stale entry is removed on sight.
+ */
 export async function lookupApiKey(secret: string, pepper: string): Promise<AuthedKey | null> {
   if (!parseApiKey(secret)) return null;
-  const index = jsonOf<KeyIndex>(await kv1(["GET", k("key", hashApiKey(secret, pepper))]));
+  const hash = hashApiKey(secret, pepper);
+  const index = jsonOf<KeyIndex>(await kv1(["GET", k("key", hash)]));
   if (!index || typeof index.id !== "string" || typeof index.partnerId !== "string") return null;
+  const rec = jsonOf<ApiKeyRecord>(await kv1(["GET", k("keyrec", index.id)]));
+  if (!rec || rec.partnerId !== index.partnerId || rec.revokedAt !== null || rec.hash !== hash) {
+    await kv1(["DEL", k("key", hash)]).catch(() => {});
+    return null;
+  }
   return { id: index.id, partnerId: index.partnerId, env: index.env === "live" ? "live" : "test" };
 }
 

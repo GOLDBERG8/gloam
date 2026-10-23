@@ -55,7 +55,7 @@ const {
   MAX_ACTIVE_KEYS,
   bearerKey,
 } = await import("../src/lib/apiKeys");
-const { resetMemoryKv, kvBackend } = await import("../src/lib/partnersKv");
+const { resetMemoryKv, kvBackend, kv1, k } = await import("../src/lib/partnersKv");
 const {
   commissionFor,
   describeFee,
@@ -443,6 +443,30 @@ await test("keys: create, lookup, rename, rotate, revoke", async () => {
   const views = await listApiKeys(partner.id);
   assert.equal(views.find((v) => v.id === spare.key.id)?.revokedAt != null, true);
   assert.ok(!JSON.stringify(views).includes("hash"));
+});
+
+await test("keys: two rotations at once leave one working secret, and revoke stops it (review finding 5)", async () => {
+  const made = await createApiKey({ partnerId: partner.id, name: "Race", env: "test", pepper });
+  const results = await Promise.allSettled([
+    rotateApiKey({ partnerId: partner.id, keyId: made.key.id, pepper }),
+    rotateApiKey({ partnerId: partner.id, keyId: made.key.id, pepper }),
+  ]);
+  const won = results.filter((r): r is PromiseFulfilledResult<{ key: unknown; secret: string }> => r.status === "fulfilled");
+  const lost = results.filter((r) => r.status === "rejected");
+  assert.equal(won.length, 1, "only one rotation runs at a time");
+  assert.match(String((lost[0] as PromiseRejectedResult).reason), /being changed/);
+  const live = won[0]!.value.secret;
+  assert.ok(await lookupApiKey(live, pepper), "the winning secret works");
+  assert.equal(await lookupApiKey(made.secret, pepper), null, "the original secret is gone");
+
+  // an index entry left over from an older race or a crash mid-rotation never passes
+  const ghost = generateApiKey("test");
+  await kv1(["SET", k("key", hashApiKey(ghost, pepper)), JSON.stringify({ id: made.key.id, partnerId: partner.id, env: "test" })]);
+  assert.equal(await lookupApiKey(ghost, pepper), null, "a stale index entry is refused");
+  assert.equal(await kv1(["GET", k("key", hashApiKey(ghost, pepper))]), null, "and removed");
+
+  await revokeApiKey({ partnerId: partner.id, keyId: made.key.id });
+  assert.equal(await lookupApiKey(live, pepper), null, "revoked means refused");
 });
 
 await test("keys: at most MAX_ACTIVE_KEYS active", async () => {
