@@ -42,6 +42,7 @@ import {
   buildGloamPayment,
   verifyGloamPayment,
   verifyPaymentNoteBinding,
+  noteFieldProblem,
   encodeRequirements,
   decodeRequirements,
   encodePaymentHeader,
@@ -1479,6 +1480,11 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     mpp?: { challengeId: string; externalId?: string };
   }) {
     const { net, notes, note, paymentNullifier, sealed, verifyView } = args;
+    // Only canonical fields count: the hash reads them mod p, so amount + p opens the same note.
+    const notCanonical = noteFieldProblem(note);
+    if (notCanonical || BigInt(note.amountWei) <= 0n) {
+      return text({ status: "rejected", grantAccess: false, final: false, message: `The payment note is not a real payment: ${notCanonical ?? "it carries no value."}` });
+    }
     const earlier = notes.list().find((n) => n.sweptFrom?.toLowerCase() === paymentNullifier.toLowerCase());
     if (earlier) {
       return text({
@@ -1785,6 +1791,10 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       } catch (e) {
         return reject(`Could not open the payment note: ${errMsg(e)}`);
       }
+      // A note claiming amount + p (or secret + p) opens the same commitment as the real one.
+      const notCanonical = noteFieldProblem(note);
+      if (notCanonical) return reject(`The payment note is not canonical: ${notCanonical}`);
+      if (BigInt(note.amountWei) <= 0n) return reject("The payment note carries no value.");
       const verify = verifyGloamPayment({ requirements: req, payload: pay, note });
       // Do not echo the commitment back: it names the leaf this server now owns.
       const verifyView = { ok: verify.ok, reason: verify.reason, sealed: verify.sealed, amountWei: verify.amountWei, asset: verify.asset };

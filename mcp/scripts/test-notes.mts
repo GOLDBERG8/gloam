@@ -26,10 +26,14 @@ import {
   buildPrivateSendIntent,
   decodePaymentHeader,
   decodeRequirements,
+  encodePaymentHeader,
+  encodeNotePackage,
   encodeRequirements,
   fieldToHex,
+  FIELD_PRIME,
   hexToField,
   openGloamPaymentNote,
+  sealToReceiveTag,
   GLOAM_NETWORKS,
   GLOAM_VS_ZONE,
   TEMPO_PATHUSD,
@@ -420,6 +424,42 @@ if (process.argv.includes("--add-notes") || process.argv.includes("--reserve")) 
 
     // No tool result, on either side, ever carried a secret.
     assertNoSecrets(secretsOf([payerEnv, payeeEnv], paymentSecrets));
+  });
+
+  test("a payment note claiming amount + p is refused, not settled", async () => {
+    const dir = tmp();
+    const chain = mockChain();
+    const payerEnv = partyEnv("payer", dir, PAYER_LIMITS);
+    const payeeEnv = partyEnv("payee", dir, { GLOAM_LIMITS: "off" });
+    const P = await connect(makeDeps(chain, payerEnv).deps);
+    const S = await connect(makeDeps(chain, payeeEnv).deps);
+    const cheap = await S.call("gloam_payment_requirements", {
+      amount: 1, decimals: 6, assetSymbol: "PathUSD", asset: TEMPO_PATHUSD, resource: "cheap", network: "tempo",
+    });
+    const dear = await S.call("gloam_payment_requirements", {
+      amount: 5, decimals: 6, assetSymbol: "PathUSD", asset: TEMPO_PATHUSD, resource: "dear", network: "tempo",
+    });
+    await P.call("gloam_execute_shield", { amount: 5, network: "tempo" });
+    const paid = await P.call("gloam_execute_private_pay", { requirements: cheap.encoded });
+    assert.equal(paid.status, "paid", JSON.stringify(paid));
+
+    // The payer re-seals its real 1 PathUSD payment note as 1 + p: Poseidon reads the
+    // amount mod p, so it opens the same commitment, which is this transfer's output.
+    const payload = decodePaymentHeader(paid.paymentHeader);
+    const tag = (await S.call("gloam_receive_tag")).tag;
+    const real = await openGloamPaymentNote(payload.payload.paymentNote, openNoteStore(payeeEnv).receiveKey()!);
+    const forged = encodeNotePackage({ pool: TEMPO.pool, asset: real.asset, amountWei: (BigInt(real.amountWei) + FIELD_PRIME).toString(), secret: real.secret, commitment: real.commitment });
+    payload.payload.paymentNote = await sealToReceiveTag(forged, tag);
+    const before = openNoteStore(payeeEnv).list().length;
+    const v = await S.call("gloam_verify_payment", { requirements: dear.encoded, payment: encodePaymentHeader(payload) });
+    assert.equal(v.grantAccess, false, JSON.stringify(v));
+    assert.equal(v.status, "rejected", JSON.stringify(v));
+    assert.equal(openNoteStore(payeeEnv).list().length, before, "nothing is swept or stored for it");
+
+    // The honest note still settles the price it really paid.
+    const ok = await S.call("gloam_verify_payment", { requirements: cheap.encoded, payment: paid.paymentHeader });
+    assert.equal(ok.status, "settled", JSON.stringify(ok));
+    assert.equal(ok.received.amount, "1");
   });
 
   test("limits still gate before any proving or signing, and refusals leave notes untouched", async () => {
