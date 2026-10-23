@@ -259,16 +259,18 @@ cashOutFee(500_000_000n);                     // what the pool keeps on a 500 US
                 <br />
                 Sealed-swap witness → <code>sealedSwap(...)</code>
               </td>
-              <td>Disabled (H1)</td>
+              <td>Retired</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p>
-        <code>buildPrivateTradeIntent</code> produces a valid intent, but the
-        on-chain sealed-swap path is disabled on testnet pending the H1 solvency
-        work, and the mainnet pools have no sealed swap at all. Private trade is
-        not live anywhere; a new engine for it is being built.
+        <code>buildPrivateTradeIntent</code> produces a valid intent for the
+        sealed trade, which is retired: the on-chain sealed-swap path stays
+        disabled on testnet, and the mainnet pools have no sealed swap at all.{" "}
+        <Link href="/docs/private-swaps">Private swaps</Link> replaced it. They
+        run in the Gloam app through a swap router on each mainnet, and the SDK
+        does not build them yet.
       </p>
 
       <h3>Parameters</h3>

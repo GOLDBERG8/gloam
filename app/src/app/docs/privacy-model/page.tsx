@@ -20,7 +20,7 @@ export default function DocsPrivacyPage() {
         { label: "Hidden", value: "the link, the bag" },
         { label: "Public", value: "deposits + exits" },
         { label: "Anon set", value: "more users = stronger" },
-        { label: "Private trade", value: "off, new engine underway" },
+        { label: "Private swaps", value: "who is hidden, amounts public" },
       ]}
     >
       <FlowDiagram
@@ -47,9 +47,9 @@ export default function DocsPrivacyPage() {
             body: "Shield (deposit) and cash out (unshield) are ordinary public transactions. The amount and address are visible.",
           },
           {
-            n: "✕",
-            title: "Private trade (switched off)",
-            body: "Not on mainnet, where the pools take payments only, and switched off on testnet while we build a new engine for private trading.",
+            n: "!",
+            title: "Private swaps (mainnet)",
+            body: "Swap from your private balance on Robinhood Chain and Tempo mainnet. Who swapped stays private. The tokens and amounts show, like any DEX trade.",
           },
           {
             n: "!",
@@ -89,12 +89,22 @@ export default function DocsPrivacyPage() {
         <li>The link between your deposit and any later spend or exit</li>
         <li>How much you hold while it is in the vault</li>
         <li>Who paid whom, and how much, on a private send (live on mainnet and testnet)</li>
+        <li>
+          Who made a private swap, which balance it came from, and where the
+          output goes next (mainnet)
+        </li>
       </ul>
 
       <h2>What the public still sees</h2>
       <ul>
         <li>Each shield deposit: your address, the asset, and the amount</li>
         <li>Each cash out: the asset, the amount, and the destination address</li>
+        <li>
+          Each private swap: the two tokens and the two amounts. A swap the
+          same size as a recent deposit, or a cash out the same size as a
+          swap&apos;s output, is easy to match. See{" "}
+          <Link href="/docs/private-swaps#tips">private swaps</Link>
+        </li>
         <li>That the pool was used, the caller of each transaction, and timing</li>
         <li>Every commitment and nullifier as opaque hashes, plus the pool total</li>
       </ul>
@@ -280,9 +290,9 @@ export default function DocsPrivacyPage() {
         Every stablecoin on Tempo points at a transfer policy in Tempo&apos;s
         TIP-403 registry: open to all, closed to all, the issuer&apos;s allowlist
         or blocklist, or separate lists for senders and recipients. The token
-        checks it on every transfer. Gloam respects it at the only two places
-        value moves: a deposit is a transfer from your wallet into the vault, and
-        a cash out is a transfer from the vault to a public address.
+        checks it on every transfer. Gloam respects it at the two places value
+        meets a public wallet: a deposit is a transfer from your wallet into the
+        vault, and a cash out is a transfer from the vault to a public address.
       </p>
       <ul>
         <li>
@@ -304,6 +314,14 @@ export default function DocsPrivacyPage() {
         <li>
           <strong>Private sends</strong> move no tokens, so the policy never
           sees them, and nothing private is read.
+        </li>
+        <li>
+          <strong>Private swaps</strong>{" "}
+          do move tokens: from the vault to the
+          swap&apos;s escrow and router, through Tempo&apos;s stablecoin
+          exchange, and back into the vault. The token checks its policy on
+          each of those transfers, and if one is refused the whole swap
+          reverts.
         </li>
       </ul>
       <p>
@@ -336,10 +354,12 @@ export default function DocsPrivacyPage() {
       </p>
       <h3>Relay limits</h3>
       <p>
-        The relay submits only the vault&apos;s private send and cash out and the
-        payment message board. It dry-runs every payment first, cannot change a
-        cash out&apos;s recipient or amount (both are bound in the proof), and
-        rate limits each device and each network. A cash out scheduled for
+        The relay submits only the vault&apos;s private send and cash out,
+        private swaps through the swap routers, and the payment message board.
+        It dry-runs every call first, cannot change a cash out&apos;s recipient
+        or amount (both are bound in the proof), cannot change what a swap
+        delivers or where (the escrow address binds it), and rate limits each
+        device and each network. A cash out scheduled for
         later is kept as the proof and its public inputs, never a secret, and
         is dropped once it is sent, cancelled or can no longer go out.
       </p>
@@ -381,8 +401,10 @@ export default function DocsPrivacyPage() {
           never enter.
         </li>
         <li>
-          <strong>Private trade is off</strong> on mainnet and testnet while we
-          build a new engine for private trading.
+          <strong>Private swaps show their amounts.</strong> Who swapped stays
+          private, but the tokens and amounts are public. If someone breaks a
+          swap on purpose, 99% of the note comes back as a refund. The old
+          sealed trade is retired.
         </li>
       </ul>
       <p>

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { mainnetPool, type MainnetChainId } from "@/lib/mainnet";
 import { RH_MAINNET_TOKENS, TEMPO_MAINNET_TOKENS } from "@/lib/tokens";
+import { VAULT_SWAP_ROUTERS } from "@/lib/vaultSwap";
 
 export const metadata: Metadata = {
   title: "Networks",
@@ -24,6 +25,13 @@ function MainnetDeployBlock({ chainId }: { chainId: MainnetChainId }) {
 const MAINNET_POSEIDON_T3 = "0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4";
 const MAINNET_OWNER = "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8";
 const MAINNET_RELAYER = "0xb1E994586E62994648a0b866BF33F2EDd942512e";
+const SWAP_TREASURY = "0xB3900ac9350903218e4c7597bAb0f008F01B30B8";
+
+/** A mainnet swap router, or "Not deployed" where there is none. */
+function SwapRouterAddress({ chainId }: { chainId: MainnetChainId }) {
+  const r = VAULT_SWAP_ROUTERS[chainId];
+  return r ? <code>{r}</code> : <>Not deployed</>;
+}
 
 export default function DocsNetworksPage() {
   return (
@@ -52,9 +60,12 @@ export default function DocsNetworksPage() {
       <h2 id="mainnet">Mainnet</h2>
       <p>
         Gloam went live on Robinhood Chain and Tempo mainnet on 21 October 2026,
-        13:00 UTC. This is real money and beta software. The mainnet pools take
-        payments only (<code>ShieldPoolPayments</code>): shield, private send,
-        cash out and proofs. Private trade is not part of them.
+        13:00 UTC. This is real money and beta software. The mainnet pools
+        (<code>ShieldPoolPayments</code>) take shield, private send, cash out
+        and proofs, and have no swap code.{" "}
+        <Link href="/docs/private-swaps">Private swaps</Link>{" "}
+        run through a separate router on each chain, which uses only the
+        vault&apos;s normal calls.
       </p>
       <div className="overflow-x-auto">
         <table>
@@ -116,6 +127,20 @@ export default function DocsNetworksPage() {
               </td>
             </tr>
             <tr>
+              <td>Swap router</td>
+              <td>
+                <SwapRouterAddress chainId={4663} />
+              </td>
+              <td>
+                <SwapRouterAddress chainId={4217} />
+              </td>
+            </tr>
+            <tr>
+              <td>Swaps on</td>
+              <td>Uniswap v4 (USDG and $GLOAM)</td>
+              <td>Tempo&apos;s stablecoin exchange (the four stablecoins)</td>
+            </tr>
+            <tr>
               <td>Gas</td>
               <td>ETH (gas only, not a pool asset)</td>
               <td>Paid in stablecoins</td>
@@ -175,7 +200,9 @@ export default function DocsNetworksPage() {
         </li>
         <li>
           <strong>Fees.</strong> Deposits and private payments are free. A cash
-          out costs 0.25%, kept by the pool.
+          out costs 0.25%, kept by the pool. A private swap pays the same 0.25%
+          on the amount swapped, plus a price buffer (0.5% on Robinhood Chain,
+          0.1% on Tempo) whose unused part goes to the swap treasury.
         </li>
       </ul>
 
@@ -206,6 +233,11 @@ export default function DocsNetworksPage() {
           Gloam team. It only submits already-proven transactions and pays the
           gas; it cannot move or redirect money.
         </li>
+        <li>
+          <strong>Swap treasury</strong>, <code>{SWAP_TREASURY}</code>. Both swap
+          routers send what a swap does not use here. It is fixed in each router
+          and cannot change. The routers have no owner, no admin and no upgrade.
+        </li>
       </ul>
 
       <h2>Robinhood Chain</h2>
@@ -229,6 +261,10 @@ export default function DocsNetworksPage() {
         <li>
           <strong>Mainnet assets</strong>, USDG and $GLOAM. Native ETH pays gas
           but is not a pool asset, and stock tokens are testnet only.
+        </li>
+        <li>
+          <strong>Mainnet swap router</strong> (GloamVaultSwapV4, Uniswap v4),{" "}
+          <SwapRouterAddress chainId={4663} />
         </li>
         <li>
           <strong>Testnet chain ID</strong>, 46630
@@ -280,6 +316,11 @@ export default function DocsNetworksPage() {
         <li>
           <strong>Mainnet assets</strong>, USDC.e, pathUSD, USDT0 and OUSD
           (TIP-20, 6 decimals)
+        </li>
+        <li>
+          <strong>Mainnet swap router</strong>{" "}
+          (GloamVaultSwapTempo, Tempo&apos;s stablecoin exchange),{" "}
+          <SwapRouterAddress chainId={4217} />
         </li>
         <li>
           <strong>Testnet name</strong>, Tempo Moderato
@@ -342,8 +383,9 @@ export default function DocsNetworksPage() {
       <p>
         On Tempo the product is private stablecoin payments, for people and for
         agents: shield a stablecoin, pay and send to a receive tag without
-        showing your size, prove a balance when you have to, and cash out to a
-        public balance whenever you want it public. Tokenized-equity markets
+        showing your size, swap one stablecoin for another from your private
+        balance, prove a balance when you have to, and cash out to a public
+        balance whenever you want it public. Tokenized-equity markets
         are a Robinhood Chain testnet feature and do not appear on Tempo.
       </p>
 

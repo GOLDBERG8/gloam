@@ -107,7 +107,7 @@ export default function DocsTestnetPage() {
           {
             n: "5",
             title: "Trade paths",
-            body: "Private trade is switched off for now. Via market needs a pool. Wallet path is fully public.",
+            body: "Private swaps are mainnet only. Via market needs a pool. Wallet path is fully public.",
           },
         ]}
       />
@@ -315,10 +315,10 @@ export default function DocsTestnetPage() {
       <h2 id="trade">7. Trade paths</h2>
       <ul>
         <li>
-          <strong>Private trade (switched off)</strong>. Built, and switched
-          off on-chain while we build a new engine for private trading. Stock
-          tokens can already be held and sent privately. See{" "}
-          <Link href="/docs/sealed-trade">sealed trade</Link>.
+          <strong>Private swaps</strong>, mainnet only. The testnets have no
+          swap router, so there is no Swap tab here. Stock tokens can be held
+          and sent privately. The old{" "}
+          <Link href="/docs/sealed-trade">sealed trade</Link> is retired.
         </li>
         <li>
           <strong>Wallet</strong>, public swaps / transfers from the open
@@ -330,30 +330,13 @@ export default function DocsTestnetPage() {
         </li>
       </ul>
 
-      <h2 id="private-trade">7b. Private trade walkthrough</h2>
+      <h2 id="private-swaps">7b. Private swaps (mainnet)</h2>
       <p>
-        Private trade is switched off on-chain while we build a new engine for
-        it (see <Link href="/docs/sealed-trade">private trade</Link>). These
-        steps describe the built version, which is not usable today.
+        Swapping from a private balance runs on Robinhood Chain and Tempo
+        mainnet, under Vault &gt; Swap, with real money. Who swapped stays
+        private; the tokens and amounts are public. How it works, what it costs
+        and what shows: <Link href="/docs/private-swaps">private swaps</Link>.
       </p>
-      <ol>
-        <li>
-          <AppLink href="/app/vault?tab=shield">Shield ETH</AppLink> (not only stock tokens).
-        </li>
-        <li>
-          Open{" "}
-          <AppLink href="/app/vault?tab=trade&path=sealed">Trade → Private</AppLink> and pick
-          TSLA / AMZN / etc.
-        </li>
-        <li>
-          Leave <strong>Max size privacy</strong> on. Enter amount or Max →
-          prove → confirm wallet.
-        </li>
-        <li>
-          Explorer shows a vault <code>sealedSwap</code>, not a Uniswap fill.
-          Cash out later publishes amount, stay in vault to stay private.
-        </li>
-      </ol>
 
       <h2 id="settings">8. Settings & backups</h2>
       <ul>
@@ -424,7 +407,7 @@ export default function DocsTestnetPage() {
         </li>
         <li>
           <strong>No DEX pool for stock</strong>, testnet liquidity is thin;
-          use ETH pairs or private trade paths when available.
+          use ETH pairs.
         </li>
         <li>
           <strong>RPC rate limits</strong>, wait and retry; public RH RPC is

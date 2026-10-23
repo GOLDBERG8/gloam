@@ -56,29 +56,25 @@ export default function DocsDataPage() {
           pool).
         </li>
         <li>
-          <strong>Sealed private trade</strong>, public{" "}
-          <code>rateIn</code> / <code>rateOut</code> (coarsened display marks).
-          Size is private: <code>amountOutMin</code> defaults to a 1-wei floor
-          so it does not equal your real output. Pair and caller are still
-          public.
+          <strong>Private swaps</strong>, the pool&apos;s own price. On
+          Robinhood Chain the app quotes the allowed Uniswap v4 pools with the
+          v4 quoter; on Tempo it asks Tempo&apos;s stablecoin exchange. The swap
+          then asks for a little less than that quote (0.5% on Robinhood Chain,
+          0.1% on Tempo) and receives exactly that amount, or reverts. See{" "}
+          <Link href="/docs/private-swaps#costs">what a swap costs</Link>.
         </li>
         <li>
-          <strong>Vault inventory</strong>, cash out needs the vault to actually
-          hold the asset (<code>deposited[asset]</code>). Private trade can mint
-          a note; unshield still needs inventory.
+          <strong>Sealed trade (retired)</strong>, used public{" "}
+          <code>rateIn</code> / <code>rateOut</code> from coarsened display
+          marks. It stays off.
         </li>
       </ul>
 
-      <h2 id="next">What ships next for pricing</h2>
-      <ol>
-        <li>
-          Bind sealed rates to a real source (target:{" "}
-          <strong>Pyth</strong> for equities-style feeds, or AMM mid when a deep
-          pool exists).
-        </li>
-        <li>Seed and show vault inventory per faucet stock so cash-out is safe.</li>
-        <li>Never claim oracle security until the feed is on-chain and checked.</li>
-      </ol>
+      <h2 id="next">Our rule on oracles</h2>
+      <p>
+        We will not claim oracle security until a feed is on-chain and checked.
+        Until then, a swap&apos;s price is the pool&apos;s own price.
+      </p>
 
       <h2 id="activity">Balances and history</h2>
       <ul>
@@ -110,7 +106,7 @@ export default function DocsDataPage() {
 
       <p>
         Related:{" "}
-        <Link href="/docs/sealed-trade">Sealed trade</Link> ·{" "}
+        <Link href="/docs/private-swaps">Private swaps</Link> ·{" "}
         <Link href="/docs/production">Production gate</Link> ·{" "}
         <Link href="/docs/product">What ships when</Link>.
       </p>
