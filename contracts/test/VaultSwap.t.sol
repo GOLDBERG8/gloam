@@ -26,10 +26,17 @@ interface IERC20T {
     function transfer(address, uint256) external returns (bool);
 }
 
+/// A hook the mock PoolManager calls during each swap (a stand-in for beforeSwap).
+interface IMockHook {
+    function onSwap() external;
+}
+
 /**
  * A small stand-in for Uniswap v4's PoolManager: a fixed price per pool and
  * direction, exact output only, with the real lock rules (deltas per currency
  * must net to zero before unlock returns; sync, settle and take move them).
+ * Native ETH is address(0): settled with msg.value after sync(address(0)), and
+ * taken as a plain ETH transfer, as in v4.
  */
 contract MockPoolManager {
     struct Rate {
@@ -45,6 +52,12 @@ contract MockPoolManager {
     uint256 internal syncedBal;
     /// Extra output on top of what was asked (models a hook paying out more).
     uint256 public bonusOut;
+    /// Output short of what was asked (models a hook keeping some of it).
+    uint256 public shortOut;
+    /// Extra input on top of the price (models a hook charging more).
+    uint256 public extraIn;
+    /// Called during every swap, like a hook.
+    address public hook;
 
     error CurrencyNotSettled();
     error ManagerLocked();
@@ -56,6 +69,20 @@ contract MockPoolManager {
     function setBonusOut(uint256 b) external {
         bonusOut = b;
     }
+
+    function setShortOut(uint256 s) external {
+        shortOut = s;
+    }
+
+    function setExtraIn(uint256 e) external {
+        extraIn = e;
+    }
+
+    function setHook(address h) external {
+        hook = h;
+    }
+
+    receive() external payable {}
 
     function unlock(bytes calldata data) external returns (bytes memory r) {
         unlocked = true;
@@ -72,8 +99,9 @@ contract MockPoolManager {
         require(p.amountSpecified > 0, "mock: exact output only");
         Rate memory r = rate[keccak256(abi.encode(key, p.zeroForOne))];
         require(r.den != 0, "mock: no rate");
-        uint256 out = uint256(p.amountSpecified) + bonusOut;
-        uint256 inAmt = (uint256(p.amountSpecified) * r.num + r.den - 1) / r.den;
+        if (hook != address(0)) IMockHook(hook).onSwap();
+        uint256 out = uint256(p.amountSpecified) + bonusOut - shortOut;
+        uint256 inAmt = (uint256(p.amountSpecified) * r.num + r.den - 1) / r.den + extraIn;
         int128 a0;
         int128 a1;
         if (p.zeroForOne) {
@@ -94,13 +122,25 @@ contract MockPoolManager {
     }
 
     function settle() external payable returns (uint256 paid) {
-        paid = IERC20T(synced).balanceOf(address(this)) - syncedBal;
-        _account(synced, int128(int256(paid)));
+        if (synced == address(0)) {
+            paid = msg.value;
+            _account(address(0), int128(int256(paid)));
+        } else {
+            require(msg.value == 0, "mock: value with a token");
+            paid = IERC20T(synced).balanceOf(address(this)) - syncedBal;
+            _account(synced, int128(int256(paid)));
+            synced = address(0);
+        }
     }
 
     function take(address c, address to, uint256 amount) external {
         _account(c, -int128(int256(amount)));
-        IERC20T(c).transfer(to, amount);
+        if (c == address(0)) {
+            (bool ok, ) = to.call{value: amount}("");
+            require(ok, "mock: eth take failed");
+        } else {
+            IERC20T(c).transfer(to, amount);
+        }
     }
 
     function _account(address c, int128 d) internal {
@@ -200,7 +240,8 @@ contract VaultSwapTest is Test {
     MockERC20 usd; // 6 decimals in spirit; amounts below are raw
     MockERC20 gloam;
     MockPoolManager pm;
-    GloamVaultSwapV4 router;
+    /// The router under test (GloamVaultSwapV4 here; VaultSwapV4b.t.sol runs every test on v2).
+    GloamVaultSwap router;
     PoolKey direct; // usd / gloam, no hook
     PoolKey ethGloam; // native ETH / gloam
     PoolKey ethUsd; // native ETH / usd
@@ -221,7 +262,7 @@ contract VaultSwapTest is Test {
         bytes route;
     }
 
-    function setUp() public {
+    function setUp() public virtual {
         vm.warp(1_900_000_000);
         acceptV = new SwapAcceptVerifier();
         bindV = new ToBindingVerifier();
@@ -267,10 +308,15 @@ contract VaultSwapTest is Test {
         allow[0] = direct;
         allow[1] = ethGloam;
         allow[2] = ethUsd;
-        router = new GloamVaultSwapV4(address(pool), treasury, address(pm), allow);
+        router = _newRouter(allow);
     }
 
     // ───────────────────────────────────────────────────────────── helpers
+
+    /// A router on this vault, treasury and pool manager, allowing `allow`.
+    function _newRouter(PoolKey[] memory allow) internal virtual returns (GloamVaultSwap) {
+        return new GloamVaultSwapV4(address(pool), treasury, address(pm), allow);
+    }
 
     function _rate(PoolKey memory k, address inCurrency, uint256 num, uint256 den) internal {
         pm.setRate(k, k.currency0 == inCurrency, num, den);
@@ -325,7 +371,7 @@ contract VaultSwapTest is Test {
         return abi.encode(r);
     }
 
-    function _assertRouterEmpty() internal view {
+    function _assertRouterEmpty() internal view virtual {
         assertEq(usd.balanceOf(address(router)), 0, "router keeps no usd");
         assertEq(gloam.balanceOf(address(router)), 0, "router keeps no gloam");
         assertEq(address(router).balance, 0, "router keeps no eth");
@@ -531,11 +577,11 @@ contract VaultSwapTest is Test {
 
     function test_unlock_callback_only_from_the_pool_manager_during_a_swap() public {
         vm.expectRevert(GloamVaultSwapV4.NotPoolManager.selector);
-        router.unlockCallback("");
+        GloamVaultSwapV4(payable(address(router))).unlockCallback("");
         // the pool manager itself, outside a swap
         vm.prank(address(pm));
         vm.expectRevert(GloamVaultSwapV4.NotPoolManager.selector);
-        router.unlockCallback("");
+        GloamVaultSwapV4(payable(address(router))).unlockCallback("");
     }
 
     function test_extra_output_goes_to_the_treasury() public {
@@ -572,7 +618,7 @@ contract VaultSwapTest is Test {
         pm.setRate(k, k.currency0 == address(usd), 1, 10 ** 12);
         PoolKey[] memory allow = new PoolKey[](1);
         allow[0] = k;
-        GloamVaultSwapV4 r2 = new GloamVaultSwapV4(address(pool), treasury, address(pm), allow);
+        GloamVaultSwap r2 = _newRouter(allow);
         Call memory inner = _call(r2, 19, address(evil), 1e18, 0xB9, _route1(k));
         // when the pool manager pays the router, the token re-enters swap()
         evil.arm(address(r2), abi.encodeCall(GloamVaultSwap.swap, (inner.s, inner.d, inner.r, inner.route)));
@@ -582,7 +628,7 @@ contract VaultSwapTest is Test {
         assertFalse(pool.isSpent(bytes32(uint256(18))));
     }
 
-    function test_constructor_checks() public {
+    function test_constructor_checks() public virtual {
         PoolKey[] memory none = new PoolKey[](0);
         vm.expectRevert(GloamVaultSwap.ZeroAddress.selector);
         new GloamVaultSwapV4(address(pool), address(0), address(pm), none);
@@ -590,8 +636,8 @@ contract VaultSwapTest is Test {
         new GloamVaultSwapV4(address(0xDEAD), treasury, address(pm), none);
         vm.expectRevert(GloamVaultSwap.NotAContract.selector);
         new GloamVaultSwapV4(address(pool), treasury, address(0xDEAD), none);
-        assertTrue(router.allowedPool(keccak256(abi.encode(direct))));
-        assertFalse(router.allowedPool(keccak256(abi.encode(stranger))));
+        assertTrue(GloamVaultSwapV4(address(router)).allowedPool(keccak256(abi.encode(direct))));
+        assertFalse(GloamVaultSwapV4(address(router)).allowedPool(keccak256(abi.encode(stranger))));
     }
 
     // ───────────────────────────────────────────────────────────── tempo
