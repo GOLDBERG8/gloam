@@ -16,8 +16,23 @@ const ACTORS: { who: string; can: string; cannot: string }[] = [
   },
   {
     who: "The Gloam relay",
-    can: "See your IP address and the timing of the transactions it sends for you, and refuse to send one. The Gloam team runs it at launch.",
-    cannot: "Change a cash out's recipient or amount, which the proof binds, learn a note secret, or move money.",
+    can: "See your IP address and the timing of the transactions it sends for you, swaps included, and refuse to send one. The Gloam team runs it at launch.",
+    cannot: "Change a cash out's recipient or amount, which the proof binds, change what a swap delivers or where, learn a note secret, or move money.",
+  },
+  {
+    who: "The swap routers",
+    can: "Take one note out of the vault for a swap, trade it on their fixed venues, and send what the trade did not use to the treasury. They have no owner, no admin and no upgrade.",
+    cannot: "Change a swap's new note, its refund note or its route, which the escrow address binds, or touch any other note in the vault.",
+  },
+  {
+    who: "Anyone who sees a swap go out",
+    can: "Send its first step alone, so the swap fails and refunds 99% of the note. Send a swap that reverted again later, which lands exactly as it was made if the price allows.",
+    cannot: "Redirect the money, change the new note or the refund note, or keep any of it.",
+  },
+  {
+    who: "The DEX pools and Tempo's exchange",
+    can: "Set the price a swap pays, and make it fail. A price move before the swap lands can take up to the buffer, which would otherwise go to the treasury.",
+    cannot: "Deliver less than the swap asks for. The router checks the output and what it paid, or the whole swap reverts.",
   },
   {
     who: "RPC providers",
@@ -77,14 +92,15 @@ export default function DocsThreatModelPage() {
       <ul>
         <li>The link between a deposit and any later spend or cash out.</li>
         <li>Who paid whom, and how much, for a private send inside the vault.</li>
+        <li>Who made a private swap, and which balance it came from.</li>
         <li>What anyone holds while their money is in the vault.</li>
         <li>Payment notes and receive keys on the user&apos;s own device.</li>
         <li>The vault itself: nobody takes out more than was put in.</li>
       </ul>
       <p>
         Some things are public by design and we do not try to hide them: deposits and
-        cash outs, the wallet that sent each transaction, timing, and the opaque hashes
-        every payment adds to the vault. <Link href="/docs/privacy-model">What stays private</Link>{" "}
+        cash outs, the tokens and amounts of a private swap, the wallet that sent each
+        transaction, timing, and the opaque hashes every payment adds to the vault. <Link href="/docs/privacy-model">What stays private</Link>{" "}
         walks through exactly what an explorer shows.
       </p>
 
@@ -128,9 +144,56 @@ export default function DocsThreatModelPage() {
         send or cash out. It checks every payment before sending it, keeps per-device and
         per-network rate limits keyed by IP address, and cannot alter what the proof
         binds. If it refuses or goes down, you can turn it off and send from your own
-        wallet, at the cost of your wallet showing as the sender. On Robinhood Chain, a
-        payment message you post yourself shows your wallet as the poster. Through the
-        relay it does not.
+        wallet, at the cost of your wallet showing as the sender. Swaps are the
+        exception: they only go through the relay, so while it is down, swaps wait.
+        On Robinhood Chain, a payment message you post yourself shows your wallet as
+        the poster. Through the relay it does not.
+      </p>
+
+      <h3 id="swaps">Private swaps</h3>
+      <p>
+        A swap runs in one transaction through a router: the vault releases one note to
+        a one-time escrow, the router trades it on a public DEX for an exact amount, and
+        the output goes back into the vault as a new note. The relay sends it, so no
+        wallet shows. The tokens, the amounts and the timing are public.
+      </p>
+      <p>
+        <strong>What a router trusts.</strong>{" "}
+        Each router is fixed at deploy, with no owner, admin or upgrade. On Robinhood Chain it trades only on three Uniswap v4
+        pools set at deploy: ETH and USDG, ETH and $GLOAM (the launch pool, whose hook
+        takes the creator fee), and USDG and $GLOAM. On Tempo it trades only on
+        Tempo&apos;s stablecoin exchange. These venues are outside code. The router checks
+        that it received the full output and paid no more than arrived from the vault,
+        so the worst a venue can do is make a swap fail.
+      </p>
+      <p>
+        <strong>Price moves.</strong> The swap asks a little below the quote (0.5% on
+        Robinhood Chain, 0.1% on Tempo). You receive exactly the amount shown or nothing.
+        A trader who moves the price before the swap lands can take up to that buffer,
+        which would otherwise go to the treasury. Past the buffer, the swap reverts and
+        nothing moves.
+      </p>
+      <p>
+        <strong>A swap made to fail.</strong>{" "}
+        Once a swap is broadcast, its unshield proof is public. Anyone can send that step alone. The money then waits at the
+        swap&apos;s escrow, which only the router can open, and only into the refund note
+        the owner made with the swap. That refund holds 99% of the note: the vault keeps
+        its 0.25% cash-out fee and the rest of the 1% goes to the treasury. The
+        owner&apos;s app finishes the refund through the relay on its next sync. The
+        attacker pays gas and gains nothing.
+      </p>
+      <p>
+        <strong>A swap that reverted can still land.</strong>{" "}
+        Its proofs stay valid, so anyone can send the same call again, and it lands if the price comes back
+        within the buffer. It lands exactly as the owner made it: the same output, into
+        the owner&apos;s new note. The app keeps both new notes until the chain shows
+        which one landed.
+      </p>
+      <p>
+        <strong>Limits and blocks.</strong> The new note and the refund note are deposits,
+        so the beta deposit limits apply. If the vault is full for that token, a refund
+        waits at the escrow until there is room. If a token issuer blocks the treasury,
+        what it cannot take stays in the router; it never stops a swap or a refund.
       </p>
 
       <h3>Owner powers</h3>
@@ -223,9 +286,13 @@ export default function DocsThreatModelPage() {
           own wallet.
         </li>
         <li>
-          <strong>Private trade is off.</strong> The mainnet pools have no sealed swap,
-          and on testnet it is switched off. Its accounting needs a redesign before it
-          comes back.
+          <strong>Swap amounts are public.</strong> A private swap hides who swapped,
+          not the tokens or the amounts. Its routers were reviewed internally, not
+          externally audited.
+        </li>
+        <li>
+          <strong>The sealed trade is retired.</strong> The mainnet pools have no
+          sealed swap, and on testnet it stays switched off. Private swaps replaced it.
         </li>
       </ul>
 

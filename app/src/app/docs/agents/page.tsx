@@ -413,9 +413,11 @@ const hash = await wallet.writeContract({
       <h2>Honesty</h2>
       <p>
         No fabricated fills, ever. If a private path is not live, the tool says so
-        and returns a plan rather than a fake success. Private trade is off: the
-        mainnet pools have no sealed swap, and on testnet it is disabled pending
-        the H1 solvency work. Shield, private send, cash out, and disclosure are
+        and returns a plan rather than a fake success.{" "}
+        <Link href="/docs/private-swaps">Private swaps</Link> are live in the
+        Gloam app on both mainnets, but the SDK and the MCP server do not swap
+        yet: the market and trade tools only plan, and the old sealed trade they
+        describe is retired. Shield, private send, cash out, and disclosure are
         live and proof-gated. Mainnet uses the final keys from the 13-contributor
         ceremony; testnet runs on dev-ceremony keys. The code was reviewed
         internally before launch, and an external audit is planned. Mainnet is

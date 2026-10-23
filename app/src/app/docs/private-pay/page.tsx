@@ -19,7 +19,7 @@ export default function DocsPrivatePayPage() {
         { label: "Chain", value: "RH EVM" },
         { label: "Direct", value: "Receive tag" },
         { label: "Discovery", value: "Memo + scan" },
-        { label: "Private trade", value: "Off for now" },
+        { label: "Swaps", value: "Mainnet, amounts public" },
       ]}
     >
       <h2>Why Solana private send “feels” like public send</h2>
@@ -131,22 +131,23 @@ export default function DocsPrivatePayPage() {
         <li>
           <strong>Gloam</strong> = private rails for{" "}
           <em>stablecoins and $GLOAM on RH mainnet</em> (and stock tokens on
-          testnet): hold and pay privately next to open settlement on the same
-          chain. Private trade is switched off for now.
+          testnet): hold and pay privately next to open settlement on the
+          same chain. On mainnet you can also swap USDG and $GLOAM from the
+          private balance. A private swap keeps who swapped private; its
+          amounts are public.
         </li>
       </ul>
       <p>What still gates a full Zcash-class experience:</p>
       <ul>
         <li>A bigger anonymity set: the mainnet pools are new</li>
-        <li>Stronger public-input privacy on trade rates / pair</li>
-        <li>Private trade on a new engine</li>
+        <li>Swaps that keep the amounts private too</li>
         <li>An external audit (mainnet launched after an internal review)</li>
       </ul>
 
       <h2>Try it</h2>
       <p>
         <AppLink href="/app/vault?tab=move">Move</AppLink>, private pay ·{" "}
-        <Link href="/docs/sealed-trade">Private trade</Link> (switched off) ·{" "}
+        <Link href="/docs/private-swaps">Private swaps</Link> ·{" "}
         <Link href="/docs/privacy-model">Privacy model</Link>.
       </p>
     </DocsLayout>

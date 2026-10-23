@@ -58,7 +58,7 @@ export default function DocsProductPage() {
           {
             n: "●",
             title: "Mainnet",
-            body: "Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC. Payments only, final ceremony keys, beta deposit limits. Deposits and private payments are free; a cash out costs 0.25%.",
+            body: "Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC, on the final ceremony keys and under beta deposit limits. Deposits and private payments are free; a cash out costs 0.25%.",
           },
           {
             n: "●",
@@ -87,7 +87,12 @@ export default function DocsProductPage() {
           },
           {
             n: "●",
-            title: "Vault trade adapter",
+            title: "Private swaps",
+            body: "Mainnet on Robinhood Chain (USDG and $GLOAM) and Tempo (its stablecoins). Swap from your private balance in one relayed transaction. Who swapped stays private; the amounts are public.",
+          },
+          {
+            n: "●",
+            title: "Vault trade adapter (testnet)",
             body: "From vault: cash out → public DEX swap → re-shield. Hold private; swap edge still public.",
           },
           {
@@ -112,8 +117,8 @@ export default function DocsProductPage() {
           },
           {
             n: "!",
-            title: "Private trade (switched off)",
-            body: "Off on mainnet, where the pools take payments only, and switched off on testnet while we build a new engine for private trading. Trading mixes many people's orders, so it needs its own design.",
+            title: "Sealed trade (retired)",
+            body: "The first private trade design stays off on every network. The mainnet vaults have no sealed swap code. Private swaps replaced it.",
           },
           {
             n: "○",
@@ -141,7 +146,7 @@ export default function DocsProductPage() {
       <p>
         Open the app: <AppLink href="/app">/app</AppLink> ·{" "}
         <Link href="/docs/production">Production gate</Link> ·{" "}
-        <Link href="/docs/sealed-trade">Private trade</Link> ·{" "}
+        <Link href="/docs/private-swaps">Private swaps</Link> ·{" "}
         <Link href="/docs/compare">How Gloam compares</Link>. Follow{" "}
         <a href="https://x.com/gloamtrade" target="_blank" rel="noreferrer">
           @gloamtrade

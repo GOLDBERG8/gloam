@@ -419,8 +419,10 @@ for (const p of payments) {
         an external audit is planned. The testnets (<code>46630</code>,{" "}
         <code>42431</code>) run on dev-ceremony keys with test funds. Real
         privacy only, never a mock success. Note secrets are the sole spend
-        authority: persist and protect them. Private trade is off on mainnet and
-        testnet. See <Link href="/docs/production">the production gate</Link>.
+        authority: persist and protect them. The old sealed trade is retired.{" "}
+        <Link href="/docs/private-swaps">Private swaps</Link> run in the app on
+        both mainnets; the SDK does not build them yet. See{" "}
+        <Link href="/docs/production">the production gate</Link>.
       </p>
     </DocsLayout>
   );

@@ -57,6 +57,11 @@ export default function DocsProductionPage() {
             title: "Mainnet deploy (done)",
             body: "New ShieldPoolPayments pools on Robinhood Chain and Tempo mainnet: payments only, no sealed swap. The app proves with the final keys there.",
           },
+          {
+            n: "5",
+            title: "Private swap routers (deployed)",
+            body: "One router per mainnet, with no owner, no admin and no upgrade. They use only the vault's normal release and deposit calls, so the vault did not change. Reviewed internally before deploy, not externally audited.",
+          },
         ]}
       />
 
@@ -143,14 +148,15 @@ export default function DocsProductionPage() {
           crowd of notes to hide among is thin at first. It grows with use.
         </li>
         <li>
-          <strong>Private trade.</strong> Off on mainnet (the mainnet pools have
-          no sealed swap) and on testnet, while we build a new engine for it
+          <strong>Swap amounts.</strong> A{" "}
+          <Link href="/docs/private-swaps">private swap</Link> hides who
+          swapped, not the tokens or the amounts. The old sealed trade, which
+          tried to hide the size too, is retired and stays off
         </li>
         <li>
           <strong>Stronger key custody.</strong> Notes and receive keys are encrypted at rest, but
           the key is device-bound; a wallet-bound or passphrase key is still open
         </li>
-        <li>Stronger public-input privacy (rates / pair strategies)</li>
       </ul>
 
       <p>

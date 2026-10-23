@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
@@ -18,7 +19,7 @@ export default function DocsEncryptionPage() {
       glance={[
         { label: "In", value: "Shield" },
         { label: "Move", value: "Private send" },
-        { label: "Trade", value: "Private trade" },
+        { label: "Swap", value: "Private swap" },
         { label: "Out", value: "Cash out" },
       ]}
     >
@@ -29,8 +30,8 @@ export default function DocsEncryptionPage() {
         <strong>Private send</strong> = pay someone while funds stay in the
         vault (share a payment tag).
         <br />
-        <strong>Private trade</strong> = sell vault ETH for vault stock without
-        a public DEX hop (built, and switched off for now).
+        <strong>Private swap</strong> = swap one token for another from the
+        vault, through a public DEX, with your wallet kept out of it (mainnet).
         <br />
         <strong>Cash out</strong> = take it back to your open wallet with a
         proof that you own it.
@@ -62,8 +63,8 @@ export default function DocsEncryptionPage() {
           },
           {
             n: "4",
-            title: "You private-send, trade, or cash out",
-            body: "Private send splits a note into payment + change. Private trade (switched off for now) swaps inside the vault. Cash out builds a proof and pays your open wallet.",
+            title: "You private-send, swap, or cash out",
+            body: "Private send splits a note into payment + change. A private swap trades one note on a DEX and puts the output back as a new note. Cash out builds a proof and pays your open wallet.",
           },
         ]}
       />
@@ -75,7 +76,8 @@ export default function DocsEncryptionPage() {
       <ul>
         <li>That someone used the Gloam contract</li>
         <li>When money entered or left the vault (shield / cash out edges)</li>
-        <li>That a private transfer or private trade happened, not who paid whom how much (and not exact size when max size privacy is on)</li>
+        <li>That a private transfer happened, not who paid whom or how much</li>
+        <li>A private swap&apos;s tokens and amounts, not who swapped</li>
         <li>Not (goal) your exact private bag while it stays inside</li>
       </ul>
 
@@ -83,8 +85,8 @@ export default function DocsEncryptionPage() {
       <p>
         Cash out is not invisible, leaving the vault is a public moment.
         Private send hides payment size and counterparty, not the fact that the
-        vault was used. Private trade hides size (default min-out floor) but
-        pair and caller remain public.
+        vault was used. A <Link href="/docs/private-swaps">private swap</Link>{" "}
+        hides who swapped, not the tokens or the amounts.
       </p>
 
       <p>

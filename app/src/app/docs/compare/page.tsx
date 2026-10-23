@@ -234,6 +234,16 @@ export default function DocsComparePage() {
         </li>
       </ul>
 
+      <h2 id="swaps">What about trading?</h2>
+      <p>
+        A trade mixes many people&apos;s orders, which is the committee job
+        above. Gloam keeps the owner model for swaps too. A{" "}
+        <Link href="/docs/private-swaps">private swap</Link> spends one note
+        with one proof made on your device, trades on a public DEX, and puts
+        the output back as a new note. Who swapped stays private. The tokens
+        and the amounts are public, like any DEX trade.
+      </p>
+
       <h2 id="short-version">The short version</h2>
       <p>
         We found no other product on Tempo or Robinhood Chain that combines

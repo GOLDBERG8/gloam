@@ -5,60 +5,66 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 
 export const metadata: Metadata = {
-  title: "Private trade",
+  title: "Sealed trade (retired)",
   description:
-    "What private trade means on Gloam, why it is off on mainnet and switched off on testnet while we build a new engine for it, and how stock tokens can already be held and sent privately on testnet.",
+    "Gloam's first private trade design, the sealed swap, is retired and stays off on every network. Private swaps replaced it on Robinhood Chain and Tempo mainnet.",
 };
 
 export default function DocsSealedTradePage() {
   return (
     <DocsLayout
-      title="Private trade"
-      lede="Trade one asset for another from your private balance, with your size kept private. It is not live anywhere: the mainnet pools take payments only, and on testnet the built version is switched off while we build a new engine for private trading. Stock tokens can already be held and sent privately on testnet."
+      title="Sealed trade (retired)"
+      lede="The sealed swap was Gloam's first design for private trading. It is retired and stays off on every network. Private swaps replaced it: you swap straight from your private balance on Robinhood Chain and Tempo mainnet."
       glance={[
-        { label: "Mainnet", value: "Off, payments only" },
-        { label: "Testnet", value: "Built, switched off" },
-        { label: "Next", value: "New engine underway" },
+        { label: "Sealed trade", value: "Retired, stays off" },
+        { label: "Replaced by", value: "Private swaps" },
+        { label: "Mainnet vault", value: "No sealed swap code" },
         { label: "Fake fills", value: "Never" },
       ]}
     >
-      <h2>Why it is switched off</h2>
+      <h2 id="replaced">What replaced it</h2>
       <p>
-        A payment has one owner, so the owner can prove it alone. A trade is
-        different: it mixes many people&apos;s orders against shared
-        liquidity. That needs its own design, so we are building a new engine
-        for private trading instead of stretching the payment one.
+        <Link href="/docs/private-swaps">Private swaps</Link>{" "}
+        are live on
+        Robinhood Chain and Tempo mainnet, under Vault &gt; Swap. One
+        transaction takes a note out of the vault, swaps it on a public DEX
+        for an exact amount, and puts the output back as a new private note.
       </p>
       <p>
-        The first version showed why. A sealed swap spends an{" "}
-        <code>assetIn</code> note and mints an <code>assetOut</code> note with
-        both amounts private, but no tokens move, so the pool ends up owing{" "}
-        <code>assetOut</code> it does not physically hold (audit H1). Rather
-        than ship an insolvent swap or reveal your size to fix the accounting,
-        the on-chain verifier on the testnet pools is set to zero and the swap
-        is off. Turning it on again there goes through the 3-day timelock.
-        Shield, private send and cash out are live and solvent in the meantime.
+        The trade-off is different. A private swap keeps who swapped private,
+        and the tokens and amounts are public, like any DEX trade. The sealed
+        swap tried to keep the size private too, and could not stay solvent
+        doing it.
+      </p>
+
+      <h2 id="why-retired">Why it was retired</h2>
+      <p>
+        A sealed swap spends an <code>assetIn</code> note and mints an{" "}
+        <code>assetOut</code> note with both amounts private, but no tokens
+        move, so the pool ends up owing <code>assetOut</code> it does not
+        physically hold (audit H1). Rather than ship an insolvent swap or
+        reveal your size to fix the accounting, the on-chain verifier on the
+        testnet pools is set to zero and the swap stays off.
       </p>
       <p>
         <strong>On mainnet there is nothing to switch on.</strong> The mainnet
-        pools (<code>ShieldPoolPayments</code>) take payments only and have no
-        sealed swap at all. Private trading comes to mainnet only with the new
-        engine.
+        vaults (<code>ShieldPoolPayments</code>) have no sealed swap code at
+        all. Private swaps do not change that: their routers are separate
+        contracts that use only the vault&apos;s normal calls.
       </p>
 
       <h2 id="stock-tokens">Stock tokens today</h2>
       <p>
-        On Robinhood Chain testnet you can already{" "}
+        On Robinhood Chain testnet you can{" "}
         <AppLink href="/app/vault?tab=shield">shield</AppLink> stock tokens (TSLA, AMZN, PLTR,
         NFLX and AMD on testnet), hold them privately, and{" "}
-        <AppLink href="/app/vault?tab=move">send them privately</AppLink>. Trading them
-        privately is the part that waits for the new engine. Stock tokens are
-        not on mainnet.
+        <AppLink href="/app/vault?tab=move">send them privately</AppLink>. Stock tokens
+        are not on mainnet, and private swaps do not cover them.
       </p>
 
-      <h2>How the built version works (switched off)</h2>
+      <h2 id="how-it-worked">How the sealed trade worked</h2>
       <FlowDiagram
-        title="Private trade (sealed path)"
+        title="Sealed trade (retired)"
         steps={[
           {
             n: "1",
@@ -78,21 +84,13 @@ export default function DocsSealedTradePage() {
         ]}
       />
       <p>
-        Testnet rates use <strong>coarsened display marks</strong> (Yahoo /
-        CoinGecko for the UI), not an on-chain oracle. If marks fail, 1:1
-        fallback. Dev ceremony keys only.
-      </p>
-      <p>
-        <strong>Size privacy (default on when enabled):</strong> the public{" "}
-        <code>amountOutMin</code> is a 1-wei floor, not your real output (an
-        earlier build leaked size by setting min-out to the exact amount; the
-        sealed path fixes that). Rates and asset pair are public. Cash out
-        publishes amount. See{" "}
-        <Link href="/docs/privacy-model">privacy model</Link> ·{" "}
-        <Link href="/docs/production">production gate</Link>.
+        Rates came from <strong>coarsened display marks</strong> (Yahoo and
+        CoinGecko), not an on-chain oracle, and it ran on dev ceremony keys
+        only. The public <code>amountOutMin</code> was a 1-wei floor, so the
+        size did not show, while the rates and the asset pair did.
       </p>
 
-      <h2>Vault trade adapter (fallback)</h2>
+      <h2 id="vault-adapter">Vault trade adapter (testnet)</h2>
       <FlowDiagram
         title="From vault (public swap step)"
         steps={[
@@ -114,93 +112,33 @@ export default function DocsSealedTradePage() {
         ]}
       />
       <p>
-        Useful on thin books. <strong>Not</strong> sealed trade: the swap edge
-        still leaks size. The product shows both paths honestly.
+        This path stays on the Robinhood Chain testnet Trade tab. Your wallet
+        shows on both public edges. On mainnet, use{" "}
+        <Link href="/docs/private-swaps">private swaps</Link> instead: the
+        relay sends them and your wallet never shows.
       </p>
 
-      <h2>What “sealed” means</h2>
+      <h2 id="will-not">What we will not do</h2>
       <ul>
-        <li>
-          Public observers do not get your exact size as a free signal (with max
-          size privacy on)
-        </li>
-        <li>Settlement still ends on-chain (we do not claim invisibility)</li>
-        <li>No theatrical “private success” without a real proof</li>
-        <li>
-          Explorer shows <code>sealedSwap</code> + pair, not a Uniswap fill
-        </li>
-      </ul>
-
-      <h2>What ships next</h2>
-      <ol>
-        <li>
-          <strong>A new engine for private trading</strong>, built for many
-          people&apos;s orders, that keeps size private and the pool solvent.
-          It is underway. Notes on the solvency side are in{" "}
-          <code>contracts/audit/H1-CONFIDENTIAL-SWAP-DESIGN.md</code>.
-        </li>
-        <li>
-          <strong>On-chain rates</strong>, replace display-mark rates with
-          oracle-bound or pool-bound pricing (Pyth / AMM). Full write-up:{" "}
-          <Link href="/docs/data">Prices &amp; oracles</Link>.
-        </li>
-        <li>
-          <strong>Vault inventory</strong>, seed faucet stocks so cash-out after
-          a sealed trade does not fail for empty <code>deposited</code>.
-        </li>
-        <li>
-          <strong>Production keys for trading</strong>. The 13-contributor
-          ceremony covered the payment and proof circuits that mainnet uses, not
-          the trading circuit, so a trading engine needs multi-party keys of its
-          own before it touches real money.
-        </li>
-        <li>
-          <strong>Ethereum expansion</strong>, same private rails where the
-          largest onchain audience already sits.
-        </li>
-        <li>
-          <strong>Deeper liquidity design</strong>, intent batching or
-          vault-native pool when books are thin.
-        </li>
-      </ol>
-      <p>
-        Each step keeps the same rule: no fake private fills. See{" "}
-        <Link href="/docs/production">Production gate</Link>.
-      </p>
-
-      <h2>What we will not do</h2>
-      <ul>
-        <li>Hide a public swap behind a “private” button</li>
+        <li>Hide a public swap behind a “private” button without saying what shows</li>
         <li>Claim production readiness on dev proving keys</li>
-        <li>Promise dark-pool guarantees on thin testnet liquidity</li>
+        <li>Turn the sealed swap back on</li>
       </ul>
 
-      <h2>Repo pointers</h2>
+      <h2 id="repo">Repo pointers</h2>
       <ul>
         <li>
-          Engineering design: <code>contracts/SEALED_TRADE.md</code>
+          Sealed trade design, for history: <code>contracts/SEALED_TRADE.md</code>
         </li>
         <li>
-          Status helper: <code>app/src/lib/sealedTrade.ts</code> (
-          <code>sealedTradeReady() === true</code> when artifacts ship; panel
-          still checks the on-chain verifier)
-        </li>
-        <li>
-          UI: <code>app/src/components/app/SealedTradePanel.tsx</code>
+          Private swaps: <code>contracts/src/GloamVaultSwap.sol</code> and{" "}
+          <code>app/src/lib/vaultSwap.ts</code>
         </li>
         <li>
           Production keys gate:{" "}
           <Link href="/docs/production">/docs/production</Link>
         </li>
       </ul>
-
-      <p>
-        Private trade is off on mainnet and switched off on-chain on testnet,
-        so the trade panel shows it as disabled until the new engine is ready. Available today: the{" "}
-        <AppLink href="/app/vault?tab=trade&path=vault">from-vault adapter</AppLink> (honest,
-        not sealed), and <AppLink href="/app/vault?tab=move">Move</AppLink> to hold and send
-        privately.
-      </p>
     </DocsLayout>
   );
 }

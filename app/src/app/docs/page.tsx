@@ -110,6 +110,11 @@ export default function DocsOverviewPage() {
         </li>
         <li>Cash out with a real zero-knowledge proof</li>
         <li>
+          <Link href="/docs/private-swaps">Private swaps</Link> on Robinhood
+          Chain and Tempo mainnet: swap from your private balance, with who
+          swapped kept private and the amounts public
+        </li>
+        <li>
           Proofs anyone can check at <Link href="/verify">/verify</Link>, in
           their own browser
         </li>
@@ -139,9 +144,10 @@ export default function DocsOverviewPage() {
       <h2 id="not-yet">What does not work yet</h2>
       <ul>
         <li>
-          <Link href="/docs/sealed-trade">Private trade</Link>: off on mainnet
-          and testnet while we build a new engine for it. Stock tokens can
-          already be held and sent privately on testnet
+          Private swaps on the testnets, and swaps of stock tokens. Stock
+          tokens can be held and sent privately on Robinhood Chain testnet.
+          The old <Link href="/docs/sealed-trade">sealed trade</Link> is
+          retired
         </li>
         <li>
           <Link href="/docs/data">On-chain price oracles</Link> (no Chainlink /
@@ -178,7 +184,7 @@ export default function DocsOverviewPage() {
           <Link href="/docs/production">Production gate</Link>
         </li>
         <li>
-          <Link href="/docs/sealed-trade">Private trade</Link>
+          <Link href="/docs/private-swaps">Private swaps</Link>
         </li>
         <li>
           <Link href="/docs/data">Prices, data &amp; oracles</Link>

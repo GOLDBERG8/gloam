@@ -76,7 +76,7 @@ export default function DocsProofsPage() {
       </p>
       <p>
         The checker confirms that every payment in it is a private payment inside
-        the vault that you sent from your own balance. A deposit, a trade, the
+        the vault that you sent from your own balance. A deposit, a swap, the
         change from a payment, or a payment someone sent you cannot be counted,
         and no payment can be counted twice.
       </p>

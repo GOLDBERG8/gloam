@@ -266,8 +266,9 @@ await wallet.writeContract({
         from the 13-contributor ceremony, under beta deposit limits, after an
         internal review; an external audit is planned. The testnets run on
         dev-ceremony keys with test funds. Everything here is real: real proofs,
-        real on-chain state, no mocks. Private trade is off on mainnet (the
-        mainnet pools have no sealed swap) and on testnet. See{" "}
+        real on-chain state, no mocks. Private swaps run in the app on both
+        mainnets (<Link href="/docs/private-swaps">private swaps</Link>); the
+        SDK does not build them yet. The old sealed trade is retired. See{" "}
         <Link href="/docs/production">the production gate</Link>.
       </p>
     </DocsLayout>
