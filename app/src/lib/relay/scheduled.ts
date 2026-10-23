@@ -22,6 +22,13 @@
  * instead of going out twice. The relay itself refuses a second copy of a
  * spend while one is in flight (lib/relay/inflight).
  *
+ * A proof also carries the vault root it was made against, and the vault keeps
+ * every root, so anyone who rebuilds the tree can tell roughly when a waiting
+ * proof was made. While the app is open it makes a fresh proof of the same
+ * cash out and swaps it in (replaceJobProof): same job, same spend, recipient,
+ * amount, asset and send time, only a later root. One that goes out while the
+ * app is closed keeps the root of its last proof.
+ *
  * Once the relay may have handed a job to the node (a timeout, a lost reply,
  * any answer that is not a clear refusal), the job stays "sending" until the
  * chain settles it: it is never cancelled, failed or said to be unsent on a
@@ -353,6 +360,72 @@ export async function cancelJob(store: JobStore, id: string, now: number): Promi
     if (job.status !== "scheduled") return job.status;
     await store.put(retire({ ...job, status: "cancelled", updatedAt: now }, "cancelled"));
     return "cancelled";
+  } finally {
+    await release();
+  }
+}
+
+// ---------------------------------------------------------------- a fresher proof
+
+/** A waiting job's proof is swapped only while its send time is at least this far off, so the runner never meets it mid-change. */
+export const REPROVE_MIN_LEAD_MS = 60 * 1000;
+
+/** A newer proof of a waiting cash out: it must be the same spend, paying the same amount of the same asset to the same address. */
+export type ProofReplacement = {
+  chainId: number;
+  proof: Hex;
+  root: Hex;
+  nullifier: Hex;
+  asset: Address;
+  to: Address;
+  /** Base units, as a decimal string. */
+  amount: string;
+};
+
+export type ReplaceRefusal =
+  /** No such job. */
+  | "not_found"
+  /** It is no longer waiting untouched: sending, sent, over, or a send was already tried. */
+  | "not_live"
+  /** Its send time is under REPROVE_MIN_LEAD_MS away (or past). */
+  | "too_late"
+  /** Another spend, chain, recipient, amount or asset. */
+  | "mismatch"
+  /** Another run holds the job right now. */
+  | "busy";
+
+/** Why `next` can't replace `job`'s proof at `now`, or null when it can. */
+export function replaceRefusal(job: CashOutJob | null, next: ProofReplacement, now: number): ReplaceRefusal | null {
+  if (!job) return "not_found";
+  // A job a run already tried may be on its way: only the chain settles it now.
+  if (job.status !== "scheduled" || job.attempts > 0 || job.maybeSent) return "not_live";
+  if (job.sendAfter - now < REPROVE_MIN_LEAD_MS) return "too_late";
+  const same =
+    job.chainId === next.chainId && job.nullifier.toLowerCase() === next.nullifier.toLowerCase() && sameCashOut(job, next);
+  return same ? null : "mismatch";
+}
+
+export type ReplaceOutcome = { ok: true; job: CashOutJob } | { ok: false; code: ReplaceRefusal; job?: CashOutJob };
+
+/**
+ * Swaps a waiting job's proof and root for a newer proof of the same cash
+ * out, under the job's lock (so a run can't take it mid-change). The job keeps
+ * its id, send time, spend, recipient, amount and asset, and stays the one job
+ * for its spend: nothing new is created, and a refused swap leaves the old
+ * proof as it was. The caller dry-runs the new proof first
+ * (lib/relay/server checkUnshieldForLater), so only a proof the vault takes
+ * now replaces one it took before.
+ */
+export async function replaceJobProof(store: JobStore, id: string, next: ProofReplacement, now: number): Promise<ReplaceOutcome> {
+  const release = await store.lock(id, 30);
+  if (!release) return { ok: false, code: "busy" };
+  try {
+    const job = await store.get(id);
+    const code = replaceRefusal(job, next, now);
+    if (code) return job ? { ok: false, code, job } : { ok: false, code };
+    const replaced: CashOutJob = { ...job!, proof: next.proof, root: next.root, updatedAt: now };
+    await store.put(replaced);
+    return { ok: true, job: replaced };
   } finally {
     await release();
   }
