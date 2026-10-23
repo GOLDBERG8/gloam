@@ -7,7 +7,8 @@
  * read; rotation keeps old keys opening; the recovery export and import still
  * round-trip; concurrent first use makes one address, not several; a value
  * that will not open is set aside, not destroyed; and turning a passkey on
- * reseals the keys with the notes.
+ * reseals the keys with the notes. A padded sealed ticket (L-2) opens to the
+ * same payment in the app and in the SDK, which both trim the padding.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-receive-keys.mts
  */
@@ -160,6 +161,34 @@ await test("turning a passkey on reseals the receive keys with the notes", async
   await vault.removeVaultPasskey(prf);
   assert.equal((await rt.getOrCreateReceiveIdentity()).tag, id.tag);
   assertNoPlainKeys();
+});
+
+await test("a padded sealed ticket opens to the same payment in the app and in the SDK", async () => {
+  const { buildNotePackage, decodeNotePackage, encodeNotePackage } = await import("../src/lib/notePackage");
+  const sdk = await import("@gloamtrade/sdk");
+  clearReceiveSlots();
+  const id = await rt.getOrCreateReceiveIdentity();
+  const pack = buildNotePackage({
+    pool: "0x39e28cDe55caB798874746aC52Cb4B5Cc99a0194",
+    asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    amountWei: "100000000",
+    secret: ("0x" + "1f".repeat(32)) as `0x${string}`,
+    commitment: ("0x" + "2e".repeat(32)) as `0x${string}`,
+    note: "rent",
+  });
+  const code = encodeNotePackage(pack);
+  const sealed = await rt.encryptTicketForTag(code, id.tag);
+  assert.equal(await rt.decryptTicketWithLocalTag(sealed), code);
+  const inApp = await decodeNotePackage(sealed, undefined, { tryTagDecrypt: true });
+  assert.deepEqual([inApp.amountWei, inApp.secret, inApp.commitment, inApp.note], [pack.amountWei, pack.secret, pack.commitment, "rent"]);
+  // what an app or SDK reads straight out of AES-GCM: the code, then spaces up to the step
+  const { current } = await rt.exportReceiveKeys();
+  const opened = await sdk.openSealedTicket(sealed, current!.privateJwk);
+  assert.equal(opened.length, 512);
+  assert.equal(opened.trimEnd(), code);
+  const inSdk = sdk.decodeNotePackage(opened);
+  assert.deepEqual([inSdk.amountWei, inSdk.secret, inSdk.commitment, inSdk.note], [pack.amountWei, pack.secret, pack.commitment, "rent"]);
+  assert.equal((await decodeNotePackage(opened)).commitment, pack.commitment, "the app's decoder trims it too");
 });
 
 console.log(`\n${passed} receive-key checks passed`);

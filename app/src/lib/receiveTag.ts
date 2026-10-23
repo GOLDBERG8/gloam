@@ -291,8 +291,32 @@ async function ecdhAesKey(
   );
 }
 
+/** Sealed tickets grow in steps of this many bytes before they are encrypted. */
+const SEAL_PAD_STEP = 512;
 /**
- * Encrypt a payment ticket JSON string for a receive tag.
+ * The largest plaintext a ticket can be (a 78-digit amount and an 80-character
+ * note at its worst, RELAY_MEMO_MAX_BYTES in lib/relay/server has the sums):
+ * the last step stops here, so padding never makes a ticket bigger than the
+ * biggest one already was.
+ */
+const SEAL_PAD_MAX = 1158;
+
+/**
+ * Pads a ticket with spaces to the next 512-byte step (512, 1024, then 1158),
+ * so a payment message's length on the public board no longer gives away how
+ * many digits the amount has or how long the note is. Readers trim it: the
+ * app's and the SDK's decodeNotePackage, and decryptTicketWithLocalTag here.
+ */
+export function padSealed(raw: Uint8Array): Uint8Array {
+  const size = Math.min(Math.ceil(raw.length / SEAL_PAD_STEP) * SEAL_PAD_STEP, SEAL_PAD_MAX);
+  if (raw.length >= size) return raw;
+  const out = new Uint8Array(size).fill(0x20);
+  out.set(raw);
+  return out;
+}
+
+/**
+ * Encrypt a payment ticket JSON string for a receive tag, padded (padSealed).
  * Returns gloam2t.… for handoff (QR/share), only tag owner can open.
  */
 export async function encryptTicketForTag(
@@ -316,7 +340,7 @@ export async function encryptTicketForTag(
     await crypto.subtle.encrypt(
       { name: "AES-GCM", iv: buf(iv) },
       aes,
-      buf(new TextEncoder().encode(plainTicketJsonOrGloam1))
+      buf(padSealed(new TextEncoder().encode(plainTicketJsonOrGloam1)))
     )
   );
 
@@ -332,7 +356,8 @@ export async function encryptTicketForTag(
 }
 
 /**
- * Decrypt gloam2t.… using this browser’s receive identity.
+ * Decrypt gloam2t.… using this browser’s receive identity. Returns the ticket
+ * as it was sealed, without the padding.
  */
 export async function decryptTicketWithLocalTag(
   sealed: string
@@ -367,7 +392,7 @@ export async function decryptTicketWithLocalTag(
           buf(cipher)
         )
       );
-      return new TextDecoder().decode(plain);
+      return new TextDecoder().decode(plain).trimEnd();
     } catch {
       /* not for this key */
     }

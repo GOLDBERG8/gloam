@@ -378,6 +378,9 @@ export function asAmount(v: unknown): bigint {
  *   sealed      2 + 91 (P-256 key) + 12 (IV) + 1158 + 16 (GCM tag) = 1279
  *   gloam2t.    8 + base64url(1279) = 8 + 1706 = 1714
  *
+ * The app pads every ticket before sealing it (lib/receiveTag padSealed) to
+ * 512, 1024 or at most 1158 bytes, so padding never takes one past 1714.
+ *
  * 2048 leaves 334 bytes over that worst case (over 600 for a note of real
  * characters), and a junk message costs the relay a quarter of what the board
  * would take.
