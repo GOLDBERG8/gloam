@@ -32,13 +32,15 @@ import {
   withdrawFeeOf,
   type LocalNote,
 } from "@/lib/shield";
-import { knownTokens, type OnchainToken } from "@/lib/tokens";
+import { knownTokens, shieldTokensFor, type OnchainToken } from "@/lib/tokens";
 import {
   QUOTE_TTL_MS,
   VAULT_SWAP_ASSETS,
   planVaultSwap,
   quoteFresh,
+  routeCurrencies,
   swapBufferBps,
+  swapRouterFor,
   vaultSwapRouter,
   type SwapPlan,
 } from "@/lib/vaultSwap";
@@ -285,15 +287,23 @@ export function VaultSwapView() {
   // right before it goes (lib/vaultSwapRun).
   const quoteAmount = typed !== null && !amountBad ? typed : null;
   const quoteKey =
-    payAsset && toAsset && feeBps != null && quoteAmount !== null ? `${payAsset}|${toAsset}|${quoteAmount}|${feeBps}` : null;
+    router && payAsset && toAsset && feeBps != null && quoteAmount !== null
+      ? `${router}|${payAsset}|${toAsset}|${quoteAmount}|${feeBps}`
+      : null;
   useEffect(() => {
-    if (!quoteKey || !payAsset || !toAsset || feeBps == null || quoteAmount === null || busy) return;
+    if (!quoteKey || !router || !payAsset || !toAsset || feeBps == null || quoteAmount === null || busy) return;
     let live = true;
     const t = window.setTimeout(() => {
       setQuoting(true);
       setQuoteError(null);
       const key = quoteKey;
-      planVaultSwap(getRhPublicClient(), network.chainId, { assetIn: payAsset, assetOut: toAsset, amountIn: quoteAmount, feeBps })
+      planVaultSwap(getRhPublicClient(), network.chainId, {
+        assetIn: payAsset,
+        assetOut: toAsset,
+        amountIn: quoteAmount,
+        feeBps,
+        router,
+      })
         .then((p) => live && setQuote({ key, plan: p, at: Date.now() }))
         .catch((e) => {
           if (!live) return;
@@ -317,7 +327,9 @@ export function VaultSwapView() {
   const priceError = shownPlan ? null : quoteError;
   const waitingQuote = Boolean(quoteKey) && !shownPlan && !priceError;
 
-  // The vault's beta deposit limits apply to what lands.
+  // The vault's beta deposit limits apply to what lands. A token it has no
+  // limit for at all is one it doesn't take yet.
+  const vaultClosed = Boolean(limit && limit[0] === 0n && limit[1] === 0n);
   const room =
     limit && typeof inVault === "bigint"
       ? (() => {
@@ -326,7 +338,7 @@ export function VaultSwapView() {
           return per < left ? per : left;
         })()
       : null;
-  const overRoom = Boolean(shownPlan && room != null && shownPlan.amountOut > room);
+  const overRoom = Boolean(shownPlan && room != null && shownPlan.amountOut > room && !vaultClosed);
 
   if (!router) return null;
 
@@ -401,6 +413,8 @@ export function VaultSwapView() {
   }
 
   const venue = network.chainId === 4217 ? "Tempo's stablecoin exchange" : "Uniswap on Robinhood Chain";
+  // What Add takes of the swap tokens (WETH, say, arrives only by swapping into it).
+  const addable = assets.filter((a) => shieldTokensFor(network.chainId).some((t) => same(t.address, a)));
   const payUsd = payAsset && typed !== null && typed > 0n ? usdOf(typed, payAsset, marks) : null;
   const getUsd = shownPlan && toAsset ? usdOf(shownPlan.amountOut, toAsset, marks) : null;
   const receiveText = shownPlan && toAsset ? formatAssetAmount(shownPlan.amountOut, toAsset) : "0";
@@ -438,7 +452,9 @@ export function VaultSwapView() {
                 }
               : priceError
                 ? { key: "noprice", label: "No price for this amount", ready: false }
-                : overRoom
+                : vaultClosed && toAsset
+                  ? { key: "closed", label: `The vault doesn't take ${assetLabel(toAsset)} yet`, ready: false }
+                  : overRoom
                   ? { key: "room", label: "Too large for the vault right now", ready: false }
                   : relayOk === false
                     ? { key: "relay", label: "The Gloam relay is off", ready: false }
@@ -624,7 +640,7 @@ export function VaultSwapView() {
                     <Row term={`Price buffer (${formatFeePercent(swapBufferBps(network.chainId))})`}>
                       about {formatAssetLabel(shownPlan.leftover, payAsset)} to the treasury
                     </Row>
-                    <Row term="Route">{routeLine(network.chainId, payAsset, shownPlan, venue)}</Row>
+                    <Row term="Route">{routeLine(network.chainId, payAsset, toAsset, shownPlan, venue)}</Row>
                     <Row term="Sent by">The Gloam relay, not your wallet</Row>
                   </dl>
                   </div>
@@ -634,9 +650,9 @@ export function VaultSwapView() {
 
             {(!notes.length || priceError || overRoom || relayOk === false || (note && amount !== null && amount < BigInt(note.amountWei))) && (
               <div className="gl-settle mt-4 space-y-2.5 px-1 text-[12.5px] leading-[1.6]">
-                {!notes.length && (
+                {!notes.length && addable.length > 0 && (
                   <p className="text-mute">
-                    You can check prices now. To swap, add {assets.map(assetLabel).join(" or ")} to your private balance first, in Add.
+                    You can check prices now. To swap, add {listOr(addable.map(assetLabel))} to your private balance first, in Add.
                   </p>
                 )}
                 {priceError && <p className="text-warn">{priceError}</p>}
@@ -716,19 +732,25 @@ function rateLine(amountIn: bigint, assetIn: string, amountOut: bigint, assetOut
   return `1 ${assetLabel(from)} ≈ ${r.toLocaleString("en-US", { maximumFractionDigits: digits })} ${assetLabel(to)}`;
 }
 
-/** "USDG → ETH → GLOAM on Uniswap on Robinhood Chain": the hops the swap takes. */
-function routeLine(chainId: number, assetIn: string, plan: SwapPlan, venue: string): string {
+/**
+ * "USDG → ETH → GLOAM on Uniswap on Robinhood Chain": the hops the swap takes,
+ * worked out as the router does (lib/vaultSwap routeCurrencies). The ends show
+ * as the two tokens, so a WETH note paid in ETH at the first pool reads WETH.
+ */
+function routeLine(chainId: number, assetIn: Address, assetOut: Address, plan: SwapPlan, venue: string): string {
   if (!plan.route.length) return `Direct on ${venue}`;
-  const path = [assetIn];
-  let at = assetIn.toLowerCase();
-  for (const hop of plan.route) {
-    const c0 = String(hop.currency0).toLowerCase();
-    const next = c0 === at ? String(hop.currency1) : String(hop.currency0);
-    path.push(next);
-    at = next.toLowerCase();
-  }
-  const names = path.map((a) => (same(a, ZERO) ? "ETH" : (tokenFor(chainId, a)?.symbol ?? assetLabel(a))));
+  const r = swapRouterFor(chainId, plan.router);
+  const path = r ? routeCurrencies(r, assetIn, assetOut, plan.route) : null;
+  if (!path) return `On ${venue}`;
+  const name = (a: string) => (same(a, ZERO) ? "ETH" : (tokenFor(chainId, a)?.symbol ?? assetLabel(a)));
+  const names = path.map((a, i) => name(i === 0 ? assetIn : i === path.length - 1 ? assetOut : a));
   return `${names.join(" → ")} on ${venue}`;
+}
+
+/** "USDG", "USDG or GLOAM", "USDG, GLOAM or WETH". */
+function listOr(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
 }
 
 function Row({ term, children }: { term: string; children: ReactNode }) {
