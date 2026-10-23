@@ -405,7 +405,10 @@ export function MoveView() {
   const pendingMemo = useRef<{
     paymentCommitment: Hex;
     ticket: string;
+    /** The payment went out through the relay: its heads-up must too, never from the wallet. */
     relay: boolean;
+    /** The relay was up at send time: a wallet payment's heads-up goes through it first, with no second prompt. */
+    relayFirst: boolean;
   } | null>(null);
 
   // Confirm path: transfer → optional on-chain memo → share UI
@@ -515,7 +518,7 @@ export function MoveView() {
         setStatus("Letting them know privately…");
         pendingAction.current = "memo";
         handledHash.current = null;
-        if (m.relay) {
+        if (m.relay || m.relayFirst) {
           try {
             const h = await relayMemo({
               chainId: network.chainId,
@@ -523,7 +526,21 @@ export function MoveView() {
               memo: ticketToMemoBytes(m.ticket),
             });
             setRelayHash(h);
+            return;
           } catch (e) {
+            // A payment sent from the wallet already shows the wallet, so its heads-up can still go
+            // from there: the one wallet prompt below. A hidden payment's never does.
+            if (!m.relay) {
+              writeContract({
+                address: payMemoAddress()!,
+                abi: payMemoAbi,
+                functionName: "postMemo",
+                args: [m.paymentCommitment, ticketToMemoBytes(m.ticket)],
+                gas: gasFor(network.chainId, MEMO_GAS_LIMIT),
+                chainId: network.chainId,
+              });
+              return;
+            }
             // Payment already landed; only the heads-up failed. Fall back to the link.
             pendingAction.current = null;
             pendingMemo.current = null;
@@ -1088,6 +1105,7 @@ export function MoveView() {
           paymentCommitment: fieldToBytes32(w.publicInputs.newCommitment0),
           ticket: share,
           relay: relayOn,
+          relayFirst: relayAvailable,
         };
       } else {
         pendingMemo.current = null;

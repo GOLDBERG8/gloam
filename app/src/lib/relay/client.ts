@@ -150,10 +150,23 @@ export async function relayVaultSwap(p: {
   return (await post({ action: "swap", ...p })).hash;
 }
 
+/**
+ * The relay reads the payment from its own node, which can be a few seconds
+ * behind the one that confirmed it here: "not in the vault yet" is tried again.
+ */
+export const MEMO_NOT_SEEN_RETRY = { tries: 3, delayMs: 2_500 };
+
 /** A payment's heads-up, with its memo ticket when this tab relayed the payment. */
 export async function relayMemo(p: { chainId: number; paymentCommitment: Hex; memo: Hex }): Promise<Hex> {
   const ticket = memoTickets.get(p.paymentCommitment.toLowerCase());
-  return (await post({ action: "memo", ...p, ...(ticket ? { ticket } : {}) })).hash;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return (await post({ action: "memo", ...p, ...(ticket ? { ticket } : {}) })).hash;
+    } catch (e) {
+      if (!(e instanceof RelaySubmitError && e.code === "not_seen") || attempt >= MEMO_NOT_SEEN_RETRY.tries) throw e;
+      await new Promise((r) => setTimeout(r, MEMO_NOT_SEEN_RETRY.delayMs));
+    }
+  }
 }
 
 /** Wait for a relayed tx on the active network. */
