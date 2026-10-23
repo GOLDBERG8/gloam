@@ -67,8 +67,8 @@ export function HowChoice({
   disabled?: boolean;
 }) {
   const options = [
+    [false, "Now", "Arrives in one go"],
     [true, "Privately", `${pieceCount} pieces over ${windowWords(window)}`],
-    [false, "All at once", "One cash out"],
   ] as const;
   return (
     <div>
@@ -106,6 +106,11 @@ export function HowChoice({
           );
         })}
       </div>
+      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+        {privately
+          ? `It arrives in pieces at different times over ${windowWords(window)}, so it is much harder to match to what you added. You can cancel any piece before it goes.`
+          : "Want it harder to trace? Privately sends it in a few pieces at different times, so it can't easily be matched to what you added."}
+      </p>
     </div>
   );
 }

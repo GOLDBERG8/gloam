@@ -145,13 +145,14 @@ export default function DocsPrivacyPage() {
           way until the network settles it.
         </li>
         <li>
-          <strong>In pieces.</strong> For a stablecoin above 5, the default is
-          to cash out privately: 2 to 4 pieces of ordinary sizes, none matching
-          money you added or were paid recently, each sent later at its own
-          random time. Pieces that all land at one address can still be added
-          up there, so a busy address (an exchange deposit address, say) or a
-          different address for each piece hides more. &quot;Send it all
-          now&quot; is always one tap away.
+          <strong>In pieces.</strong> A cash out arrives at once by default.
+          For a stablecoin above 5 you can switch on Privately: 2 to 4 pieces
+          of ordinary sizes, none matching money you added or were paid
+          recently, each sent later at its own random time. The app suggests
+          it when an amount matches money you added. Pieces that all land at
+          one address can still be added up there, so a busy address (an
+          exchange deposit address, say) or a different address for each
+          piece hides more.
         </li>
         <li>
           <strong>Another address.</strong> A fresh wallet that never deposited
