@@ -5,7 +5,7 @@
 import type { Address, Hex } from "viem";
 import { getRhPublicClient } from "@/lib/rhClient";
 import { readDemo } from "@/lib/demoFlag";
-import { demoRelay, demoRelayStatus } from "@/lib/demo/chain";
+import { demoRelay, demoRelayStatus, demoWaitForTx } from "@/lib/demo/chain";
 import type { PoolKey } from "@/lib/vaultSwap";
 
 export type RelayNetworkStatus = {
@@ -171,6 +171,7 @@ export async function relayMemo(p: { chainId: number; paymentCommitment: Hex; me
 
 /** Wait for a relayed tx on the active network. */
 export async function waitForTx(hash: Hex, timeoutMs = 120_000): Promise<"success" | "reverted"> {
+  if (readDemo()) return demoWaitForTx(hash, timeoutMs);
   const receipt = await getRhPublicClient().waitForTransactionReceipt({ hash, timeout: timeoutMs, pollingInterval: 1_000 });
   return receipt.status === "success" ? "success" : "reverted";
 }
