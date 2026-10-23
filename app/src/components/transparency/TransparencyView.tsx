@@ -29,6 +29,7 @@ import {
 } from "./ledger";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { RH_MAINNET_TOKENS } from "@/lib/tokens";
+import { vaultSwapRouter } from "@/lib/vaultSwap";
 
 const LOGOS: Record<ChainFamily, string> = {
   robinhood: "/brand/logos/robinhood.png",
@@ -580,14 +581,18 @@ function ActivityCard({ ledger }: { ledger: Ledger }) {
 
 function ContractsCard({ ledger }: { ledger: Ledger }) {
   const n = getNetwork(ledger.network);
+  const router = vaultSwapRouter(n.chainId);
   const rows = [
     { name: "Vault", what: "Holds every private balance", address: ledger.pool },
     ...(ledger.memo ? [{ name: "Payment messages", what: "Encrypted heads-ups for recipients", address: ledger.memo }] : []),
+    ...(router
+      ? [{ name: "Swap router", what: "Private swaps. Each one counts here as a cash-out and a deposit", address: router }]
+      : []),
   ];
   return (
     <div className="gl-card overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4 sm:px-6">
-        <h3 className="text-[15px] font-medium text-foreground">Contracts read here</h3>
+        <h3 className="text-[15px] font-medium text-foreground">Contracts</h3>
         <Link href="/verify#contracts" className="text-[12.5px] text-mute underline-offset-4 transition-colors hover:text-foreground hover:underline">
           Verify them
         </Link>

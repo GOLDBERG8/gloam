@@ -145,7 +145,9 @@ export default function PrivacyPage() {
         The relay receives the proof and its public inputs. For a cash out
         these include the amount, the asset and the address you cash out to,
         which become public on chain anyway. For a private send it sees no
-        amount and no recipient. A payment message it posts for you is
+        amount and no recipient. For a private swap, which always goes through
+        the relay, it sees the tokens and amounts, which become public on chain
+        anyway. A payment message it posts for you is
         encrypted for the recipient, and the relay cannot read it. The relay
         never receives your keys, your note secrets or your private balance,
         and it cannot change where money goes: the most it can do is refuse to
@@ -155,9 +157,10 @@ export default function PrivacyPage() {
         Beyond the transaction itself, which is public on chain, the relay
         keeps only a hashed rate-limit count and, for about three minutes, a
         lock on each spend so the same proof is not sent twice. The relay pays
-        the network fee for what it submits. On mainnet, the only fee Gloam
-        takes is 0.25% of a cash out, kept by the vault; on testnet nothing is
-        charged.
+        the network fee for what it submits. On mainnet, Gloam takes 0.25% of a
+        cash out, kept by the vault. A private swap pays the same 0.25% on the
+        amount swapped, and what its price buffer does not use goes to the
+        Gloam treasury. On testnet nothing is charged.
       </p>
       <h2>7. Sanctions screening</h2>
       <p>

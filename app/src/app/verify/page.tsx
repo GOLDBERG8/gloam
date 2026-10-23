@@ -28,6 +28,7 @@ import { NETWORK_KEYS, getNetwork, type ChainFamily, type GloamNetwork, type Net
 import { track } from "@/lib/track";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { useMainnetLive } from "@/components/MainnetCountdown";
+import { vaultSwapRouter } from "@/lib/vaultSwap";
 
 type Result =
   | { kind: "idle" }
@@ -147,6 +148,14 @@ function chainRows(n: GloamNetwork): Row[] {
       address: n.payMemo.address,
     });
   }
+  const router = vaultSwapRouter(n.chainId);
+  if (router) {
+    rows.push({
+      name: "Swap router",
+      what: "Swaps one note through a public DEX and back into the vault. No owner, no admin, no upgrade.",
+      address: router,
+    });
+  }
   return rows;
 }
 
@@ -228,7 +237,7 @@ const FACTS = [
   },
   {
     title: "The relay cannot redirect",
-    body: "Private sends and cash outs can go through the Gloam relay. The proof fixes where the money goes, so the relay can only submit or refuse.",
+    body: "Private sends and cash outs can go through the Gloam relay, and swaps always do. The proofs fix where the money goes, so the relay can only submit or refuse.",
   },
   {
     title: "Open source",
@@ -598,7 +607,8 @@ export default function VerifyPage() {
                     {live ? (
                       <>
                         Gloam runs on Robinhood Chain and Tempo, on mainnet and on
-                        testnet. The mainnet vaults are for payments only. Every address
+                        testnet. The mainnet vaults hold payments, and private swaps
+                        run through a separate router on each mainnet. Every address
                         links to the public explorer, and the source behind each one
                         is on GitHub.
                       </>

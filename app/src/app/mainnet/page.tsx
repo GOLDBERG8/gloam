@@ -29,6 +29,7 @@ const LIVE = [
   { title: "Robinhood Chain and Tempo", body: "Private payments on both mainnets, for people, teams and agents." },
   { title: "Free to pay", body: "Deposits and private payments are free. Cash-outs carry a 0.25% fee." },
   { title: "$GLOAM, held privately", body: "Shield $GLOAM next to USDG in the Robinhood Chain pool." },
+  { title: "Private swaps", body: "Swap from your private balance on both mainnets. Who swapped stays private; the amounts are public." },
 ];
 
 export default function MainnetPage() {
@@ -77,7 +78,7 @@ export default function MainnetPage() {
                 The same Gloam you can try today, with real money.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-10 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">
               {LIVE.map((l) => (
                 <div key={l.title} className="border-t border-foreground pt-5">
                   <p className="text-[19px] leading-tight tracking-[-0.015em]">{l.title}</p>

@@ -32,9 +32,9 @@ const inside: Stage[] = [
   {
     id: "move",
     label: "Private rails",
-    sub: "Send, trade",
+    sub: "Send, swap",
     detail:
-      "Private send and private trade settle inside the vault. Size stays off the open book by default.",
+      "Private sends settle inside the vault, amount sealed. A private swap trades on a public DEX and lands back in the vault: who swapped stays private, the amounts show.",
   },
 ];
 
