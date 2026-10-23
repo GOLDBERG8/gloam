@@ -3,14 +3,17 @@ import { randomUUID } from "crypto";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import {
   DELAY_WINDOWS,
+  REPROVE_MIN_LEAD_MS,
   cancelJob,
   drawSendAfter,
   isLive,
   jobView,
+  replaceJobProof,
   sameCashOut,
   scheduleJob,
   type CashOutJob,
   type DelayWindow,
+  type ReplaceRefusal,
 } from "@/lib/relay/scheduled";
 import { scheduledStore, scheduledStoreReady } from "@/lib/relay/scheduledStore";
 import { RelayError, checkRateLimit, checkUnshieldForLater, networkForChain } from "@/lib/relay/server";
@@ -25,6 +28,17 @@ const SCHEDULE_PER_HOUR = 20;
 const SCHEDULE_PER_SPEND = 6;
 /** Status reads per sender per minute (the app checks each job now and then). */
 const STATUS_PER_MINUTE = 60;
+/** Newer proofs handed in per sender per hour, and per job (the app renews each waiting one now and then). */
+const REPROVE_PER_HOUR = 60;
+const REPROVE_PER_JOB = 6;
+/** Why a newer proof was not taken. The old one stays, so the cash out goes out as scheduled either way. */
+const REPLACE_REFUSED: Record<ReplaceRefusal, [number, string]> = {
+  not_found: [404, "Unknown cash out."],
+  not_live: [409, "This cash out is no longer waiting, so its proof stays as it is."],
+  too_late: [409, "This cash out goes out in under a minute, so its proof stays as it is."],
+  mismatch: [409, "A newer proof must pay the same amount to the same address from the same balance."],
+  busy: [409, "The relay is working on this cash out right now. Its proof stays as it is."],
+};
 const NO_STORE = { "Cache-Control": "no-store" };
 
 const ID = /^[0-9a-f-]{36}$/;
@@ -42,7 +56,8 @@ function owned(job: CashOutJob) {
 
 /** The live job for this spend answered: the same cash out comes back, another one is refused. */
 function answerExisting(job: CashOutJob, same: boolean) {
-  if (same) return NextResponse.json({ ok: true, ...owned(job) }, { headers: NO_STORE });
+  // existing: the job already waiting, with the proof it was scheduled with (not the one just sent).
+  if (same) return NextResponse.json({ ok: true, existing: true, ...owned(job) }, { headers: NO_STORE });
   const error =
     job.status === "scheduled" && !job.attempts
       ? "Already scheduled to another address. Cancel it first."
@@ -135,6 +150,59 @@ export async function GET(req: Request) {
     const job = await scheduledStore().get(id);
     if (!job) return NextResponse.json({ ok: false, error: "Unknown cash out.", code: "not_found" }, { status: 404, headers: NO_STORE });
     return NextResponse.json({ ok: true, ...jobView(job) }, { headers: NO_STORE });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+function refused(code: ReplaceRefusal) {
+  const [status, error] = REPLACE_REFUSED[code];
+  return NextResponse.json({ ok: false, error, code }, { status, headers: NO_STORE });
+}
+
+/**
+ * A newer proof for a waiting cash out: ?id=<job id>, with the same body as
+ * scheduling it ({ chainId, proof, root, nullifier, asset, to, amount }). A
+ * proof shows roughly when it was made (its root), so the app swaps in a fresh
+ * one while it is open. Taken only for the same spend, recipient, amount and
+ * asset, while the job is still waiting untouched and more than a minute from
+ * its send time, and only after the same checks and dry run as scheduling.
+ * The job keeps its id and send time; nothing new is created. Returns the job
+ * as { id, sendAfter, to }; a refusal leaves the old proof in place.
+ */
+export async function PATCH(req: Request) {
+  try {
+    assertStoreReady();
+    const ip = clientIp(req);
+    await checkRateLimit(ip);
+    if (!(await hitRateLimit(ip, "cashout-later-reprove", REPROVE_PER_HOUR, Date.now(), 3600)).allowed) {
+      throw new RelayError("Too many proof updates from this device. Wait a while.", 429, "rate_limit");
+    }
+    const id = new URL(req.url).searchParams.get("id") ?? "";
+    if (!ID.test(id)) throw new RelayError("Unknown cash out.", 400);
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object") throw new RelayError("Invalid request.");
+    const net = networkForChain(body.chainId);
+    const store = scheduledStore();
+    // Refused before the dry run when it could never be taken (checked again under the job's lock).
+    const before = await store.get(id);
+    if (!before) return refused("not_found");
+    if (before.status !== "scheduled" || before.attempts > 0 || before.maybeSent) return refused("not_live");
+    if (before.sendAfter - Date.now() < REPROVE_MIN_LEAD_MS) return refused("too_late");
+    if (!(await hitRateLimit(id, "cashout-later-reprove-job", REPROVE_PER_JOB, Date.now(), 3600)).allowed) {
+      throw new RelayError("This cash out's proof was updated too many times. Wait a while.", 429, "rate_limit");
+    }
+    // Everything scheduling checks: the recipient, screening, an unspent note, a known root, and the dry run.
+    const call = await checkUnshieldForLater(net, body);
+    const [proof, root, nullifier, asset, to, amount] = call.args;
+    const r = await replaceJobProof(
+      store,
+      id,
+      { chainId: net.chainId, proof, root, nullifier, asset, to, amount: amount.toString() },
+      Date.now()
+    );
+    if (!r.ok) return refused(r.code);
+    return NextResponse.json({ ok: true, ...owned(r.job) }, { headers: NO_STORE });
   } catch (e) {
     return fail(e);
   }

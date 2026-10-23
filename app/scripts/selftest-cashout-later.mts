@@ -53,10 +53,13 @@ const {
   MAX_DELAY_MS,
   MIN_DELAY_MS,
   SENDING_STALE_MS,
+  REPROVE_MIN_LEAD_MS,
   cancelJob,
   drawSendAfter,
   jobView,
   memoryJobStore,
+  replaceJobProof,
+  replaceRefusal,
   runDueJobs,
   scheduleJob,
 } = await import("../src/lib/relay/scheduled");
@@ -1116,6 +1119,179 @@ await test("8. a job that waited its whole window still goes out: the vault keep
   const { store, chain } = await setup(j);
   assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
   assert.deepEqual(Object.keys(DELAY_WINDOWS), ["hour", "6h", "day"]);
+});
+
+// 9. A waiting proof shows when it was made: the app swaps in a fresher one.
+
+/** The same cash out as `j`, proven again against a later root. */
+const fresher = (j: CashOutJob, over: Partial<Record<"chainId" | "nullifier" | "asset" | "to" | "amount", unknown>> = {}) =>
+  ({
+    chainId: j.chainId,
+    proof: "0xfeed" as Hex,
+    root: hex32(0x9999),
+    nullifier: j.nullifier,
+    asset: j.asset,
+    to: j.to,
+    amount: j.amount,
+    ...over,
+  }) as Parameters<typeof replaceJobProof>[2];
+
+await test("9. a fresher proof of the same cash out replaces the old one: same job, send time, spend, recipient and amount", async () => {
+  const j = job({ sendAfter: T0 + 3_600_000 });
+  const { store, chain } = await setup(j);
+  const r = await replaceJobProof(store, j.id, fresher(j), T0);
+  assert.equal(r.ok, true);
+  const after = (await store.get(j.id))!;
+  assert.equal(after.proof, "0xfeed");
+  assert.equal(after.root, hex32(0x9999));
+  for (const k of ["id", "chainId", "nullifier", "asset", "to", "amount", "sendAfter", "status", "attempts", "createdAt"] as const) {
+    assert.deepEqual(after[k], j[k], k);
+  }
+  // still the one job for its spend, still not due before its time
+  assert.equal(await store.byNullifier(j.chainId, j.nullifier), j.id);
+  assert.deepEqual(await store.due(T0, 10), []);
+  // and at its time it goes out with the new proof: the chain here knows only the new root
+  chain.known.clear();
+  chain.known.add(hex32(0x9999));
+  chain.now = j.sendAfter;
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sent" }]);
+  assert.deepEqual(chain.sends, [j.id]);
+});
+
+await test("9. a fresher proof is refused for another amount, recipient, asset, spend or chain, and the old one stays", async () => {
+  const j = job({ sendAfter: T0 + 3_600_000 });
+  const { store } = await setup(j);
+  const cases: [string, Parameters<typeof fresher>[1]][] = [
+    ["amount", { amount: "5000001" }],
+    ["recipient", { to: OTHER }],
+    ["asset", { asset: TO }],
+    ["spend", { nullifier: hex32(0xdead) }],
+    ["chain", { chainId: 46630 }],
+  ];
+  for (const [what, over] of cases) {
+    const r = await replaceJobProof(store, j.id, fresher(j, over), T0);
+    assert.deepEqual(r.ok ? "replaced" : r.code, "mismatch", what);
+  }
+  assert.equal((await store.get(j.id))!.proof, j.proof, "the old proof stays");
+  assert.equal((await store.get(j.id))!.root, j.root);
+});
+
+await test("9. a fresher proof is refused once the job is not waiting untouched, or is under a minute from its time", async () => {
+  const now = T0;
+  const notLive = [
+    job({ status: "cancelled", sendAfter: now + 3_600_000 }),
+    job({ status: "sending", sendAfter: now + 3_600_000 }),
+    job({ status: "sent", sendAfter: now + 3_600_000, hash: hex32(1) }),
+    job({ status: "expired", sendAfter: now + 3_600_000 }),
+    job({ status: "scheduled", attempts: 1, sendAfter: now + 3_600_000 }),
+    job({ status: "scheduled", maybeSent: true, sendAfter: now + 3_600_000 }),
+  ];
+  const late = [job({ sendAfter: now + REPROVE_MIN_LEAD_MS - 1 }), job({ sendAfter: now - 1 })];
+  const { store } = await setup(...notLive, ...late);
+  for (const j of notLive) {
+    const r = await replaceJobProof(store, j.id, fresher(j), now);
+    assert.deepEqual(r.ok ? "replaced" : r.code, "not_live", `${j.status}/${j.attempts}/${j.maybeSent}`);
+    assert.equal((await store.get(j.id))!.proof, j.proof);
+  }
+  for (const j of late) {
+    const r = await replaceJobProof(store, j.id, fresher(j), now);
+    assert.deepEqual(r.ok ? "replaced" : r.code, "too_late");
+    assert.equal((await store.get(j.id))!.proof, j.proof);
+  }
+  assert.equal(replaceRefusal(null, fresher(job()), now), "not_found");
+  // exactly a minute away is still taken
+  assert.equal(replaceRefusal(job({ sendAfter: now + REPROVE_MIN_LEAD_MS }), fresher(job()), now) === "too_late", false);
+});
+
+await test("9. a fresher proof waits for a run holding the job, and never makes a second job for the spend", async () => {
+  const j = job({ sendAfter: T0 + 3_600_000 });
+  const { store } = await setup(j);
+  const release = await store.lock(j.id, 90);
+  const busy = await replaceJobProof(store, j.id, fresher(j), T0);
+  assert.deepEqual(busy.ok ? "replaced" : busy.code, "busy");
+  assert.equal((await store.get(j.id))!.proof, j.proof);
+  await release!();
+  assert.equal((await replaceJobProof(store, j.id, fresher(j), T0)).ok, true);
+  assert.equal((await replaceJobProof(store, j.id, fresher(j, {}), T0 + 60_000)).ok, true, "again later: fine");
+  // scheduling the same spend again still finds this one job, replaced or not
+  const again = { ...job(), nullifier: j.nullifier, to: j.to, amount: j.amount, asset: j.asset, chainId: j.chainId };
+  const s = await scheduleJob(store, again);
+  assert.equal(s.outcome, "existing");
+  assert.equal(s.job.id, j.id);
+  const other = { ...job(), nullifier: j.nullifier, chainId: j.chainId, to: OTHER };
+  assert.equal((await scheduleJob(store, other)).outcome, "conflict");
+  assert.equal(await store.byNullifier(j.chainId, j.nullifier), j.id);
+});
+
+// 9 (routes): PATCH /api/relay/scheduled, the relay's own checks and dry run, against the fake node.
+
+const route = await import("../src/app/api/relay/scheduled/route");
+const routeStore = scheduledStore();
+const call = (method: string, id: string | null, payload?: unknown) =>
+  new Request(`http://localhost/api/relay/scheduled${id ? `?id=${id}` : ""}`, {
+    method,
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "10.9.9.9" },
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
+  });
+type Answer = { ok?: boolean; id?: string; sendAfter?: number; to?: string; code?: string; existing?: boolean };
+const read = async (r: Response) => ({ status: r.status, json: (await r.json()) as Answer });
+
+await test("9 (routes). PATCH swaps the proof after the same checks and dry run; refusals keep the old one", async () => {
+  resetNode();
+  const first = body();
+  const made = await read(await route.POST(call("POST", null, { ...first, window: "6h" })));
+  assert.equal(made.status, 200);
+  const id = made.json.id!;
+  const stored = (await routeStore.get(id))!;
+  assert.equal(stored.root, first.root);
+
+  // asked again for the same cash out: the job already waiting, flagged so the app knows its proof isn't the new one
+  const again = await read(await route.POST(call("POST", null, { ...first, window: "6h" })));
+  assert.deepEqual([again.json.id, again.json.existing], [id, true]);
+
+  // a fresher proof of the same cash out: the same job and send time
+  resetNode();
+  const newer = { ...first, proof: ("0x" + "33".repeat(256)) as Hex, root: hex32(0x78) };
+  const swapped = await read(await route.PATCH(call("PATCH", id, newer)));
+  assert.equal(swapped.status, 200);
+  assert.deepEqual([swapped.json.id, swapped.json.sendAfter, swapped.json.to?.toLowerCase()], [id, made.json.sendAfter, TO.toLowerCase()]);
+  assert.ok(node.calls.some((c) => c.method === "eth_estimateGas"), "dry-run like scheduling");
+  assert.deepEqual([(await routeStore.get(id))!.root, (await routeStore.get(id))!.proof], [newer.root, newer.proof]);
+  assert.equal(await routeStore.byNullifier(net.chainId, first.nullifier), id, "still the one job for the spend");
+
+  // another amount or recipient: refused, nothing changes
+  for (const over of [{ amount: "5000001" }, { to: OTHER }]) {
+    const r = await read(await route.PATCH(call("PATCH", id, { ...newer, proof: ("0x" + "44".repeat(256)) as Hex, ...over })));
+    assert.deepEqual([r.status, r.json.code], [409, "mismatch"]);
+    assert.equal((await routeStore.get(id))!.proof, newer.proof);
+  }
+  // a root the vault doesn't know: the dry run refuses it, the last good proof stays
+  resetNode({ known: false });
+  const unknown = await read(await route.PATCH(call("PATCH", id, { ...newer, proof: ("0x" + "55".repeat(256)) as Hex, root: hex32(0x79) })));
+  assert.equal(unknown.json.ok, false);
+  assert.equal((await routeStore.get(id))!.root, newer.root);
+  resetNode();
+
+  // past waiting: cancelled, then nothing can replace it
+  const cancelled = await read(await route.DELETE(call("DELETE", id)));
+  assert.equal(cancelled.json.ok, true);
+  const gone = await read(await route.PATCH(call("PATCH", id, newer)));
+  assert.deepEqual([gone.status, gone.json.code], [409, "not_live"]);
+
+  // under a minute from its send time: refused before the dry run
+  const soon = job({ chainId: net.chainId, nullifier: hex32(0x6100), sendAfter: Date.now() + 30_000 });
+  await routeStore.put(soon);
+  node.calls.length = 0;
+  const tooLate = await read(
+    await route.PATCH(call("PATCH", soon.id, { chainId: net.chainId, proof: newer.proof, root: hex32(0x78), nullifier: soon.nullifier, asset: soon.asset, to: soon.to, amount: soon.amount }))
+  );
+  assert.deepEqual([tooLate.status, tooLate.json.code], [409, "too_late"]);
+  assert.equal(node.calls.length, 0, "no dry run for one that could never be taken");
+  assert.equal((await routeStore.get(soon.id))!.proof, soon.proof);
+
+  // an unknown job, and a malformed id
+  assert.equal((await route.PATCH(call("PATCH", "00000000-0000-4000-8000-00000000ffff", newer))).status, 404);
+  assert.equal((await route.PATCH(call("PATCH", "nope", newer))).status, 400);
 });
 
 console.log(`\n${passed} passed`);
