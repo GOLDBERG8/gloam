@@ -213,6 +213,7 @@ COMMON ISSUES (from the app)
 - "Paste their Gloam address (it starts with gloamr1)": the To field is empty or holds a 0x address. Private payments go to Gloam addresses only; to pay someone without one, pick Claim link under To.
 - "That is more than this balance holds.": the amount is bigger than the one balance picked under Pay from. Pick a bigger balance or send less.
 - "This payment is for a different vault or network.": switch the app's network to the one the payment was made on, then claim.
+- "This payment is on a different network. Switch network, then claim it again.": the code is for the other mainnet (Robinhood Chain or Tempo). Switch the app's network to the one it was sent on and claim it there.
 - "Could not open this ticket with your tag, it was encrypted for someone else.": that sealed payment was for a Gloam address this browser does not hold.
 - "This payment is locked, enter the passphrase from the sender.": it is a locked code; ask the sender for the phrase.
 - "Not enough in the vault yet" or "Not enough in the shared vault to cash out right now": the vault holds too little of that asset at the moment. Try a smaller amount or later.

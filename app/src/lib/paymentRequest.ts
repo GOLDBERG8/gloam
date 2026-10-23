@@ -78,6 +78,26 @@ export function findRequestAsset(key: NetworkKey, raw: string): RequestAsset | n
   );
 }
 
+/**
+ * Why a payment code can't be claimed on this network, or null when it can.
+ * Both mainnet vaults sit at the same address, so the vault alone can't tell
+ * a Robinhood Chain code from a Tempo one; the asset can. A code claimed on
+ * the wrong one would sit in the balance as "not settled".
+ */
+export function claimNetworkProblem(
+  network: { key: NetworkKey; pool: string | null },
+  pack: { pool?: string; asset: string }
+): string | null {
+  if (pack.pool && network.pool && pack.pool.toLowerCase() !== network.pool.toLowerCase()) {
+    return "This payment is for a different vault or network.";
+  }
+  const asset = pack.asset.trim().toLowerCase();
+  if (!requestAssetsFor(network.key).some((a) => a.address.toLowerCase() === asset)) {
+    return "This payment is on a different network. Switch network, then claim it again.";
+  }
+  return null;
+}
+
 const TAG_BODY = /^[A-Za-z0-9_-]{40,400}$/;
 
 /** A complete-looking Gloam address (gloamr1.<base64url key>). */

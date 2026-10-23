@@ -4,6 +4,7 @@
  *  - the whole claim link, the dot written %2E, a code inside a message
  *  - a code an email or chat broke over lines or with a space
  *  - a cut-off code followed by other words is refused, never misread
+ *  - a code is claimed only on its own network, though both mainnet vaults share an address
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-claim-codes.mts
  */
@@ -11,6 +12,8 @@ import assert from "node:assert/strict";
 import { buildNotePackage, decodeNotePackage, encodeNotePackage, paymentCodeIn } from "../src/lib/notePackage";
 import { appClaimPath, claimLinkFor, codeFromHash } from "../src/lib/claimLink";
 import { isClaimLink } from "../src/lib/funnel";
+import { getNetwork } from "../src/lib/networks";
+import { claimNetworkProblem } from "../src/lib/paymentRequest";
 
 const pack = buildNotePackage({
   pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194",
@@ -86,4 +89,21 @@ assert.equal((await decodeNotePackage(leftover)).secret, pack.secret, "and claim
 const whole = `https://www.gloam.trade/claim?net=robinhood-mainnet#claim=gloam1\n${leftover}`;
 assert.equal((await decodeNotePackage(whole)).secret, pack.secret, "the whole cut message pasted back claims");
 n += 3;
+// The network check: same vault address on both mainnets, so the asset decides.
+{
+  const rh = getNetwork("robinhood-mainnet");
+  const tempo = getNetwork("tempo-mainnet");
+  const rhTest = getNetwork("robinhood");
+  assert.equal(rh.pool?.toLowerCase(), tempo.pool?.toLowerCase(), "both mainnet vaults share an address");
+  const read = await decodeNotePackage(code);
+  assert.equal(claimNetworkProblem(rh, read), null, "a USDG code claims on Robinhood Chain");
+  assert.match(claimNetworkProblem(tempo, read) ?? "", /different network/, "and not on Tempo");
+  assert.match(claimNetworkProblem(rhTest, read) ?? "", /different vault/, "nor on the testnet vault");
+  const tempoPack = { pool: tempo.pool!, asset: "0x20c000000000000000000000b9537d11c60e8b50" };
+  assert.equal(claimNetworkProblem(tempo, tempoPack), null, "a USDC.e code claims on Tempo");
+  assert.match(claimNetworkProblem(rh, tempoPack) ?? "", /different network/, "and not on Robinhood Chain");
+  assert.match(claimNetworkProblem(tempo, { asset: read.asset }) ?? "", /different network/, "a code naming no vault");
+  assert.equal(claimNetworkProblem(rh, { asset: read.asset.toUpperCase().replace("0X", "0x") }), null, "any case");
+  n += 8;
+}
 console.log(`${n} claim-code checks passed`);

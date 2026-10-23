@@ -85,6 +85,7 @@ import {
 import { RelayToggle } from "./RelayToggle";
 import { PaymentRequestBanner, RequestPaymentCard } from "./PaymentRequest";
 import {
+  claimNetworkProblem,
   readPaymentRequest,
   requestParamsFrom,
   type PaymentRequest,
@@ -1345,12 +1346,8 @@ export function MoveView() {
     const pack = await decodeNotePackage(code, passphrase || undefined, {
       tryTagDecrypt: true,
     });
-    if (
-      pack.pool &&
-      pack.pool.toLowerCase() !== network.pool.toLowerCase()
-    ) {
-      throw new Error("This payment is for a different vault or network.");
-    }
+    const wrongNetwork = claimNetworkProblem(network, pack);
+    if (wrongNetwork) throw new Error(wrongNetwork);
 
     const asset = pack.asset;
     const secret = pack.secret;
