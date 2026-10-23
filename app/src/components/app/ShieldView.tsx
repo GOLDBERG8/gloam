@@ -494,7 +494,8 @@ export function ShieldView() {
           asset: BigInt(asset).toString(),
           secret: BigInt(note.secret).toString(),
         });
-        keepUntilLanded();
+        // stored and read back before the wallet is asked: a refused write stops here
+        await keepUntilLanded();
         writeContract({
           address: network.pool,
           abi: shieldPoolAbi,
@@ -514,7 +515,14 @@ export function ShieldView() {
       return;
     }
 
-    keepUntilLanded();
+    try {
+      await keepUntilLanded();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Could not save your private deposit. Try again.");
+      setPendingKind(null);
+      setPendingNote(null);
+      return;
+    }
     if (selectedToken) {
       writeContract({
         address: network.pool,

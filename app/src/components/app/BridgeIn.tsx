@@ -594,7 +594,12 @@ function BridgeSheet({
     const at = quote === r.quote ? r.at : Date.now();
     // The note's secret is the money: kept before anything is sent, out of the
     // balance until the vault shows it.
-    saveLocalNote({ ...r.note, status: "open", sweepPending: true });
+    try {
+      await saveLocalNote({ ...r.note, status: "open", sweepPending: true });
+    } catch (err) {
+      setPriv({ ...r, signing: false, error: err instanceof Error ? err.message : "Couldn't save your private balance. Try again." });
+      return;
+    }
 
     if (quote.solanaTx && r.wallet && r.account) {
       let unsure = false;

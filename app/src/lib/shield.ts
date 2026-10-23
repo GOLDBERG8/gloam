@@ -670,8 +670,13 @@ export function loadLocalNotes(address?: string | null): LocalNote[] {
 /** Spent/history rows kept for the activity view. Spendable notes are never trimmed. */
 const MAX_HISTORY_NOTES = 200;
 
-export function saveLocalNote(note: LocalNote) {
-  if (typeof window === "undefined") return;
+/**
+ * Keep a note in this browser. Settles once it is on disk: await it before
+ * sending anything that depends on the note's secret (it rejects with
+ * NoteSaveError when the browser refuses the write).
+ */
+export function saveLocalNote(note: LocalNote): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
   const next = [note, ...getAllNotes().filter((n) => n.id !== note.id)];
   // Never drop a note that can still be spent (that would lose the money);
   // only trim spent or chain-only history rows once there are too many.
@@ -683,7 +688,7 @@ export function saveLocalNote(note: LocalNote) {
     history++;
     return history <= MAX_HISTORY_NOTES;
   });
-  setAllNotes(kept);
+  return setAllNotes(kept);
 }
 
 export function updateLocalNote(

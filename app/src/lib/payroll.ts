@@ -720,7 +720,7 @@ async function payRow(
         if (BigInt(w.changeNote.amountWei) > 0n) {
           // Never reused: a later payment for this row must not overwrite an earlier change.
           changeNoteId = `chg-pr-${row.id}-${Date.now()}`;
-          saveLocalNote({
+          await saveLocalNote({
             id: changeNoteId,
             chainId: batch.chainId,
             pool: batch.pool,
