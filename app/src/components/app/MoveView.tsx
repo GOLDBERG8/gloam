@@ -10,7 +10,7 @@ import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { shortAddress } from "@/lib/chain";
 import { useAppAccount, useAppTxReceipt, useAppWriteContract, useDemo } from "@/lib/demo";
-import { shieldTokensFor } from "@/lib/tokens";
+import { knownTokens, shieldTokensFor } from "@/lib/tokens";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
@@ -1891,7 +1891,8 @@ export function MoveView() {
     }, 0);
   }
 
-  const shieldTokens = shieldTokensFor(network.chainId);
+  // every token the chain knows, so a note a swap brought in (WETH, a stock token) shows its logo too
+  const shieldTokens = knownTokens(network.chainId);
   const logoIdFor = (asset: string): string | null => {
     if (isNativeAsset(asset)) return null;
     return (
