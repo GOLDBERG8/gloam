@@ -331,6 +331,31 @@ const hash = await wallet.writeContract({
         hidden and what does not.
       </p>
 
+      <h2 id="check-before-paying">Check before paying (Agent Wormhole)</h2>
+      <p>
+        A 402 is text the payee wrote, and an agent reads it before it pays. The
+        MCP server can send each payment request to{" "}
+        <a href="https://agentwormhole.com" target="_blank" rel="noreferrer">
+          Agent Wormhole
+        </a>{" "}
+        first, which scans it for hidden instructions and tells whether it
+        changed since it was first seen. The payment goes ahead only on an allow.
+        A refusal, an abstain, findings, an error or no answer within five
+        seconds all mean the agent does not pay, and nothing is spent.
+      </p>
+      <p>
+        It is off until you turn it on. Put your Agent Wormhole key in the
+        server&apos;s settings (<code>~/.gloam/agent.env</code>) or its
+        environment:
+      </p>
+      <pre>
+        <code>GLOAM_WORMHOLE_KEY=your-agent-wormhole-key</code>
+      </pre>
+      <p>
+        Agent Wormhole sees the payment request and nothing else: never a note,
+        a balance, the wallet or a key.
+      </p>
+
       <h2>Spending limits</h2>
       <p>
         An agent that can sign can spend, so the owner sets its limits and every
