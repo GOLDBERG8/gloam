@@ -11,7 +11,7 @@
  * original landing while the retry is out, a good receipt for some other
  * transaction, the note spent by another payment (the only case its codes
  * go), a wallet prompt turned down, a relay that sent it but lost its reply,
- * and the backup side: unsettled runs are never pruned and come back from a
+ * the change counted only once its payment lands, and the backup side: unsettled runs are never pruned and come back from a
  * backup, and Sent links carry every unused code.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-payroll.mts
@@ -30,7 +30,7 @@ import {
 
 const { getActiveNetwork } = await import("../src/lib/networks");
 const { getAllNotes } = await import("../src/lib/noteVault");
-const { saveLocalNote } = await import("../src/lib/shield");
+const { activeSpendableNotes, loadLocalNotes, saveLocalNote } = await import("../src/lib/shield");
 const { decodeNotePackage } = await import("../src/lib/notePackage");
 const { loadBatches, newBatch, runPayroll, saveBatch } = await import("../src/lib/payroll");
 const { PAYROLL_SAVED_EVENT, pendingPayrollRuns, restorePayrollRuns } = await import("../src/lib/payrollStore");
@@ -226,6 +226,8 @@ async function storedLater(id: string): Promise<PayrollBatch> {
 }
 
 const byId = (id: string) => getAllNotes().find((n) => n.id === id)!;
+/** The notes the balance counts for this employer. */
+const counted = (owner: Address) => activeSpendableNotes(loadLocalNotes(owner)).map((n) => n.id).sort();
 const nothingSent = async (): Promise<Hex> => assert.fail("nothing should be sent");
 
 await test("a receipt that times out is still checking, never failed, and keeps every code", async () => {
@@ -242,6 +244,10 @@ await test("a receipt that times out is still checking, never failed, and keeps 
   assert.ok(row.ticket && row.paymentSecret && row.changeSecret && row.spendNullifier, "codes and secrets kept");
   assert.equal(byId(row.changeNoteId!).status, "open", "the change is kept");
   assert.equal(byId(spend.id).status, "open");
+  // Until the payment lands the balance counts the note it spends, not its change as well.
+  assert.equal(byId(row.changeNoteId!).sweepPending, true, "the change waits for the payment");
+  assert.deepEqual(byId(row.changeNoteId!).sweptFrom, { id: spend.id, nullifier: row.spendNullifier });
+  assert.deepEqual(counted(me), [spend.id], "only the note it spends counts meanwhile");
   assert.ok((await pendingPayrollRuns()).some((b) => b.id === run.id), "the backup carries this run");
 
   // It lands after the run stopped waiting: resuming settles it, sending nothing.
@@ -256,6 +262,8 @@ await test("a receipt that times out is still checking, never failed, and keeps 
   assert.ok(pool.index.has(lc(pack.commitment)), "the code opens a payment in the pool");
   assert.equal(byId(spend.id).status, "recovered");
   assert.equal(byId(paid.changeNoteId!).leafIndex, pool.index.get(lc(byId(paid.changeNoteId!).commitment)));
+  assert.equal(byId(paid.changeNoteId!).sweepPending, false, "landed: the change counts");
+  assert.deepEqual(counted(me), [paid.changeNoteId], "and the spent note no longer does");
   assert.equal((await pendingPayrollRuns()).some((b) => b.id === run.id), false, "settled runs leave the backup");
   // ...but the payee's code does not: Sent links keeps it (and backs it up) until the money moves.
   assert.ok(paid.codeKept, "the paid code was copied to Sent links");

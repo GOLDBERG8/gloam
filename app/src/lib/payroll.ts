@@ -708,6 +708,10 @@ async function payRow(
         const ticket = row.kind === "gloam" ? await encryptTicketForTag(plain, row.recipient) : plain;
 
         // Persist the change note and the row BEFORE submitting (crash safety).
+        // The change is out of the balance until the payment lands (the note it
+        // comes from still counts until then); finalizeTransfer counts it, or the
+        // sync settles it with the note it came from (lib/claimSweep).
+        const spendNullifier = fieldToBytes32(w.publicInputs.nullifier);
         let changeNoteId: string | undefined;
         if (BigInt(w.changeNote.amountWei) > 0n) {
           // Never reused: a later payment for this row must not overwrite an earlier change.
@@ -727,10 +731,12 @@ async function payRow(
             createdAt: Date.now(),
             status: "open",
             source: "local",
+            sweptFrom: { id: note.id, nullifier: spendNullifier },
+            sweepPending: true,
           });
         }
         row.spendNoteId = note.id;
-        row.spendNullifier = fieldToBytes32(w.publicInputs.nullifier);
+        row.spendNullifier = spendNullifier;
         row.changeNoteId = changeNoteId;
         row.paymentCommitment = fieldToBytes32(w.publicInputs.newCommitment0);
         row.changeSecret = w.changeNote.secret;
@@ -835,7 +841,8 @@ async function finalizeTransfer(batch: PayrollBatch, row: PayrollRow, deps: Payr
     const change = notes.find((n) => n.id === row.changeNoteId);
     const tree = await syncUntil(deps, change?.commitment);
     const idx = change ? tree?.indexByCommitment.get(change.commitment.toLowerCase()) : undefined;
-    updateLocalNote(row.changeNoteId, { leafIndex: idx, txHash: row.txHash });
+    // landed: the change counts from now on
+    updateLocalNote(row.changeNoteId, { leafIndex: idx, txHash: row.txHash, sweepPending: false });
   }
 }
 
