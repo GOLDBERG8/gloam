@@ -451,7 +451,7 @@ await test("keys: two rotations at once leave one working secret, and revoke sto
     rotateApiKey({ partnerId: partner.id, keyId: made.key.id, pepper }),
     rotateApiKey({ partnerId: partner.id, keyId: made.key.id, pepper }),
   ]);
-  const won = results.filter((r): r is PromiseFulfilledResult<{ key: unknown; secret: string }> => r.status === "fulfilled");
+  const won = results.filter((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ secret: string }>[];
   const lost = results.filter((r) => r.status === "rejected");
   assert.equal(won.length, 1, "only one rotation runs at a time");
   assert.match(String((lost[0] as PromiseRejectedResult).reason), /being changed/);
