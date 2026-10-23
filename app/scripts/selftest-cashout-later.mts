@@ -210,6 +210,8 @@ await test("a due job is sent once and recorded with its hash", async () => {
   assert.equal(after.hash, hex32(0xbeef));
   assert.equal(after.attempts, 1);
   assert.equal(after.proof, "0x", "a sent job drops its proof");
+  assert.equal(after.createdAt, 0, "and when it was asked for");
+  assert.equal(after.sendAfter, j.sendAfter, "the job view still reads");
   assert.equal(chain.sends.length, 1);
 });
 

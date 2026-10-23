@@ -47,7 +47,7 @@ export const SENDING_STALE_MS = 5 * 60 * 1000;
 /** How long a live job record is kept (refreshed on every save). */
 export const JOB_TTL_SEC = 3 * 24 * 60 * 60;
 /** How long a finished job is kept, without its proof, so the app can still read what happened. */
-export const JOB_DONE_TTL_SEC = 30 * 24 * 60 * 60;
+export const JOB_DONE_TTL_SEC = 7 * 24 * 60 * 60;
 
 export type JobStatus =
   | "scheduled"
@@ -264,9 +264,13 @@ export async function runDueJobs(store: JobStore, deps: RunDeps, limit = 20, bud
   return out;
 }
 
-/** A job that is done no longer needs its proof: it is dropped, so it can never be sent later. */
+/**
+ * A job that is done no longer needs its proof: it is dropped, so it can never be sent later.
+ * Nor when it was asked for, the one thing here the chain does not already show next to its
+ * hash: kept, it would tie the person's visit to the cash out.
+ */
 function retire(job: CashOutJob, status: JobStatus): CashOutJob {
-  return isLive(status) ? job : { ...job, proof: "0x" };
+  return isLive(status) ? job : { ...job, proof: "0x", createdAt: 0 };
 }
 
 async function settle(store: JobStore, job: CashOutJob, status: JobStatus, now: number, extra: Partial<CashOutJob> = {}) {
