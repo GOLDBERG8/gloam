@@ -42,7 +42,7 @@ const PNG_LOGO_IDS = new Set([
 ]);
 
 /** Round marks (a full disc): shown as a circle with no plate, so no white corners. */
-const DISC_LOGO_IDS = new Set(["usdg", "usdce", "eth", "avgo", "mstr", "sbux"]);
+const DISC_LOGO_IDS = new Set(["usdg", "usdce", "eth", "weth", "avgo", "mstr", "sbux"]);
 
 const SPECIAL_LOGOS: Record<string, string> = {
   tempo: "/brand/logos/tempo.svg",
@@ -55,6 +55,8 @@ const SPECIAL_LOGOS: Record<string, string> = {
   thetausd: "/brand/logos/thetausd.svg",
   // $GLOAM: the Gloam mark
   gloam: "/brand/kit/gloam-avatar-ink.png",
+  // WETH is ETH in the vault: the same mark
+  weth: "/brand/logos/eth.png",
 };
 
 /** The logo file for a token id, or undefined when it has none (a monogram shows instead). */

@@ -99,6 +99,16 @@ export const RH_MAINNET_TOKENS: OnchainToken[] = [
 ];
 
 /**
+ * Robinhood Chain mainnet tokens a private swap can land in that Add does not
+ * list (lib/vaultSwap RH_SWAP_ASSETS_V2): named here so a note in one shows
+ * with its symbol and decimals everywhere. WETH is the chain's canonical
+ * wrapped ETH (Arbitrum's aeWETH), the form ETH takes in the vault.
+ */
+export const RH_MAINNET_SWAP_TOKENS: OnchainToken[] = [
+  { id: "weth", symbol: "WETH", name: "Wrapped Ether", address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", decimals: 18, yahoo: "", kind: "token", coingecko: "weth" },
+];
+
+/**
  * Tempo mainnet (4217): the four TIP-20 stablecoins the mainnet pool lists, 6
  * decimals each. Beta limits: 500 per deposit / 25,000 in total for each.
  */
@@ -128,6 +138,7 @@ export function knownTokens(chainId?: number): OnchainToken[] {
     ...TESTNET_STOCK_TOKENS,
     ...TEMPO_STABLE_TOKENS,
     ...RH_MAINNET_TOKENS,
+    ...RH_MAINNET_SWAP_TOKENS,
     ...TEMPO_MAINNET_TOKENS,
   ];
   return chainId === undefined ? all : [...shieldTokensFor(chainId), ...all];
