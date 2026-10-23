@@ -53,6 +53,7 @@ export const OFFICIAL_LINKS = [
   "gloam.trade/testers (apply to be a tester)",
   "gloam.trade/transparency (what anyone can see about the vault)",
   "gloam.trade/blog/live-on-mainnet (the mainnet launch post)",
+  "gloam.trade/blog/private-agent-payments (Raeto and Agent Wormhole: agents funded privately, checked before they pay)",
   "X: @gloamtrade (x.com/gloamtrade), for news",
   "Email: hello@gloam.trade, for anything private",
   "The community group: t.me/gloamhq",

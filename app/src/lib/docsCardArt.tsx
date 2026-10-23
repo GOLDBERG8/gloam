@@ -756,3 +756,45 @@ export function LedgerArt() {
     </svg>
   );
 }
+
+/** Research, agent payments: a price comes in, gets checked, and is paid with the amount hidden. */
+export function GuardArt() {
+  return (
+    <div style={{ ...col, width: 320, gap: 14 }}>
+      <div
+        style={{
+          ...row,
+          alignSelf: "flex-start",
+          padding: "14px 20px",
+          borderRadius: "20px 20px 20px 6px",
+          border: `1.5px solid ${C.line}`,
+          background: C.surface,
+        }}
+      >
+        <Text size={22}>402: pay 2 USDG</Text>
+      </div>
+      <div style={{ ...row, alignSelf: "center", gap: 10, padding: "10px 18px", borderRadius: 16, border: `1.5px dashed ${C.line}` }}>
+        <Check size={18} color={C.mute} />
+        <Text size={20} color={C.mute}>
+          Checked: allow
+        </Text>
+      </div>
+      <div
+        style={{
+          ...row,
+          alignSelf: "flex-end",
+          gap: 10,
+          padding: "14px 20px",
+          borderRadius: "20px 20px 6px 20px",
+          border: `1.5px solid ${C.tintLine}`,
+          background: C.tintSoft,
+        }}
+      >
+        <Check size={20} color={C.tint} />
+        <Text size={22} color={C.tint}>
+          Paid, amount hidden
+        </Text>
+      </div>
+    </div>
+  );
+}
