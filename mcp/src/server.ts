@@ -95,6 +95,7 @@ import { KNOWN_ASSETS, assetLabel, type Spend } from "./policy.js";
 import { authorizeSpend, limitsReport, previewSpend, settleSpend, spendingReport } from "./spendGuard.js";
 import { balances, noteView, openNoteStore, type NoteStore, type StoredNote } from "./noteStore.js";
 import { guardedFetch } from "./safeFetch.js";
+import { checkBeforePay } from "./wormholeGuard.js";
 import {
   credentialField,
   credentialFromPayment,
@@ -948,6 +949,9 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           "Self-custodial: this server signs and broadcasts the shielded transfer. Only the payee can open the payment note; the public sees only that a shielded transfer occurred.",
         notVsZone: GLOAM_VS_ZONE,
         sourceNote: note ?? "the smallest note that covers the amount",
+        ...(env.GLOAM_WORMHOLE_KEY?.trim()
+          ? { checkBeforePay: "Agent Wormhole checks this payment request first (GLOAM_WORMHOLE_KEY). Only an allow pays." }
+          : {}),
       });
     }
   );
@@ -963,12 +967,20 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         authorization?: string;
       };
 
+  /** The payment request as Agent Wormhole reads it: the price itself, decoded (an MPP challenge's request, else the x402 requirements). */
+  const quoteText = (req: GloamPaymentRequirements, mpp?: PaymentChallenge | null): string =>
+    JSON.stringify(
+      mpp ? { method: mpp.method, intent: mpp.intent, realm: mpp.realm, description: mpp.description, expires: mpp.expires, request: mpp.request } : req
+    );
+
   /**
    * Pay a 402 privately: pick or take a note by handle, pass the spend gate,
    * prove, broadcast, and keep the change. Secrets stay in this function and the
    * note store; the result carries handles and the sealed X-PAYMENT header, plus
    * the MPP credential when `mpp` is the challenge being paid (push mode: this
    * server broadcasts, so limits and the note store work exactly as for x402).
+   * With GLOAM_WORMHOLE_KEY set, `quote` (the payment request as the payee sent
+   * it) goes to Agent Wormhole after the spend gate, and only an allow pays.
    */
   async function payPrivately(
     req: GloamPaymentRequirements,
@@ -977,6 +989,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       issuerTag?: string;
       legacyNote?: { secret: string; amount: number; decimals?: number };
       mpp?: PaymentChallenge;
+      quote?: string;
     }
   ): Promise<PayResult> {
     const fail = (result: Record<string, unknown>): PayResult => ({ ok: false, result });
@@ -1069,6 +1082,17 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
 
     const gate = authorizeSpend(spend, env);
     if (!gate.ok) return fail(gate.refusal);
+    // Agent Wormhole, when the operator turned it on: it sees the payment request only, and anything but allow stops here.
+    const wormhole = await checkBeforePay(opts.quote ?? quoteText(req, opts.mpp), env);
+    if (wormhole && !wormhole.pay) {
+      settleSpend(gate, "failed", { reason: `Agent Wormhole: ${wormhole.decision}${wormhole.findings.length ? ` (${wormhole.findings.map((f) => f.code).join(", ")})` : ""}` });
+      return fail({
+        status: "refused",
+        code: "wormhole_refused",
+        message: wormhole.message,
+        wormhole: { decision: wormhole.decision, findings: wormhole.findings, attestation: wormhole.attestation, signature: wormhole.signature },
+      });
+    }
     if (input.handle) {
       try {
         notes.reserveForSpend(input.handle, fits);
@@ -1225,6 +1249,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         result: {
           status: "paid",
           ...(opts.mpp ? { protocol: "mpp" } : {}),
+          ...(wormhole ? { wormhole: { decision: wormhole.decision, attestation: wormhole.attestation, signature: wormhole.signature } } : {}),
           ...(mppWarning ? { mppWarning } : {}),
           ...(logWarning ? { logWarning } : {}),
           ...(noteWarning ? { noteWarning } : {}),
@@ -1479,7 +1504,9 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           });
         }
       }
-      const paid = await payPrivately(req, { handle: note, ...(mpp ? { mpp } : {}) });
+      // For Agent Wormhole: the 402 body as the payee sent it, when the price came in it.
+      const quote = !mpp && firstBody.trim() && firstBody.length <= 65_536 ? firstBody : undefined;
+      const paid = await payPrivately(req, { handle: note, ...(mpp ? { mpp } : {}), ...(quote ? { quote } : {}) });
       if (!paid.ok) return text({ ...paid.result, httpStatus: 402, resource: req.resource });
       // What to present: the MPP credential when paying an MPP challenge, else the x402 header.
       const presented = mpp ? paid.authorization : paid.header;
