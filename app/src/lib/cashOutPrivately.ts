@@ -195,16 +195,16 @@ export function keepPiece(noteId: string) {
 const PREF_KEY = "gloam.cashout.private";
 
 export type PrivateCashOutPref = {
-  /** Cash out privately when it is offered (the default), or all at once. */
+  /** Cash out privately when it is offered, or all at once (the default: most people want it now). */
   on: boolean;
   window: CashOutWindow;
 };
 
 const WINDOWS: readonly CashOutWindow[] = ["hour", "6h", "day"];
 
-/** What this browser last chose: privately, over about 6 hours, unless the person picked otherwise. */
+/** What this browser last chose: all at once unless the person turned on privately (over about 6 hours). */
 export function readPrivatePref(): PrivateCashOutPref {
-  const fallback: PrivateCashOutPref = { on: true, window: "6h" };
+  const fallback: PrivateCashOutPref = { on: false, window: "6h" };
   if (typeof window === "undefined") return fallback;
   try {
     const raw = JSON.parse(window.localStorage.getItem(PREF_KEY) ?? "null") as Partial<PrivateCashOutPref> | null;
