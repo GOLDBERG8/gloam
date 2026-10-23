@@ -406,6 +406,8 @@ function loadConfig(): Promise<Config | null> {
 
 async function saveConfig(next: Config | null) {
   config = next;
+  // a later loadConfig() reads this, not the settings as they were first read
+  loading = Promise.resolve(next);
   if (next) localStorage.setItem(CONFIG_KEY, await sealJson(next));
   else localStorage.removeItem(CONFIG_KEY);
   setState({ on: Boolean(next), source: next?.source ?? null, savedAt: next?.savedAt ?? null });
@@ -413,11 +415,38 @@ async function saveConfig(next: Config | null) {
 
 /* ------------------------------------------------------------ sync */
 
+/**
+ * Set while recovery is being turned off: no new save starts, and one that
+ * finishes doesn't turn recovery back on.
+ */
+let stopping = false;
+/** The save under way (settled either way), so turning off can wait for it. */
+let inFlight: Promise<void> | null = null;
+
+function tracked(job: Promise<void>): Promise<void> {
+  const settled = job.then(
+    () => undefined,
+    () => undefined,
+  );
+  inFlight = settled;
+  void settled.then(() => {
+    if (inFlight === settled) inFlight = null;
+  });
+  return job;
+}
+
+/** Whether `c` is still the backup this browser saves to. */
+function stillOn(c: Config): boolean {
+  return !stopping && config?.id === c.id;
+}
+
 /** Saves this browser's private balance to the backup. One retry after a conflict. */
 async function upload(c: Config): Promise<void> {
   let current = c;
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (!stillOn(current)) return;
     const blob = await seal(current, await collect());
+    if (!stillOn(current)) return;
     let res: Response;
     try {
       res = await fetch("/api/recovery", {
@@ -430,7 +459,8 @@ async function upload(c: Config): Promise<void> {
     }
     if (res.ok) {
       const { data } = (await res.json()) as { data: { n: number; t: number } };
-      await saveConfig({ ...current, n: data.n, savedAt: data.t });
+      // Turned off while this was saving: it stays off.
+      if (stillOn(current)) await saveConfig({ ...current, n: data.n, savedAt: data.t });
       return;
     }
     if (res.status === 409 && attempt === 0) {
@@ -454,7 +484,7 @@ let again = false;
 
 async function runSync() {
   const c = config ?? (await loadConfig());
-  if (!c) return;
+  if (!c || stopping) return;
   if (running) {
     again = true;
     return;
@@ -462,7 +492,7 @@ async function runSync() {
   running = true;
   setState({ busy: true, error: null });
   try {
-    await upload(c);
+    await tracked(upload(c));
   } catch (e) {
     setState({ error: e instanceof Error ? e.message : "The backup didn't save. It will try again." });
   } finally {
@@ -476,7 +506,7 @@ async function runSync() {
 }
 
 function schedule() {
-  if (!config) return;
+  if (!config || stopping) return;
   window.clearTimeout(timer);
   timer = window.setTimeout(() => void runSync(), 2500);
 }
@@ -531,25 +561,40 @@ export async function connectRecovery(
     }
     const next: Config = { ...keys, n: remote?.n ?? 0, savedAt: remote?.t ?? null };
     await saveConfig(next);
-    await upload(next);
+    await tracked(upload(next));
     return added;
   } finally {
     setState({ busy: false });
   }
 }
 
-/** Turns recovery off on this browser, and deletes the saved backup when asked. */
+/**
+ * Turns recovery off on this browser, and deletes the saved backup when asked.
+ * Nothing new is saved from the start, and a save already sent finishes
+ * first: one landing after the delete would bring the backup back.
+ */
 export async function turnOffRecovery({ deleteBackup }: { deleteBackup: boolean }): Promise<void> {
   const c = config ?? (await loadConfig());
-  if (c && deleteBackup) {
-    const res = await fetch("/api/recovery", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: c.id, write: c.write }),
-    }).catch(() => null);
-    if (!res?.ok) throw new RecoveryError(res ? await errorText(res) : "No connection. Try again.");
-  }
+  stopping = true;
   window.clearTimeout(timer);
-  await saveConfig(null);
-  setState({ error: null });
+  let off = false;
+  try {
+    await inFlight;
+    if (c && deleteBackup) {
+      const res = await fetch("/api/recovery", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: c.id, write: c.write }),
+      }).catch(() => null);
+      if (!res?.ok) throw new RecoveryError(res ? await errorText(res) : "No connection. Try again.");
+    }
+    window.clearTimeout(timer);
+    await saveConfig(null);
+    off = true;
+    setState({ error: null });
+  } finally {
+    stopping = false;
+    // Still on (the delete failed): what changed meanwhile still gets saved.
+    if (!off) schedule();
+  }
 }
