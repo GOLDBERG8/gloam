@@ -199,7 +199,24 @@ function noteOf(obj: Record<string, unknown>): { note?: string } {
   return note ? { note } : {};
 }
 
+/** Notes are range checked to < 2^128 in every Gloam circuit. */
+const AMOUNT_LIMIT = 1n << 128n;
+
+/**
+ * An amount the circuits can hold: plain digits below 2^128. Poseidon reads the
+ * amount mod the field prime, so a code claiming amount + p would open the same
+ * note as the real one and show a balance it does not have.
+ */
+function amountInRange(w: string): boolean {
+  return /^\d{1,39}$/.test(w) && BigInt(w) < AMOUNT_LIMIT;
+}
+
 function expandCompact(obj: Record<string, unknown>): NotePackage | null {
+  const pack = readFields(obj);
+  return pack && amountInRange(pack.amountWei) ? pack : null;
+}
+
+function readFields(obj: Record<string, unknown>): NotePackage | null {
   if (obj.t !== "gloam-private-note" && obj.type !== "gloam-private-note") {
     // compact form uses t/s/p/a/w/k/c
     if (obj.t && obj.k && obj.w) {

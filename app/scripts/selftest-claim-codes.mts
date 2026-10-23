@@ -5,11 +5,12 @@
  *  - a code an email or chat broke over lines or with a space
  *  - a cut-off code followed by other words is refused, never misread
  *  - a code is claimed only on its own network, though both mainnet vaults share an address
+ *  - an amount the circuits cannot hold (2^128 or more, amount + p) is refused
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-claim-codes.mts
  */
 import assert from "node:assert/strict";
-import { buildNotePackage, decodeNotePackage, encodeNotePackage, paymentCodeIn } from "../src/lib/notePackage";
+import { buildNotePackage, decodeNotePackage, encodeNotePackage, encodeNotePackageEncrypted, paymentCodeIn } from "../src/lib/notePackage";
 import { appClaimPath, claimLinkFor, codeFromHash } from "../src/lib/claimLink";
 import { isClaimLink } from "../src/lib/funnel";
 import { getNetwork } from "../src/lib/networks";
@@ -106,4 +107,19 @@ n += 3;
   assert.equal(claimNetworkProblem(rh, { asset: read.asset.toUpperCase().replace("0X", "0x") }), null, "any case");
   n += 8;
 }
+// Poseidon reads the amount mod p, so 5000000 + p opens the same note as 5000000.
+// Only amounts the circuits hold (below 2^128) read, in every form a code comes in.
+const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+const LIMIT = 1n << 128n;
+const legacyJson = (w: string) => JSON.stringify({ v: 1, type: "gloam-private-note", scheme: "poseidon", pool: pack.pool, asset: pack.asset, amountWei: w, secret: pack.secret, commitment: pack.commitment });
+for (const w of [(5_000_000n + P).toString(), LIMIT.toString(), "0x10", "-1"]) {
+  await assert.rejects(decodeNotePackage(encodeNotePackage({ ...pack, amountWei: w })), `a plain code with amount ${w.slice(0, 12)} is refused`);
+  await assert.rejects(decodeNotePackage(legacyJson(w)), `an old JSON package with amount ${w.slice(0, 12)} is refused`);
+  n += 2;
+}
+await assert.rejects(decodeNotePackage(await encodeNotePackageEncrypted({ ...pack, amountWei: (5_000_000n + P).toString() }, "pass phrase"), "pass phrase"), "a locked code with amount + p is refused");
+const top = (LIMIT - 1n).toString();
+assert.equal((await decodeNotePackage(encodeNotePackage({ ...pack, amountWei: top }))).amountWei, top, "the largest amount the circuits hold still reads");
+assert.equal((await decodeNotePackage(await encodeNotePackageEncrypted(pack, "pass phrase"), "pass phrase")).amountWei, pack.amountWei, "a locked code still reads");
+n += 3;
 console.log(`${n} claim-code checks passed`);
