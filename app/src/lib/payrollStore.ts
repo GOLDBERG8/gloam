@@ -18,6 +18,8 @@ import { restoreSentLinks } from "./sentLinksStore";
 import { assetLabel } from "./shield";
 
 const STORE_KEY = "gloam.payroll.v1";
+/** Held while a tab writes runs (Web Locks), so tabs take turns. */
+const STORE_LOCK = "gloam-payroll-store";
 /** Runs this browser could not open (another key, damaged data), set aside so a write never destroys them. */
 const UNREADABLE_KEY = "gloam.payroll.v1.unreadable";
 /** Finished runs kept besides the ones still holding a payment that may land. */
@@ -33,9 +35,8 @@ export function holdsPendingPayment(r: PayrollRow): boolean {
   return Boolean(r.spendNullifier) && r.status !== "paid" && r.status !== "failed";
 }
 
-async function readAll(): Promise<PayrollBatch[]> {
+async function readAll(raw = typeof window === "undefined" ? null : window.localStorage.getItem(STORE_KEY)): Promise<PayrollBatch[]> {
   if (typeof window === "undefined") return [];
-  const raw = window.localStorage.getItem(STORE_KEY);
   if (!raw) return [];
   const all = await openJson<PayrollBatch[]>(raw);
   if (!Array.isArray(all)) {
@@ -46,12 +47,35 @@ async function readAll(): Promise<PayrollBatch[]> {
   return all;
 }
 
-async function writeAll(batches: PayrollBatch[]): Promise<void> {
-  // Claim links are money: stored encrypted under the same device key as notes.
-  let others = 0;
-  const kept = batches.filter((b) => b.rows.some(holdsPendingPayment) || ++others <= KEEP_RUNS);
-  window.localStorage.setItem(STORE_KEY, await sealJson(kept));
-  window.dispatchEvent(new Event(PAYROLL_SAVED_EVENT));
+/** Runs `fn` while no other tab is writing runs. Without Web Locks, `fn` re-checks the store itself. */
+function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = (globalThis.navigator as { locks?: { request: (n: string, f: () => Promise<T>) => Promise<T> } } | undefined)
+    ?.locks;
+  return locks?.request ? locks.request(STORE_LOCK, fn) : fn();
+}
+
+/**
+ * Change the stored runs: `change` gets what is stored now and returns the new
+ * list, or null to leave it. Runs under a cross-tab lock, so a tab holding an
+ * older copy can never write a run back over newer progress; without Web
+ * Locks, a write that lands meanwhile is read again and the change made over it.
+ */
+async function mutate(change: (all: PayrollBatch[]) => PayrollBatch[] | null): Promise<void> {
+  await withStoreLock(async () => {
+    for (let attempt = 0; ; attempt++) {
+      const raw = window.localStorage.getItem(STORE_KEY);
+      const next = change(await readAll(raw));
+      if (!next) return;
+      // Claim links are money: stored encrypted under the same device key as notes.
+      let others = 0;
+      const kept = next.filter((b) => b.rows.some(holdsPendingPayment) || ++others <= KEEP_RUNS);
+      const sealed = await sealJson(kept);
+      if (window.localStorage.getItem(STORE_KEY) !== raw && attempt < 5) continue;
+      window.localStorage.setItem(STORE_KEY, sealed);
+      window.dispatchEvent(new Event(PAYROLL_SAVED_EVENT));
+      return;
+    }
+  });
 }
 
 export async function loadBatches(chainId: number, pool: Address): Promise<PayrollBatch[]> {
@@ -60,9 +84,41 @@ export async function loadBatches(chainId: number, pool: Address): Promise<Payro
     .sort((a, b) => b.createdAt - a.createdAt);
   // Runs paid before their codes went to Sent links: copy them over once.
   for (const run of runs) {
-    if (await keepPaidCodes(run).catch(() => false)) await saveBatch(run).catch(() => undefined);
+    if (await keepPaidCodes(run).catch(() => false)) await markCodesKept(run).catch(() => undefined);
   }
   return runs;
+}
+
+/** One run as stored now, or null. */
+export async function loadStoredRun(id: string): Promise<PayrollBatch | null> {
+  return (await readAll()).find((b) => b.id === id) ?? null;
+}
+
+/**
+ * Mark the stored rows whose codes `run` just copied to Sent links, and only
+ * those: the rest of the stored run stays as it is, so this never writes an
+ * older copy of a run back over a tab that is paying it.
+ */
+function markCodesKept(run: PayrollBatch): Promise<void> {
+  const kept = new Map(run.rows.filter((r) => r.codeKept).map((r) => [r.id, r.ticket]));
+  return queue(() =>
+    mutate((all) => {
+      let changed = false;
+      const next = all.map((b) =>
+        b.id !== run.id
+          ? b
+          : {
+              ...b,
+              rows: b.rows.map((r) => {
+                if (r.codeKept || r.status !== "paid" || !kept.has(r.id) || kept.get(r.id) !== r.ticket) return r;
+                changed = true;
+                return { ...r, codeKept: true };
+              }),
+            }
+      );
+      return changed ? next : null;
+    })
+  );
 }
 
 /** Paid, and the payer holds the only copy of the code: a claim link, or a heads-up that didn't post. */
@@ -119,16 +175,11 @@ function queue(task: () => Promise<void>): Promise<void> {
 }
 
 export function saveBatch(batch: PayrollBatch): Promise<void> {
-  return queue(async () => {
-    const all = await readAll();
-    await writeAll([batch, ...all.filter((b) => b.id !== batch.id)]);
-  });
+  return queue(() => mutate((all) => [batch, ...all.filter((b) => b.id !== batch.id)]));
 }
 
 export async function deleteBatch(id: string): Promise<void> {
-  return queue(async () => {
-    await writeAll((await readAll()).filter((b) => b.id !== id));
-  });
+  return queue(() => mutate((all) => all.filter((b) => b.id !== id)));
 }
 
 /** Runs on any network still holding a payment that may land: what the backup carries. */
@@ -181,12 +232,13 @@ export async function restorePayrollRuns(value: unknown, owner?: string | null):
   const incoming = value.filter(isRun);
   if (!incoming.length) return 0;
   let added = 0;
-  await queue(async () => {
-    const all = await readAll();
-    const ids = new Set(all.map((b) => b.id));
-    const fresh = incoming.filter((b) => !ids.has(b.id)).map((b) => asRestored(b, owner));
-    added = fresh.length;
-    if (fresh.length) await writeAll([...all, ...fresh]);
-  });
+  await queue(() =>
+    mutate((all) => {
+      const ids = new Set(all.map((b) => b.id));
+      const fresh = incoming.filter((b) => !ids.has(b.id)).map((b) => asRestored(b, owner));
+      added = fresh.length;
+      return fresh.length ? [...all, ...fresh] : null;
+    })
+  );
   return added;
 }

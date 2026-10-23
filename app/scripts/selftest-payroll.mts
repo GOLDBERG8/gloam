@@ -13,6 +13,10 @@
  * go), a wallet prompt turned down, a relay that sent it but lost its reply,
  * the change counted only once its payment lands, and the backup side: unsettled runs are never pruned and come back from a
  * backup, and Sent links carry every unused code.
+ * Review finding 4, 23 Oct 2026: two old copies of one run (two tabs, a page
+ * left open) pay each person once; a run going in another tab is refused,
+ * with and without Web Locks; a note spent elsewhere is never paid with; and
+ * two tabs saving runs at once keep both.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-payroll.mts
  */
@@ -32,7 +36,7 @@ const { getActiveNetwork } = await import("../src/lib/networks");
 const { getAllNotes } = await import("../src/lib/noteVault");
 const { activeSpendableNotes, loadLocalNotes, saveLocalNote } = await import("../src/lib/shield");
 const { decodeNotePackage } = await import("../src/lib/notePackage");
-const { loadBatches, newBatch, runPayroll, saveBatch } = await import("../src/lib/payroll");
+const { loadBatches, newBatch, runPayroll, saveBatch, RUN_ELSEWHERE } = await import("../src/lib/payroll");
 const { PAYROLL_SAVED_EVENT, pendingPayrollRuns, restorePayrollRuns } = await import("../src/lib/payrollStore");
 const { makeSentLink, paymentNullifier } = await import("../src/lib/sentLinks");
 const { loadSentLinks, markSentLinksUsed, openSentLinks, restoreSentLinks, saveSentLink } = await import(
@@ -462,5 +466,132 @@ await test("a backup brings an unsettled run back on a new device, under the wal
   assert.equal(await restorePayrollRuns(restored, owner), 0, "a run already here is kept as it is");
   assert.equal(await restorePayrollRuns([{ junk: true }, null, "x"], owner), 0);
 });
+
+/** Run `fn` as a browser without Web Locks (the localStorage lease stands in). */
+async function withoutLocks(fn: () => Promise<void>) {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: undefined });
+  try {
+    await fn();
+  } finally {
+    if (real) Object.defineProperty(globalThis, "navigator", real);
+  }
+}
+
+const transfersOut = (sent: Transfer[]) => new Set(sent.map((t) => lc(t.nullifier))).size;
+
+await test("two old copies of a paused run, resumed one after the other, pay each person once", async () => {
+  const pool = mockPool();
+  const me = employer();
+  await fund(pool, me, 1_000n, "dep-s1");
+  await fund(pool, me, 1_000n, "dep-s2");
+  const run = runFor(me, [990n]);
+  await saveBatch(run); // started, then paused before anyone was paid
+  const tabA = await stored(run.id);
+  const tabB = await stored(run.id); // a second tab, or the page left open
+  const sent: Transfer[] = [];
+  await runPayroll(tabA, deps(pool, (t) => pool.land(t), sent));
+  assert.equal(tabA.rows[0].status, "paid");
+  await runPayroll(tabB, deps(pool, (t) => pool.land(t), sent));
+  assert.equal(sent.length, 1, "one transfer submitted");
+  assert.equal(transfersOut(sent), 1, "one note spent");
+  assert.equal(tabB.status, "done");
+  assert.equal(tabB.rows[0].status, "paid");
+  assert.equal(tabB.rows[0].paymentCommitment, tabA.rows[0].paymentCommitment, "the old copy shows the payment that went out");
+  const left = activeSpendableNotes(loadLocalNotes(me)).reduce((sum, n) => sum + BigInt(n.amountWei), 0n);
+  assert.equal(left, 1_010n, "the other note and the change are still there");
+});
+
+await test("an old copy resumed while the first payment is still landing waits for it, sending nothing", async () => {
+  const pool = mockPool();
+  const me = employer();
+  await fund(pool, me, 1_000n, "dep-t1");
+  await fund(pool, me, 1_000n, "dep-t2");
+  const run = runFor(me, [400n]);
+  await saveBatch(run);
+  const tabB = await stored(run.id);
+  const sent: Transfer[] = [];
+  let first: Hex | undefined;
+  await runPayroll(run, deps(pool, (t) => (first = pool.hold(t)), sent));
+  assert.equal(run.rows[0].status, "unconfirmed");
+  await runPayroll(tabB, deps(pool, (t) => pool.land(t), sent));
+  assert.equal(sent.length, 1, "nothing new from the old copy");
+  assert.equal(tabB.rows[0].status, "unconfirmed");
+  assert.equal(tabB.rows[0].spendNullifier, run.rows[0].spendNullifier);
+  await pool.mine(first!);
+  await runPayroll(tabB, deps(pool, nothingSent));
+  assert.equal(tabB.rows[0].status, "paid");
+});
+
+for (const locks of [true, false]) {
+  const how = locks ? "with Web Locks" : "without Web Locks (a lease in storage)";
+  await test(`a run going in another tab is refused, ${how}`, async () => {
+    const go = async () => {
+      const pool = mockPool();
+      const me = employer();
+      await fund(pool, me, 5_000n, `dep-l-${locks}`);
+      const run = runFor(me, [500n]);
+      await saveBatch(run);
+      const tabA = await stored(run.id);
+      const tabB = await stored(run.id);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const sent: Transfer[] = [];
+      const going = runPayroll(
+        tabA,
+        deps(
+          pool,
+          async (t) => {
+            await gate;
+            return pool.land(t);
+          },
+          sent
+        )
+      );
+      while (!sent.length) await new Promise((r) => setTimeout(r, 5));
+      await assert.rejects(runPayroll(tabB, deps(pool, nothingSent)), (e: unknown) => (e as Error).message === RUN_ELSEWHERE);
+      assert.equal(tabB.rows[0].status, "queued", "the refused copy is left as it was");
+      release();
+      await going;
+      await runPayroll(tabB, deps(pool, nothingSent));
+      assert.equal(tabB.rows[0].status, "paid");
+      assert.equal(sent.length, 1);
+    };
+    if (locks) await go();
+    else await withoutLocks(go);
+  });
+}
+
+await test("a note spent elsewhere is retired, never paid with", async () => {
+  const pool = mockPool();
+  const me = employer();
+  const gone = await fund(pool, me, 1_000n, "dep-x1");
+  await fund(pool, me, 5_000n, "dep-x2");
+  pool.spent.add(lc(gone.nullifier!)); // another tab or device spent it
+  const run = runFor(me, [900n]);
+  const sent: Transfer[] = [];
+  await runPayroll(run, deps(pool, (t) => pool.land(t), sent));
+  assert.equal(run.rows[0].status, "paid");
+  assert.equal(sent.length, 1, "no transfer the vault would refuse");
+  assert.equal(run.rows[0].spendNoteId, "dep-x2");
+  assert.equal(byId(gone.id).status, "recovered");
+});
+
+for (const locks of [true, false]) {
+  const how = locks ? "with Web Locks" : "without Web Locks (re-read before write)";
+  await test(`two tabs saving runs at once keep both, ${how}`, async () => {
+    const go = async () => {
+      const other = (await import(`../src/lib/payrollStore.ts?tab=${locks}`)) as typeof import("../src/lib/payrollStore");
+      const me = employer();
+      const a = { ...runFor(me, [1n]), id: `pr-race-a-${locks}` };
+      const b = { ...runFor(me, [2n]), id: `pr-race-b-${locks}` };
+      await Promise.all([saveBatch(a), other.saveBatch(b)]);
+      const ids = (await loadBatches(net.chainId, POOL)).map((x) => x.id);
+      assert.ok(ids.includes(a.id) && ids.includes(b.id), "both runs are stored");
+    };
+    if (locks) await go();
+    else await withoutLocks(go);
+  });
+}
 
 console.log(`\n${passed} payroll checks passed`);
