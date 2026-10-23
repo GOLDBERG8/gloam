@@ -159,7 +159,7 @@ export default function ClaimPage() {
               autoComplete="off"
               spellCheck={false}
               placeholder="Paste it here"
-              className="mt-1.5 w-full resize-none rounded-xl border border-line bg-panel px-3.5 py-3 text-[16px] text-foreground outline-none placeholder:text-faint focus:border-foreground/40 sm:text-[14px]"
+              className="gl-input mt-1.5 h-auto resize-none px-3.5 py-3 text-[16px] leading-relaxed sm:text-[14px]"
             />
             {pasteError && (
               <p role="alert" className="mt-2 text-[13px] leading-relaxed text-danger">

@@ -162,7 +162,7 @@ export function SendView() {
             </span>
           </div>
 
-          <div className="mt-6 rounded-[16px] bg-surface p-[16px] transition-shadow focus-within:ring-2 focus-within:ring-foreground/15 sm:p-5">
+          <div className="gl-inputcard mt-6 p-5 sm:p-6">
             <div className="flex items-center justify-between gap-3 text-[13px]">
               <label htmlFor="send-amount" className="text-mute">
                 You send

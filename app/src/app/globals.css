@@ -499,27 +499,252 @@ html.gl-lite .gl-field.gl-drift {
   opacity: 0.85;
 }
 
-/* Inputs: one calm style the app can opt into. */
+/* ---------- Motion: one set of curves for the whole app ---------- */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Inputs: one calm style the app can opt into. Focus eases in as a soft ring
+   instead of snapping to a hard outline. */
 .gl-input {
   height: 3rem;
   width: 100%;
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--line-strong);
   background: var(--panel);
-  padding: 0 0.95rem;
+  padding: 0 1rem;
   font-size: 15px;
   color: var(--foreground);
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.25s var(--ease-out),
+    background-color 0.2s var(--ease-out);
 }
 .gl-input::placeholder {
   color: var(--faint);
+  transition: color 0.2s var(--ease-out);
+}
+.gl-input:hover:not(:focus):not(:disabled) {
+  border-color: color-mix(in srgb, var(--line-strong) 70%, var(--foreground));
 }
 .gl-input:focus {
   outline: none;
-  border-color: var(--navy-500);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navy-500) 18%, transparent);
+  border-color: color-mix(in srgb, var(--navy-500) 65%, var(--line-strong));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--navy-500) 12%, transparent);
+}
+.gl-input:focus::placeholder {
+  color: color-mix(in srgb, var(--faint) 60%, transparent);
+}
+
+/* A field made of parts (an input plus a suffix or a button): looks like
+   .gl-input and lights up the same way while anything inside has focus. */
+.gl-inputwrap {
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  transition:
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.25s var(--ease-out);
+}
+.gl-inputwrap:hover:not(:focus-within) {
+  border-color: color-mix(in srgb, var(--line-strong) 70%, var(--foreground));
+}
+.gl-inputwrap:focus-within {
+  border-color: color-mix(in srgb, var(--navy-500) 65%, var(--line-strong));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--navy-500) 12%, transparent);
+}
+.gl-inputwrap :is(input, textarea, select):focus {
+  outline: none;
+}
+
+/* The big amount cards (Add, Pay, Swap, Prove): a soft surface that rises to
+   the panel colour with a gentle edge while you type in it. */
+.gl-inputcard {
+  border-radius: 20px;
+  border: 1px solid transparent;
+  background: var(--surface);
+  transition:
+    background-color 0.22s var(--ease-out),
+    border-color 0.22s var(--ease-out),
+    box-shadow 0.28s var(--ease-out);
+}
+.gl-inputcard:hover:not(:focus-within) {
+  border-color: var(--line);
+}
+.gl-inputcard:focus-within {
+  background: var(--panel);
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.gl-inputcard[data-invalid="true"] {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.gl-inputcard[data-invalid="true"]:focus-within {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.gl-inputcard :is(input, textarea):focus {
+  outline: none;
+}
+/* Big amounts step their size down as digits grow, smoothly. */
+.gl-amount {
+  transition: font-size 0.2s var(--ease-out);
+}
+
+/* Small pill choices (25%, 50%, Max), and anything pressable. */
+.gl-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  padding: 0 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--soft);
+  transition:
+    background-color 0.18s var(--ease-out),
+    border-color 0.18s var(--ease-out),
+    color 0.18s var(--ease-out),
+    transform 0.18s var(--ease-out);
+}
+.gl-chip:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--foreground);
+}
+.gl-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gl-press {
+  transition:
+    transform 0.18s var(--ease-out),
+    background-color 0.18s var(--ease-out),
+    border-color 0.18s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    color 0.18s var(--ease-out);
+}
+.gl-chip:active:not(:disabled),
+.gl-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Values that change in place (a new quote, a new label) settle in. */
+@keyframes gl-settle {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+.gl-settle {
+  animation: gl-settle 0.24s var(--ease-out) both;
+}
+.gl-settle-fast {
+  animation: gl-settle 0.16s var(--ease-out) both;
+}
+
+/* Loading placeholders: a slow sheen instead of a blink. */
+@keyframes gl-sheen {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -20% 0;
+  }
+}
+.gl-skeleton {
+  border-radius: 10px;
+  background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--panel) 70%, transparent) 50%, transparent 70%)
+    var(--surface-2);
+  background-size: 220% 100%;
+  animation: gl-sheen 1.3s linear infinite;
+}
+
+/* Folding sections: height and opacity ease together. */
+.gl-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.28s var(--ease-out),
+    opacity 0.2s var(--ease-out);
+}
+.gl-collapse > * {
+  min-height: 0;
+  overflow: hidden;
+}
+.gl-collapse[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* Sheets and their backdrop, in and out. */
+@keyframes gl-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
+@keyframes gl-sheet-out {
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+}
+@keyframes gl-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes gl-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+.gl-sheet {
+  animation: gl-sheet-in 0.26s var(--ease-out) both;
+}
+.gl-sheet[data-leaving="true"] {
+  animation: gl-sheet-out 0.17s ease-in both;
+}
+.gl-backdrop {
+  animation: gl-fade-in 0.22s var(--ease-out) both;
+}
+.gl-backdrop[data-leaving="true"] {
+  animation: gl-fade-out 0.17s ease-in both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gl-input,
+  .gl-input::placeholder,
+  .gl-inputwrap,
+  .gl-inputcard,
+  .gl-amount,
+  .gl-chip,
+  .gl-press,
+  .gl-collapse {
+    transition: none;
+  }
+  .gl-chip:active:not(:disabled),
+  .gl-press:active:not(:disabled) {
+    transform: none;
+  }
+  .gl-settle,
+  .gl-settle-fast,
+  .gl-skeleton,
+  .gl-sheet,
+  .gl-sheet[data-leaving="true"],
+  .gl-backdrop,
+  .gl-backdrop[data-leaving="true"] {
+    animation: none;
+  }
 }
 }
 

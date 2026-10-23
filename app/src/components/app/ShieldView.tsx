@@ -777,7 +777,7 @@ export function ShieldView() {
 
           <div className="mt-6">
             {/* from: your wallet */}
-            <div className="rounded-[16px] bg-surface p-[16px] transition-shadow focus-within:ring-2 focus-within:ring-foreground/15 sm:p-5">
+            <div className="gl-inputcard p-5 sm:p-6">
               <div className="flex items-center justify-between gap-3 text-[13px]">
                 <label htmlFor="shield-amount" className="text-mute">
                   You add

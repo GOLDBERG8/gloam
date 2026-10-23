@@ -89,9 +89,8 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
             Amount <span className="text-faint">(optional)</span>
           </label>
           <div
-            className={`mt-2 flex items-center gap-2 rounded-[16px] bg-surface py-2 pl-4 pr-2 focus-within:ring-2 ${
-              amountError ? "ring-2 ring-danger/40 focus-within:ring-danger/40" : "focus-within:ring-foreground/15"
-            }`}
+            data-invalid={Boolean(amountError)}
+            className="gl-inputcard mt-2 flex items-center gap-2 rounded-[16px] py-2 pl-4 pr-2"
           >
             <input
               ref={amountRef}

@@ -254,7 +254,7 @@ export function FundsFlow({ notes, empty }: { notes: LocalNote[]; empty: ReactNo
           <label htmlFor={`${ids}-amt`} className="text-[13px] text-mute">
             At least
           </label>
-          <div className="mt-2 flex items-center gap-3 rounded-[16px] bg-surface py-2 pl-4 pr-2 focus-within:ring-2 focus-within:ring-foreground/15">
+          <div className="gl-inputcard mt-2 flex items-center gap-3 rounded-[16px] py-2 pl-4 pr-2">
             <input
               id={`${ids}-amt`}
               inputMode="decimal"

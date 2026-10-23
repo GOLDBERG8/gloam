@@ -767,7 +767,7 @@ export function SealedTradePanel({
                 )}
               </div>
 
-              <div className="rounded-[18px] border border-line bg-surface/60 p-4 transition-colors focus-within:border-line-strong focus-within:bg-panel">
+              <div className="gl-inputcard p-5">
                 <div className="flex items-center justify-between gap-3">
                   <label htmlFor="ss-amt" className="text-[13px] text-mute">
                     {inSymbol} to {dir === "buy" ? "spend" : "sell"}

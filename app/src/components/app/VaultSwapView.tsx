@@ -11,7 +11,7 @@
  * that matches it exactly, else the smallest that covers it (the rest is set
  * aside privately first). More than the largest note takes a second swap.
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { formatUnits, type Address } from "viem";
 import { useReadContract } from "wagmi";
@@ -75,6 +75,14 @@ function plainAmount(raw: bigint, asset: string, maxFrac = 6): string {
   const [a, b = ""] = s.split(".");
   const frac = b.slice(0, maxFrac).replace(/0+$/, "");
   return frac ? `${a}.${frac}` : a!;
+}
+
+/** Big amount sizes (phone / from sm up), stepping down as digits grow so a long number never clips. */
+function amountSize(text: string): string {
+  const n = text.length;
+  const phone = n <= 6 ? "text-[32px]" : n <= 8 ? "text-[27px]" : n <= 10 ? "text-[23px]" : n <= 13 ? "text-[19px]" : "text-[16px]";
+  const wide = n <= 8 ? "sm:text-[40px]" : n <= 11 ? "sm:text-[33px]" : n <= 14 ? "sm:text-[27px]" : "sm:text-[22px]";
+  return `${phone} ${wide}`;
 }
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -235,6 +243,8 @@ export function VaultSwapView() {
   const [inverse, setInverse] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [picker, setPicker] = useState<"pay" | "receive" | null>(null);
+  // The flip button turns half a circle on each flip.
+  const [turns, setTurns] = useState(0);
 
   // A fresh quote whenever what is being swapped changes (after a short pause while typing).
   const quoteKey =
@@ -331,6 +341,7 @@ export function VaultSwapView() {
   function flip() {
     if (!canFlip || !toAsset || !payAsset) return;
     const next = shownPlan ? plainAmount(shownPlan.amountOut, toAsset) : "";
+    setTurns((t) => t + 1);
     setPayPick(toAsset);
     setToPick(payAsset);
     setAmountInput(next);
@@ -347,10 +358,12 @@ export function VaultSwapView() {
   const venue = network.chainId === 4217 ? "Tempo's stablecoin exchange" : "Uniswap on Robinhood Chain";
   const payUsd = payAsset && typed !== null && typed > 0n ? usdOf(typed, payAsset, marks) : null;
   const getUsd = shownPlan && toAsset ? usdOf(shownPlan.amountOut, toAsset, marks) : null;
+  const receiveText = shownPlan && toAsset ? formatAssetAmount(shownPlan.amountOut, toAsset) : "0";
 
   // One label for the main button, the first thing that stops the swap.
-  const button: { label: ReactNode; ready: boolean } = busy
+  const button: { key: string; label: ReactNode; ready: boolean } = busy
     ? {
+        key: `busy-${status ?? ""}`,
         label: (
           <>
             <Spinner />
@@ -360,15 +373,16 @@ export function VaultSwapView() {
         ready: false,
       }
     : !amountInput.trim()
-      ? { label: "Enter an amount", ready: false }
+      ? { key: "empty", label: "Enter an amount", ready: false }
       : amountBad
-        ? { label: "Enter a valid amount", ready: false }
+        ? { key: "bad", label: "Enter a valid amount", ready: false }
         : overTotal
-          ? { label: "Insufficient private balance", ready: false }
+          ? { key: "over", label: "Insufficient private balance", ready: false }
           : overNote && held && payAsset
-            ? { label: `Up to ${formatAssetLabel(held.largest, payAsset)} in one swap`, ready: false }
+            ? { key: "note", label: `Up to ${formatAssetLabel(held.largest, payAsset)} in one swap`, ready: false }
             : waitingQuote || quoting
               ? {
+                  key: "quoting",
                   label: (
                     <>
                       <Spinner />
@@ -378,19 +392,17 @@ export function VaultSwapView() {
                   ready: false,
                 }
               : quoteError
-                ? { label: "No price for this amount", ready: false }
+                ? { key: "noprice", label: "No price for this amount", ready: false }
                 : overRoom
-                  ? { label: "Too large for the vault right now", ready: false }
+                  ? { key: "room", label: "Too large for the vault right now", ready: false }
                   : relayOk === false
-                    ? { label: "The Gloam relay is off", ready: false }
-                    : shownPlan && relayOk === true
-                      ? { label: "Swap privately", ready: true }
-                      : { label: "Swap privately", ready: false };
+                    ? { key: "relay", label: "The Gloam relay is off", ready: false }
+                    : { key: "swap", label: "Swap privately", ready: Boolean(shownPlan && relayOk === true) };
 
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="gl-card mx-auto w-full min-w-0 max-w-[560px] p-3 sm:p-4 lg:mx-0">
-        <div className="flex items-center justify-between gap-3 px-2 pb-3 pt-1">
+    <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-10">
+      <div className="gl-card mx-auto w-full min-w-0 max-w-[560px] p-4 sm:p-6 lg:mx-0">
+        <div className="flex items-center justify-between gap-3 px-1 pb-5">
           <p className="t-title text-foreground">Swap</p>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-1 text-[12px] font-medium text-sealed">
             <LockIcon />
@@ -399,20 +411,21 @@ export function VaultSwapView() {
         </div>
 
         {!isConnected || !address ? (
-          <div className="space-y-3 rounded-[18px] bg-surface p-5">
+          <div className="space-y-4 rounded-[20px] bg-surface p-6">
             <p className="text-[14px] leading-relaxed text-soft">
               Connect the wallet you use with Gloam to swap from your private balance.
             </p>
             <WalletMenu />
           </div>
         ) : !notes.length ? (
-          <div className="rounded-[18px] bg-surface p-5 text-[14px] leading-relaxed text-soft">
+          <div className="rounded-[20px] bg-surface p-6 text-[14px] leading-relaxed text-soft">
             Nothing to swap yet. Add {assets.map(assetLabel).join(" or ")} to your private balance first.
           </div>
         ) : (
           <>
             {/* You pay */}
-            <div className="rounded-[18px] bg-surface p-4 focus-within:ring-1 focus-within:ring-line-strong">
+            <div className="gl-inputcard p-5 sm:p-6">
+              <div key={`pay-${payAsset ?? ""}`} className="gl-settle">
               <div className="flex items-center justify-between gap-3">
                 <label htmlFor="swap-amount" className="text-[13px] text-mute">
                   You pay
@@ -423,7 +436,7 @@ export function VaultSwapView() {
                   </span>
                 )}
               </div>
-              <div className="mt-2 flex items-center gap-3">
+              <div className="mt-3 flex items-center gap-3">
                 <input
                   id="swap-amount"
                   inputMode="decimal"
@@ -436,7 +449,9 @@ export function VaultSwapView() {
                     setDone(null);
                   }}
                   size={1}
-                  className="tnum w-0 min-w-0 flex-1 bg-transparent text-[28px] font-light sm:text-[34px] leading-tight tracking-[-0.02em] text-foreground outline-none placeholder:text-faint disabled:opacity-60"
+                  className={`gl-amount tnum w-0 min-w-0 flex-1 bg-transparent font-light leading-tight tracking-[-0.02em] text-foreground outline-none placeholder:text-faint disabled:opacity-60 ${amountSize(
+                    amountInput || "0"
+                  )}`}
                 />
                 {payAsset && (
                   <TokenPill
@@ -448,16 +463,16 @@ export function VaultSwapView() {
                   />
                 )}
               </div>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                <span className="tnum text-[12.5px] text-mute">{payUsd != null ? fmtUsd(payUsd) : " "}</span>
-                <div className="flex gap-1.5" role="group" aria-label="Amount presets">
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <span className="tnum text-[13px] text-mute">{payUsd != null ? fmtUsd(payUsd) : " "}</span>
+                <div className="flex gap-2" role="group" aria-label="Amount presets">
                   {[25, 50, 75, 100].map((p) => (
                     <button
                       key={p}
                       type="button"
                       disabled={busy || !held}
                       onClick={() => setShare(p)}
-                      className="min-h-8 rounded-full border border-line bg-panel px-2.5 text-[12px] font-medium text-soft transition-colors hover:border-line-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 disabled:opacity-50"
+                      className="gl-chip focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15"
                     >
                       {p === 100 ? "Max" : `${p}%`}
                     </button>
@@ -465,29 +480,36 @@ export function VaultSwapView() {
                 </div>
               </div>
               {held && payAsset && held.notes.length > 1 && held.largest < held.total && (
-                <p className="mt-2 text-[12px] leading-relaxed text-mute">
+                <p className="mt-4 text-[12.5px] leading-[1.6] text-mute">
                   Up to {formatAssetLabel(held.largest, payAsset)} in one swap. Your balance is in {held.notes.length} parts, and
                   a swap spends one.
                 </p>
               )}
+              </div>
             </div>
 
             {/* Flip */}
-            <div className="relative z-[1] -my-3 flex justify-center">
+            <div className="relative z-[1] flex h-2 items-center justify-center">
               <button
                 type="button"
                 onClick={flip}
                 disabled={!canFlip}
                 aria-label="Switch what you pay and what you receive"
                 title={canFlip ? "Switch" : "You need a private balance in the other token to switch"}
-                className="grid h-10 w-10 place-items-center rounded-full border border-line bg-panel text-foreground shadow-card ring-4 ring-panel transition-transform hover:rotate-180 focus-visible:outline-none focus-visible:ring-foreground/20 disabled:text-faint disabled:hover:rotate-0 motion-reduce:transition-none"
+                className="gl-press grid h-11 w-11 place-items-center rounded-full border border-line bg-panel text-foreground shadow-card ring-[5px] ring-panel hover:border-line-strong focus-visible:outline-none focus-visible:ring-foreground/20 disabled:text-faint"
               >
-                <FlipIcon />
+                <span
+                  className="inline-grid transition-transform duration-300 ease-[cubic-bezier(0.34,1.22,0.64,1)] motion-reduce:transition-none"
+                  style={{ transform: `rotate(${turns * 180}deg)` }}
+                >
+                  <FlipIcon />
+                </span>
               </button>
             </div>
 
             {/* You receive */}
-            <div className="rounded-[18px] bg-surface p-4" aria-live="polite">
+            <div className="rounded-[20px] bg-surface p-5 sm:p-6" aria-live="polite">
+              <div key={`get-${toAsset ?? ""}`} className="gl-settle">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[13px] text-mute">You receive</span>
                 {toAsset && holdings.get(toAsset.toLowerCase()) && (
@@ -496,20 +518,18 @@ export function VaultSwapView() {
                   </span>
                 )}
               </div>
-              <div className="mt-2 flex items-center gap-3">
+              <div className="mt-3 flex items-center gap-3">
                 <div className="min-w-0 flex-1">
                   {(waitingQuote || quoting) && !shownPlan ? (
-                    <span
-                      className="block h-[42px] w-36 rounded-lg bg-surface-2 motion-safe:animate-pulse"
-                      aria-label="Getting a price"
-                    />
+                    <span className="gl-skeleton block h-[40px] w-40 sm:h-[48px]" aria-label="Getting a price" />
                   ) : (
                     <p
-                      className={`tnum truncate text-[28px] font-light sm:text-[34px] leading-tight tracking-[-0.02em] ${
-                        shownPlan ? "text-foreground" : "text-faint"
-                      }`}
+                      key={shownPlan ? shownPlan.amountOut.toString() : "none"}
+                      className={`gl-settle gl-amount tnum truncate font-light leading-tight tracking-[-0.02em] ${amountSize(
+                        receiveText
+                      )} ${shownPlan ? "text-foreground" : "text-faint"}`}
                     >
-                      {shownPlan && toAsset ? formatAssetAmount(shownPlan.amountOut, toAsset) : "0"}
+                      {receiveText}
                     </p>
                   )}
                 </div>
@@ -523,32 +543,38 @@ export function VaultSwapView() {
                   />
                 )}
               </div>
-              <p className="tnum mt-2 text-[12.5px] text-mute">{getUsd != null ? fmtUsd(getUsd) : " "}</p>
+              <p key={getUsd != null ? fmtUsd(getUsd) : "none"} className="gl-settle-fast tnum mt-4 text-[13px] text-mute">
+                {getUsd != null ? fmtUsd(getUsd) : " "}
+              </p>
+              </div>
             </div>
 
             {/* Rate and details */}
             {shownPlan && payAsset && toAsset && amount !== null && (
-              <div className="mt-3 rounded-[18px] border border-line px-4">
-                <div className="flex min-h-12 items-center justify-between gap-3">
+              <div className="gl-settle mt-4 rounded-[18px] border border-line px-5">
+                <div className="flex min-h-[52px] items-center justify-between gap-3">
                   <button
                     type="button"
                     onClick={() => setInverse((v) => !v)}
-                    className="tnum min-w-0 truncate text-left text-[13px] text-soft hover:text-foreground focus-visible:outline-none focus-visible:underline"
+                    className="tnum min-w-0 truncate text-left text-[13px] text-soft transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
                     aria-label="Flip the rate"
                   >
-                    {rateLine(amount, payAsset, shownPlan.amountOut, toAsset, inverse)}
+                    <span key={`${inverse}-${shownPlan.amountOut}`} className="gl-settle-fast inline-block">
+                      {rateLine(amount, payAsset, shownPlan.amountOut, toAsset, inverse)}
+                    </span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowDetails((v) => !v)}
                     aria-expanded={showDetails}
-                    className="inline-flex min-h-10 shrink-0 items-center gap-1 text-[13px] text-mute hover:text-foreground focus-visible:outline-none focus-visible:underline"
+                    className="inline-flex min-h-10 shrink-0 items-center gap-1 text-[13px] text-mute transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
                   >
                     Details
                     <Chevron open={showDetails} />
                   </button>
                 </div>
-                {showDetails && (
+                <div className="gl-collapse" data-open={showDetails} aria-hidden={!showDetails}>
+                  <div>
                   <dl className="divide-y divide-line border-t border-line pb-1 text-[13px]">
                     <Row term="You receive exactly">{formatAssetLabel(shownPlan.amountOut, toAsset)}</Row>
                     <Row term={`Vault fee (${formatFeePercent(feeBps ?? 0)})`}>
@@ -560,12 +586,13 @@ export function VaultSwapView() {
                     <Row term="Route">{routeLine(network.chainId, payAsset, shownPlan, venue)}</Row>
                     <Row term="Sent by">The Gloam relay, not your wallet</Row>
                   </dl>
-                )}
+                  </div>
+                </div>
               </div>
             )}
 
             {(quoteError || overRoom || relayOk === false || (note && amount !== null && amount < BigInt(note.amountWei))) && (
-              <div className="mt-3 space-y-2 px-1 text-[12.5px] leading-relaxed">
+              <div className="gl-settle mt-4 space-y-2.5 px-1 text-[12.5px] leading-[1.6]">
                 {quoteError && <p className="text-warn">{quoteError}</p>}
                 {overRoom && room != null && toAsset && (
                   <p className="text-warn">The vault takes at most {formatAssetLabel(room, toAsset)} right now. Swap a smaller amount.</p>
@@ -583,18 +610,20 @@ export function VaultSwapView() {
               type="button"
               disabled={!button.ready || busy}
               onClick={() => void onSwap()}
-              className="btn btn-ink btn-lg btn-block mt-3"
+              className="btn btn-ink btn-lg btn-block mt-5 h-[52px]"
             >
-              {button.label}
+              <span key={button.key} className="gl-settle-fast inline-flex min-w-0 items-center gap-2">
+                {button.label}
+              </span>
             </button>
 
             {error && (
-              <p role="alert" className="mt-3 break-words rounded-xl bg-danger-soft px-4 py-3 text-[13.5px] leading-relaxed text-danger">
+              <p role="alert" className="gl-settle mt-4 break-words rounded-[14px] bg-danger-soft px-4 py-3.5 text-[13.5px] leading-relaxed text-danger">
                 {error}
               </p>
             )}
             {done && (
-              <p className="mt-3 rounded-xl bg-sealed-soft px-4 py-3 text-[13.5px] leading-relaxed text-foreground">{done}</p>
+              <p className="gl-settle mt-4 rounded-[14px] bg-sealed-soft px-4 py-3.5 text-[13.5px] leading-relaxed text-foreground">{done}</p>
             )}
           </>
         )}
@@ -655,7 +684,7 @@ function routeLine(chainId: number, assetIn: string, plan: SwapPlan, venue: stri
 
 function Row({ term, children }: { term: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-11 items-center justify-between gap-4 py-2">
+    <div className="flex min-h-12 items-center justify-between gap-4 py-2.5">
       <dt className="text-mute">{term}</dt>
       <dd className="tnum min-w-0 text-right text-foreground">{children}</dd>
     </div>
@@ -683,7 +712,7 @@ function TokenPill({
       onClick={onClick}
       disabled={disabled}
       aria-label={`${label}, now ${symbol}`}
-      className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full border border-line bg-panel pl-1.5 pr-3 text-[15px] font-medium text-foreground shadow-card transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 disabled:opacity-60"
+      className="gl-press inline-flex h-11 shrink-0 items-center gap-2 rounded-full border border-line bg-panel pl-1.5 pr-3 text-[15px] font-medium text-foreground shadow-card hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 disabled:opacity-60"
     >
       <TokenLogo id={t?.id ?? symbol.toLowerCase()} symbol={symbol} size={30} />
       {symbol}
@@ -713,12 +742,23 @@ function TokenPicker({
 }) {
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const first = useRef<HTMLButtonElement>(null);
+  // Closing plays the sheet out first (instantly with reduced motion), then
+  // hands over to the parent.
+  const [leaving, setLeaving] = useState(false);
+  const leavingRef = useRef(false);
+  const leave = useCallback((then: () => void) => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return then();
+    setLeaving(true);
+    window.setTimeout(then, 170);
+  }, []);
   useEffect(() => {
     first.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && leave(onClose);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, leave]);
   if (!mounted) return null;
   return createPortal(
     <div
@@ -727,17 +767,26 @@ function TokenPicker({
       aria-modal="true"
       aria-labelledby="swap-picker-title"
     >
-      <button type="button" className="absolute inset-0 bg-black/40 backdrop-blur-sm" aria-label="Close" onClick={onClose} />
-      <div className="relative z-[1] max-h-[min(80dvh,560px)] w-full max-w-[400px] overflow-y-auto rounded-[24px] bg-panel p-5 shadow-pop sm:p-6">
+      <button
+        type="button"
+        data-leaving={leaving}
+        className="gl-backdrop absolute inset-0 bg-black/40 backdrop-blur-sm"
+        aria-label="Close"
+        onClick={() => leave(onClose)}
+      />
+      <div
+        data-leaving={leaving}
+        className="gl-sheet relative z-[1] max-h-[min(80dvh,560px)] w-full max-w-[400px] overflow-y-auto rounded-[24px] bg-panel p-6 shadow-pop sm:p-7"
+      >
         <div className="flex items-center justify-between gap-3">
           <h2 id="swap-picker-title" className="text-[20px] font-light tracking-[-0.01em] text-foreground">
             {mode === "pay" ? "Pay with" : "Receive"}
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => leave(onClose)}
             aria-label="Close"
-            className="-mr-2 grid h-10 w-10 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"
+            className="gl-press -mr-2 grid h-10 w-10 place-items-center rounded-full text-mute hover:bg-surface hover:text-foreground"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -747,7 +796,7 @@ function TokenPicker({
         <p className="mt-1 text-[13px] text-mute">
           {mode === "pay" ? "From your private balance." : "Lands in your private balance."}
         </p>
-        <ul className="mt-4 space-y-1">
+        <ul className="mt-5 space-y-1.5">
           {assets.map((a, i) => {
             const t = tokenFor(chainId, a);
             const symbol = t?.symbol ?? assetLabel(a);
@@ -761,9 +810,9 @@ function TokenPicker({
                   ref={i === 0 ? first : undefined}
                   type="button"
                   disabled={blocked}
-                  onClick={() => onPick(a)}
+                  onClick={() => leave(() => onPick(a))}
                   aria-current={isCurrent ? "true" : undefined}
-                  className={`flex min-h-14 w-full items-center gap-3 rounded-[14px] px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`gl-press flex min-h-[60px] w-full items-center gap-3 rounded-[16px] px-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 disabled:cursor-not-allowed disabled:opacity-50 ${
                     isCurrent ? "bg-surface" : "hover:bg-surface"
                   }`}
                 >
@@ -792,14 +841,14 @@ function TokenPicker({
 /** What stays private, what is public, and what happens if a swap can't finish. Kept in full. */
 function PrivacyNotes({ venue }: { venue: string }) {
   return (
-    <div className="gl-card min-w-0 p-5 text-[13px] leading-relaxed text-soft">
+    <div className="gl-card min-w-0 p-6 text-[13.5px] leading-[1.65] text-soft sm:p-7">
       <p className="t-title text-foreground">What stays private</p>
-      <ul className="mt-3 space-y-2">
+      <ul className="mt-3 space-y-2.5">
         <li>Who swapped. The Gloam relay sends it, so your wallet never shows.</li>
         <li>Which balance it came from, and where the new one goes next.</li>
       </ul>
-      <p className="t-title mt-5 text-foreground">What is public</p>
-      <ul className="mt-3 space-y-2">
+      <p className="t-title mt-7 text-foreground">What is public</p>
+      <ul className="mt-3 space-y-2.5">
         <li>The two amounts and the two tokens, as with any trade on {venue}.</li>
         <li>
           The amount you swap, too: swapping exactly what you added links back to that deposit. Swap a different
@@ -807,7 +856,7 @@ function PrivacyNotes({ venue }: { venue: string }) {
         </li>
         <li>And cashing out exactly what you got can be matched to this swap. Send it on or cash out a different amount.</li>
       </ul>
-      <p className="t-title mt-5 text-foreground">If it can&apos;t finish</p>
+      <p className="t-title mt-7 text-foreground">If it can&apos;t finish</p>
       <p className="mt-3">
         Once a swap is sent, anyone can make it fail on purpose by sending its first step on its own. Then the money
         comes back to your private balance by itself, less up to 1%: the vault&apos;s cash-out fee and a safety margin
@@ -834,7 +883,7 @@ function Chevron({ open }: { open: boolean }) {
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden
-      className={`shrink-0 text-mute transition-transform ${open ? "rotate-180" : ""}`}
+      className={`shrink-0 text-mute transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
     >
       <path d="m7 10 5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
