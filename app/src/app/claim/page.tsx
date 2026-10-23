@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
+import { ClaimSafetyLine } from "@/components/app/ClaimSafetyLine";
 import { appClaimPath, codeFromHash } from "@/lib/claimLink";
 import { countLinkOpened, isClaimLink } from "@/lib/funnel";
 import { getNetwork, isNetworkKey, type NetworkKey } from "@/lib/networks";
 import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/notePackage";
 import { inWalletBrowser } from "@/lib/passkey";
+import { relayFor } from "@/lib/relay/client";
 import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
 import { formatAssetLabel } from "@/lib/shield";
 
@@ -55,6 +57,21 @@ export default function ClaimPage() {
   const [linkNet, setLinkNet] = useState<NetworkKey | null>(null);
   const [pasted, setPasted] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
+  // Whether the Gloam relay is up on the link's network: then it pays the
+  // network fee and claiming is free. Unknown (null) until it answers.
+  const [relayUp, setRelayUp] = useState<boolean | null>(null);
+  const readyNet = view.kind === "ready" ? view.net : null;
+
+  useEffect(() => {
+    if (!readyNet) return;
+    let live = true;
+    void relayFor(getNetwork(readyNet).chainId).then((r) => {
+      if (live) setRelayUp(Boolean(r?.enabled));
+    });
+    return () => {
+      live = false;
+    };
+  }, [readyNet]);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,6 +235,7 @@ export default function ClaimPage() {
                 <a href={appClaimPath(view.code, view.net)} className="btn btn-ink btn-lg btn-block mt-7">
                   Claim it
                 </a>
+                {relayUp !== null && <ClaimSafetyLine free={relayUp} centered className="mt-4" />}
                 <p className="mt-3 text-center text-[13px] text-mute">
                   {view.net === "tempo"
                     ? "No wallet needed: sign in with a passkey on the next screen."
