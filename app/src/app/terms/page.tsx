@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "Terms of Use" };
 
 export default function TermsPage() {
   return (
-    <LegalLayout title="Terms of Use" updated="October 21, 2026">
+    <LegalLayout title="Terms of Use" updated="October 23, 2026">
       <p>
         These Terms of Use (“Terms”) govern access to and use of the websites,
         applications, documentation, and interfaces operated under gloam.trade
@@ -42,10 +42,11 @@ export default function TermsPage() {
       <p>
         Gloam is early-stage, beta software for interacting with blockchain
         networks, including Tempo and Robinhood Chain. Features such as private
-        balances, private payments, payroll, proofs and private trading may be
+        balances, private payments, payroll, proofs and private swaps may be
         incomplete, unavailable, or change without notice. Stock tokens are on
-        testnet only, and private trading is not available on mainnet. There
-        is no guarantee of uptime, correctness, or fitness for any purpose.
+        testnet only. A private swap trades on a public exchange, so its tokens
+        and amounts are public. There is no guarantee of uptime, correctness,
+        or fitness for any purpose.
       </p>
       <h2>3. No custody</h2>
       <p>

@@ -10,6 +10,7 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { faucetFor } from "@/lib/faucet";
 import { MAINNET_ENABLED, getNetwork, NETWORK_KEYS, isNetworkKey, type NetworkKey } from "@/lib/networks";
 import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
+import { vaultSwapRouter } from "@/lib/vaultSwap";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import {
   buildPaymentRequestLink,
@@ -110,8 +111,8 @@ const LEAVE_OUT = MAINNET_ENABLED ? "Leave out for every network." : "Leave out 
 const STATUS = MAINNET_ENABLED
   ? `Mainnet, real money: ${NETWORK_KEYS.filter((k) => !getNetwork(k).testnet)
       .map((k) => `${getNetwork(k).label} (${getNetwork(k).chainId})`)
-      .join(" and ")}, with the trusted setup's final keys (13 contributors) and beta deposit limits. Deposits and private payments are free; a cash out costs 0.25%. Beta software: reviewed internally before launch, external audit planned. Testnets, play money: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys. Private trade (sealed swaps) is paused until its solvency accounting lands.`
-  : "Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Testnet proofs use development keys; the production ceremony is done (13 contributors) and mainnet deploys its final keys. Private trade (sealed swaps) is paused until its solvency accounting lands.";
+      .join(" and ")}, with the trusted setup's final keys (13 contributors) and beta deposit limits. Deposits and private payments are free; a cash out costs 0.25%. Beta software: reviewed internally before launch, external audit planned. Testnets, play money: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys. Private swaps are live in the app on both mainnets (Vault > Swap): who swapped stays private, the tokens and amounts are public, and this server does not swap. The old private trade (sealed swaps) is retired.`
+  : "Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Testnet proofs use development keys; the production ceremony is done (13 contributors) and mainnet deploys its final keys. The old private trade (sealed swaps) is retired.";
 
 const WHAT_IS_PUBLIC =
   "Deposits and cash outs are public transactions (wallet, asset and amount show on chain). What stays private is everything in between: balances inside the vault, the amounts and parties of private sends, and the link between a deposit and a later cash out.";
@@ -126,6 +127,7 @@ function appLinks(origin: string) {
   return {
     app: `${origin}/app`,
     deposit: `${origin}/app/vault?tab=shield`,
+    swap: `${origin}/app/vault?tab=swap`,
     receive: `${origin}/app/vault?tab=move&mode=receive`,
     verify: `${origin}/verify`,
     transparency: `${origin}/transparency`,
@@ -149,7 +151,7 @@ export const TOOLS: Tool[] = [
     name: "gloam_networks",
     title: "Networks and assets",
     description: MAINNET_ENABLED
-      ? "The networks Gloam runs on, mainnets first, with each vault (pool) address, the assets you can deposit (on mainnet: USDC.e, pathUSD, USDT0 and OUSD on Tempo, USDG and GLOAM on Robinhood Chain; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and the testnet faucets."
+      ? "The networks Gloam runs on, mainnets first, with each vault (pool) address, each mainnet's private swap router, the assets you can deposit (on mainnet: USDC.e, pathUSD, USDT0 and OUSD on Tempo, USDG and GLOAM on Robinhood Chain; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and the testnet faucets."
       : "The networks Gloam runs on, with each vault (pool) address, the assets you can deposit (OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and faucets.",
     inputSchema: {
       type: "object",
@@ -304,6 +306,7 @@ function networkView(key: NetworkKey, origin: string) {
     poolExplorer: n.pool ? n.explorerAddress(n.pool) : null,
     deployBlock: n.deployBlock?.toString() ?? null,
     paymentMessageBoard: n.payMemo?.address ?? null,
+    swapRouter: vaultSwapRouter(n.chainId),
     gas: n.family === "tempo" ? "Paid in stablecoins; Tempo has no gas coin. Deposits are tokens only." : "ETH",
     mainStablecoin: assets.find((a) => a.stable)?.symbol ?? null,
     assets: assets.map((a) => ({

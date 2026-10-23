@@ -373,13 +373,12 @@ export function Landing() {
             })}
           </div>
           <p className="mt-8 max-w-[68ch] text-[15px] leading-relaxed text-mute">
-            <span className="text-foreground">Coming next.</span>{" "}
-            <MainnetCopy
-              live="Stock tokens can be held and sent privately on Robinhood Chain testnet today. Private trading is underway, with a new engine built for it."
-              before="Stock tokens on Robinhood Chain can be held and sent privately today. Private trading is underway, with a new engine built for it."
-            />{" "}
-            <Link href="/docs/sealed-trade" className="text-foreground underline-offset-4 hover:underline">
-              About private trade <span aria-hidden>→</span>
+            <span className="text-foreground">New: private swaps.</span> Swap
+            straight from your private balance on Robinhood Chain and Tempo
+            mainnet. Who swapped stays private; the amounts show, like any DEX
+            trade.{" "}
+            <Link href="/docs/private-swaps" className="text-foreground underline-offset-4 hover:underline">
+              About private swaps <span aria-hidden>→</span>
             </Link>
           </p>
         </section>

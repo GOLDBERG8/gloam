@@ -20,8 +20,8 @@ export default function WhitepaperPage() {
         { label: "Version", value: "0.5" },
         { label: "Status", value: "Public draft" },
         { label: "Networks", value: "Mainnet RH 4663 · Tempo 4217; testnet 46630 · 42431" },
-        { label: "Live", value: "Shield · pay · payroll · proofs" },
-        { label: "Private trade", value: "Off; new engine underway" },
+        { label: "Live", value: "Shield · pay · payroll · proofs · swaps" },
+        { label: "Private swaps", value: "Mainnet; amounts public" },
         { label: "Mainnet", value: "Live since 21 Oct 2026, beta" },
       ]}
       quickLinks={[
@@ -162,8 +162,8 @@ export default function WhitepaperPage() {
         </li>
         <li>
           <strong>Hidden by design (goal):</strong> amounts while shielded;
-          the internal transfer graph between notes; trade intent during private
-          execution (roadmap).
+          the internal transfer graph between notes; who made a private swap;
+          trade intent during private execution (roadmap).
         </li>
         <li>
           <strong>Degraded when the set is small:</strong> timing and size
@@ -211,9 +211,9 @@ export default function WhitepaperPage() {
         <li>
           <strong>Circuits</strong>, shield (binds a deposit to its note),
           transfer (private send / split) and unshield (exit), with
-          public-input layouts bound to the vault. A sealed-swap circuit for
-          private trade is built but switched off. Three more circuits back the
-          proofs in 6.1.
+          public-input layouts bound to the vault. A sealed-swap circuit from
+          the first private trade design is retired and stays off. Three more
+          circuits back the proofs in 6.1.
         </li>
         <li>
           <strong>Verifiers</strong>, Groth16 verifiers for each on-chain
@@ -223,6 +223,14 @@ export default function WhitepaperPage() {
         <li>
           <strong>Memo board</strong>, an encrypted payment-message contract
           that lets a recipient find payments sent to them. It holds no funds.
+        </li>
+        <li>
+          <strong>Swap routers</strong>, one per mainnet (Uniswap v4 on
+          Robinhood Chain, Tempo&apos;s stablecoin exchange on Tempo). A router
+          takes one note out of the vault to a one-time escrow, buys an exact
+          amount on its fixed venue, and deposits the output back as a new
+          note, in one transaction. It uses only the vault&apos;s unshield and
+          proof-bound deposit, and has no owner, admin or upgrade.
         </li>
       </ul>
 
@@ -277,6 +285,14 @@ export default function WhitepaperPage() {
         <li>
           <strong>Unshield</strong>, prove ownership of a note and withdraw to
           a public address bound in the proof. Exit is a visible edge.
+        </li>
+        <li>
+          <strong>Swap</strong>, unshield one note to an escrow address derived
+          from the whole swap (the note spent, the new note, a refund note and
+          the route), trade it on a public DEX, and shield the exact output as
+          a new note. The Gloam relay submits it. Who swapped stays private; the
+          tokens and amounts are public. If someone sends the unshield alone,
+          the same call returns 99% of the note as the refund note.
         </li>
         <li>
           <strong>Prove</strong>, show a named party a balance, a payment
@@ -347,15 +363,14 @@ export default function WhitepaperPage() {
         The dual verifier routes transfer and unshield by public-input count.
       </p>
       <p>
-        Sealed swap (private trade) binds root, nullifier, two new commitments,
-        assets, a public min-out floor, and rate numerators. Its circuit,
-        verifier, and oracle-bound rate checks are built and tested, but it is
-        switched off: neither testnet pool has a sealed-swap verifier set, so
-        every swap call reverts, and the mainnet pools have no sealed swap at
-        all. Its first design could leave the pool owing
-        an asset it does not hold (audit H1). It stays off while we build a new
-        engine for private trading, and any re-enable goes through the 3-day
-        timelock.
+        Sealed swap (the first private trade design) binds root, nullifier,
+        two new commitments, assets, a public min-out floor, and rate
+        numerators. It is retired: neither testnet pool has a sealed-swap
+        verifier set, so every sealed swap call reverts, and the mainnet pools
+        have no sealed swap at all. Its design could leave the pool owing an
+        asset it does not hold (audit H1). Private swaps replaced it. They add
+        no circuit: a swap is an unshield and a proof-bound shield, joined by
+        the router in one transaction.
       </p>
       <p>
         Earlier pools on both chains, including a keccak-based Robinhood Chain
@@ -527,6 +542,11 @@ export default function WhitepaperPage() {
         <li>
           Correlation attacks when few users participate or amounts are unique
         </li>
+        <li>
+          Private swap tokens and amounts, which are public like any DEX trade;
+          a swap sized like a recent deposit, or a cash out sized like a
+          swap&apos;s output, can be matched
+        </li>
       </ul>
       <h3>9.3 Out of scope as “solved by crypto alone”</h3>
       <ul>
@@ -565,9 +585,15 @@ export default function WhitepaperPage() {
         <li>Private payroll, scheduled payroll, and payment requests</li>
         <li>Proofs of funds, payment, and payroll totals, checked at /verify</li>
         <li>
-          Private trade (sealedSwap): built, switched off while we build a new
-          engine for private trading. A via-market path (cash out, public swap, re-shield) is available where
-          a public pool exists, with the swap size public on that edge
+          Private swaps on Robinhood Chain and Tempo mainnet: USDG and $GLOAM
+          on Robinhood Chain, the four vault stablecoins on Tempo, sent by the
+          Gloam relay, with who swapped kept private and the amounts public
+        </li>
+        <li>
+          The first private trade design (sealedSwap) is retired. On the
+          Robinhood Chain testnet a via-market path (cash out, public swap,
+          re-shield) remains where a public pool exists, with the swap size
+          public on that edge
         </li>
       </ul>
       <p>
@@ -586,14 +612,14 @@ export default function WhitepaperPage() {
           shield, unshield, private send, the Gloam relay, payroll, proofs of
           funds, payment, and payroll totals, private agent payments, beta
           deposit limits, and pools with no admin withdraw and timelocked rule
-          changes. The testnets add encrypted memos and stock tokens held and
-          sent privately, with test funds.
+          changes. Private swaps from the private balance run on both, through
+          a router per chain. The testnets add encrypted memos and stock tokens
+          held and sent privately, with test funds.
         </li>
         <li>
-          <strong>Underway:</strong> a new engine for private trading. The
-          first sealed-swap path (circuit, verifier, oracle-bound rates) is
-          built and tested but switched off. Trading mixes many people&apos;s
-          orders, so it needs its own design rather than the payment one.
+          <strong>Retired:</strong> the first sealed-swap path (circuit,
+          verifier, oracle-bound rates). It stays off, and private swaps
+          replaced it.
         </li>
         <li>
           <strong>Near term:</strong> a designated-verifier mode for proofs;
@@ -601,8 +627,7 @@ export default function WhitepaperPage() {
         </li>
         <li>
           <strong>Mid term:</strong> issuer-scoped disclosure for regulated
-          stablecoins on Tempo; private trading of stock tokens on the new
-          engine.
+          stablecoins on Tempo; private trading of stock tokens.
         </li>
         <li>
           <strong>Production gate:</strong> done before mainnet, the multi-party
@@ -634,6 +659,11 @@ export default function WhitepaperPage() {
           it into a new note only the payee knows
         </li>
         <li>The relayer is run by the Gloam team at launch; it can refuse or go down, never redirect</li>
+        <li>
+          Private swaps show their tokens and amounts, trade on outside venues,
+          and only go through the relay; a swap someone breaks on purpose
+          refunds 99% of the note
+        </li>
         <li>
           A stablecoin issuer can freeze the vault contract; the answer is to
           screen deposits so flagged funds never enter
