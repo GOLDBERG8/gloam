@@ -29,7 +29,7 @@ import {
   type GloamNetwork,
 } from "./constants.js";
 import { noteCommitmentPoseidon, noteNullifierPoseidon } from "./note.js";
-import { fieldToHex, hexToField } from "./poseidon.js";
+import { fieldToHex, getPoseidon, hexToField } from "./poseidon.js";
 import {
   decodeNotePackage,
   isSealedTicket,
@@ -50,9 +50,9 @@ export interface PayMemoBoard {
 }
 
 /**
- * The boards Gloam runs, by chain id. Robinhood Chain and Tempo MAINNET have
- * none yet: there, payments to a Gloam address are handed over as a sealed
- * code (openIncomingPayment) until a board is deployed and filled in here.
+ * The boards Gloam runs, by chain id: both testnets and both mainnets. On a
+ * chain with no entry here, payments to a Gloam address are handed over as a
+ * sealed code (openIncomingPayment).
  */
 export const PAY_MEMO_BOARDS: Record<number, PayMemoBoard | null> = {
   [RH_TESTNET_CHAIN_ID]: { address: GLOAM_PAY_MEMO, deployBlock: 90_421_567n, emitsPoster: true },
@@ -229,6 +229,9 @@ export async function scanIncomingPayments(params: ScanIncomingParams): Promise<
 
   const payments: IncomingPayment[] = [];
   const seen = new Set<string>();
+  // Load the hash up front, so a failure to load it is passed on (and the range
+  // retried) instead of every message reading as a bad code below.
+  if (logs.length) await getPoseidon();
   for (const log of logs) {
     const { paymentCommitment, memo } = log.args;
     if (!paymentCommitment || !memo) continue;
@@ -238,7 +241,8 @@ export async function scanIncomingPayments(params: ScanIncomingParams): Promise<
     } catch {
       continue;
     }
-    const opened = await openForKey(sealed, receiveKey, network, paymentCommitment);
+    // Anyone can post to the board: one malformed code must not stop the scan.
+    const opened = await openForKey(sealed, receiveKey, network, paymentCommitment).catch(() => null);
     if (!opened || seen.has(opened.commitment.toLowerCase())) continue;
     const { inVault, spent } = await stateAt(client, network.pool, opened.commitment, opened.nullifier, scannedTo);
     if (!inVault || spent) continue;

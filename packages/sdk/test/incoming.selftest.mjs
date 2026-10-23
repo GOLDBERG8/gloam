@@ -4,9 +4,9 @@
  * Runs scanIncomingPayments and openIncomingPayment against an in-memory chain:
  * a payment-message board with real sealed payments, payments to someone else,
  * a forged message, spent and not-yet-landed payments, a duplicate post, a node
- * that refuses wide ranges, and a mainnet with no board. With GLOAM_LIVE=1 it
- * also scans the live testnet boards read-only (Robinhood Chain and Tempo) with
- * a fresh key, and checks that the mainnets report they have no board yet.
+ * that refuses wide ranges, malformed codes, and a chain with no board. With
+ * GLOAM_LIVE=1 it also scans the live testnet and mainnet boards read-only
+ * (Robinhood Chain and Tempo) with a fresh key.
  *
  * Run after build:  node test/incoming.selftest.mjs
  */
@@ -153,6 +153,29 @@ const someoneElse = await generateReceiveKey();
   chain.memos.push({ block: 1501n, commitment, memo: toHex(await sealToReceiveTag(pack, raeto.tag)), tx: "0xc1" });
   const r = await scanIncomingPayments({ client: chain.client, network: net, receiveKey: raeto, board: BOARD });
   assert(r.payments.length === 0, `a code claiming amount + p is not a payment (got ${r.payments.map((p) => p.amountWei).join(",")})`);
+}
+
+// ── malformed codes sealed to the key do not stop the scan ────────────────────
+{
+  const chain = mockChain();
+  const good = await payment(raeto.tag, 2_000_000n, "agent-2");
+  chain.land(good.commitment);
+  const junk = [
+    { p: net.pool, a: "not-hex", w: "1", k: "0x01", c: "0x01" },
+    { p: net.pool, a: RH_MAINNET_USDG, w: "1e6", k: "0x01", c: "0x01" },
+    { p: net.pool, a: RH_MAINNET_USDG, w: "1", k: "0xzz", c: "0x01" },
+  ];
+  for (const [i, j] of junk.entries()) {
+    chain.memos.push({ block: BigInt(1501 + i), commitment: "0x" + "11".repeat(32), memo: toHex(await sealToReceiveTag(JSON.stringify(j), raeto.tag)), tx: `0xd${i}` });
+  }
+  chain.memos.push({ block: 1510n, commitment: good.commitment, memo: toHex(good.sealed), tx: "0xd9" });
+  let r = null;
+  try {
+    r = await scanIncomingPayments({ client: chain.client, network: net, receiveKey: raeto, board: BOARD });
+  } catch (e) {
+    assert(false, `a malformed code stopped the scan: ${e.message}`);
+  }
+  assert(r.payments.length === 1 && r.payments[0].note === "agent-2", "the scan skips malformed codes and still finds the real payment");
 }
 
 // ── a node that refuses wide ranges or too many results ───────────────────────
