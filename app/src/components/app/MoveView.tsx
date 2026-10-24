@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { codeFromHash } from "@/lib/claimLink";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatUnits, isAddress, type Address, type Hex } from "viem";
@@ -337,26 +338,36 @@ export function MoveView() {
   // the URL fragment (never sent to a server) and is cleared once read.
   const { setNetworkKey, networkKey } = useNetwork();
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const h = window.location.hash;
-    if (!h.startsWith("#claim=")) return;
-    const code = decodeURIComponent(h.slice("#claim=".length));
-    const net = new URLSearchParams(window.location.search).get("net");
-    const t = window.setTimeout(() => {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-      if (isNetworkKey(net) && net !== networkKey) setNetworkKey(net);
-      if (code) {
+    let timer = 0;
+    let scrollTimer = 0;
+    const readClaim = () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(scrollTimer);
+      const code = codeFromHash(window.location.hash);
+      if (!code) return;
+      const net = new URLSearchParams(window.location.search).get("net");
+      timer = window.setTimeout(() => {
+        window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+        if (isNetworkKey(net) && net !== networkKey) setNetworkKey(net);
         countLinkOpened(code, net);
         setMode("receive");
         setImportText(code);
         // opened from a claim link: go straight to the claim, not the address above it
-        window.setTimeout(() => {
+        scrollTimer = window.setTimeout(() => {
           const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
           document.getElementById("claim-payment")?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
         }, 400);
-      }
-    }, 0);
-    return () => window.clearTimeout(t);
+      }, 0);
+    };
+    readClaim();
+    window.addEventListener("hashchange", readClaim);
+    window.addEventListener("popstate", readClaim);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(scrollTimer);
+      window.removeEventListener("hashchange", readClaim);
+      window.removeEventListener("popstate", readClaim);
+    };
   }, [networkKey, setNetworkKey]);
 
   // A request link opened in a tab that already shows Pay only changes the

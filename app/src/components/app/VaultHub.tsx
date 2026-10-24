@@ -95,7 +95,7 @@ export function VaultHub() {
         aria-label="Vault actions"
         className="inline-flex max-w-full rounded-full bg-surface-2 p-1 max-sm:flex max-sm:w-full dark:bg-panel dark:ring-1 dark:ring-line"
       >
-        {tabs.map((t) => {
+        {tabs.map((t, index) => {
           const active = t.id === tab;
           return (
             <button
@@ -104,9 +104,19 @@ export function VaultHub() {
               type="button"
               role="tab"
               aria-selected={active}
+              tabIndex={active ? 0 : -1}
               aria-controls="vault-panel"
               title={t.hint}
               onClick={() => select(t.id)}
+              onKeyDown={(event) => {
+                const next = event.key === "ArrowRight" ? (index + 1) % tabs.length
+                  : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length
+                    : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : null;
+                if (next === null) return;
+                event.preventDefault();
+                document.getElementById(`vault-tab-${tabs[next].id}`)?.focus();
+                select(tabs[next].id);
+              }}
               className={`h-10 whitespace-nowrap rounded-full px-[18px] text-[14px] transition-colors duration-200 max-sm:flex-auto max-sm:px-3 ${
                 active
                   ? "bg-panel font-medium text-foreground shadow-card dark:bg-surface-2"

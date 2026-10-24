@@ -62,8 +62,12 @@ function useHeadings(rootRef: RefObject<HTMLDivElement | null>, pathname: string
 
     // Honour a deep link that arrived before the ids existed, including search
     // links that point at a heading's text slug rather than its explicit id.
-    const hash = decodeURIComponent(window.location.hash.slice(1));
-    if (hash) findDocHeading(hash)?.scrollIntoView();
+    try {
+      const hash = decodeURIComponent(window.location.hash.slice(1));
+      if (hash) findDocHeading(hash)?.scrollIntoView();
+    } catch {
+      // A malformed fragment must not prevent the contents and scroll spy loading.
+    }
 
     let frame = 0;
     const update = () => {

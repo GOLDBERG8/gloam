@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { formatUnits, type Address } from "viem";
@@ -90,6 +90,7 @@ export function ScheduleEditor({
   const reduce = useReducedMotion();
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
   const c = base.cadence;
   const [name, setName] = useState(base.name);
@@ -153,19 +154,22 @@ export function ScheduleEditor({
                   ? "With these dates there is no payday left. Pick a later date."
                   : null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!mounted || !dialog) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Native modal behavior contains focus, makes the background inert, and
+    // restores the opener's focus when closed.
+    dialog.showModal();
     nameRef.current?.focus({ preventScroll: true });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
+      dialog.close();
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
-  }, [onClose]);
+  }, [mounted]);
 
   async function save() {
     setTried(true);
@@ -204,9 +208,25 @@ export function ScheduleEditor({
     : "No payday left with these dates.";
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-[200] flex items-end justify-center sm:items-center sm:p-6"
-      role="dialog"
+    <dialog
+      ref={dialogRef}
+      className="fixed inset-0 m-0 hidden h-full max-h-none w-full max-w-none items-end justify-center border-0 bg-transparent p-0 text-foreground open:flex sm:items-center sm:p-6"
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+        )).filter((element) => element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }}
       aria-modal="true"
       aria-labelledby="schedule-editor-title"
     >
@@ -505,7 +525,7 @@ export function ScheduleEditor({
           </div>
         </footer>
       </motion.div>
-    </div>,
+    </dialog>,
     document.body
   );
 }

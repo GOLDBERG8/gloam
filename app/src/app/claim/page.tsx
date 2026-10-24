@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { ClaimSafetyLine } from "@/components/app/ClaimSafetyLine";
@@ -51,6 +51,7 @@ function netIn(text: string): NetworkKey | null {
 
 export default function ClaimPage() {
   const [view, setView] = useState<View>({ kind: "loading" });
+  const loadVersion = useRef(0);
   const [walletBrowser, setWalletBrowser] = useState(false);
   const [copied, setCopied] = useState(false);
   // The network the link names, known on every screen (the missing-payment one too).
@@ -75,11 +76,19 @@ export default function ClaimPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const code = codeFromHash(window.location.hash);
-    const q = new URLSearchParams(window.location.search).get("net");
-    const known = isNetworkKey(q) ? q : null;
-    const net: NetworkKey = known ?? "tempo";
-    void (async () => {
+    let lastUrl = "";
+    const readLink = async () => {
+      if (cancelled || lastUrl === window.location.href) return;
+      lastUrl = window.location.href;
+      const version = ++loadVersion.current;
+      const code = codeFromHash(window.location.hash);
+      const q = new URLSearchParams(window.location.search).get("net");
+      const known = isNetworkKey(q) ? q : null;
+      const net: NetworkKey = known ?? "tempo";
+      setView({ kind: "loading" });
+      setRelayUp(null);
+      setCopied(false);
+      setPasteError(null);
       const wb = inWalletBrowser();
       if (!code || !isClaimLink(code)) {
         if (!cancelled) {
@@ -91,14 +100,20 @@ export default function ClaimPage() {
       }
       countLinkOpened(code, q);
       const ready = await readyView(code, net);
-      if (!cancelled) {
+      if (!cancelled && version === loadVersion.current) {
         setWalletBrowser(wb);
         setLinkNet(known);
         setView(ready);
       }
-    })();
+    };
+    const onLocation = () => { void readLink(); };
+    void Promise.resolve().then(onLocation);
+    window.addEventListener("hashchange", onLocation);
+    window.addEventListener("popstate", onLocation);
     return () => {
       cancelled = true;
+      window.removeEventListener("hashchange", onLocation);
+      window.removeEventListener("popstate", onLocation);
     };
   }, []);
 
@@ -110,10 +125,14 @@ export default function ClaimPage() {
       return;
     }
     setPasteError(null);
+    const version = ++loadVersion.current;
+    setView({ kind: "loading" });
+    setRelayUp(null);
     const net = netIn(pasted) ?? linkNet ?? "tempo";
     countLinkOpened(code, net);
     setLinkNet(netIn(pasted) ?? linkNet);
-    setView(await readyView(code, net));
+    const ready = await readyView(code, net);
+    if (version === loadVersion.current) setView(ready);
   }
 
   async function copyLink() {
