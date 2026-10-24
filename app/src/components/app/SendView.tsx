@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { isAddress } from "viem";
+import { formatEther, isAddress } from "viem";
 import { formatEth, shortAddress } from "@/lib/chain";
 import {
   useAppAccount,
@@ -13,6 +13,8 @@ import {
 } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { safeParseEther } from "@/lib/amount";
+import { maxNativeSend } from "@/lib/nativeSend";
+import { getRhPublicClient } from "@/lib/rhClient";
 import { amountTextError } from "@/lib/amountText";
 import { useEthPrice } from "@/hooks/useLiveMarkets";
 import { useTradingSettings } from "@/hooks/useTradingSettings";
@@ -21,7 +23,7 @@ import { WalletMenu } from "./WalletMenu";
 import { SuccessModal } from "./SuccessModal";
 
 export function SendView() {
-  const { address, isConnected, chainId } = useAppAccount();
+  const { address, isConnected, chainId, demo } = useAppAccount();
   const { network } = useNetwork();
   const onProduct = chainId === network.chainId;
   const { ethUsd } = useEthPrice();
@@ -39,6 +41,30 @@ export function SendView() {
   const [showPreview, setShowPreview] = useState(false);
   const [sentAmount, setSentAmount] = useState("");
   const [sentTo, setSentTo] = useState("");
+  const [estimatingMax, setEstimatingMax] = useState(false);
+  const maxVersion = useRef(0);
+  useEffect(() => () => { ++maxVersion.current; }, [address, chainId, network.chainId, to]);
+
+  async function fillMax() {
+    if (!address || !onProduct || !bal) return;
+    if (!isAddress(to)) {
+      setFormError("Enter the recipient first so the network fee can be estimated.");
+      return;
+    }
+    const version = ++maxVersion.current;
+    setEstimatingMax(true);
+    setFormError(null);
+    try {
+      const value = demo ? bal.value : await maxNativeSend(getRhPublicClient(), address, to);
+      if (version === maxVersion.current) setAmount(formatEther(value));
+    } catch (error) {
+      if (version === maxVersion.current) {
+        setFormError(error instanceof Error ? error.message : "Could not estimate Max. Try again.");
+      }
+    } finally {
+      setEstimatingMax(false);
+    }
+  }
 
   const {
     sendTransaction,
@@ -117,7 +143,7 @@ export function SendView() {
     setShowPreview(true);
   }
 
-  const maxEth = bal ? formatEth(bal.value, 6) : "0";
+  const balanceText = bal ? formatEth(bal.value, 6) : "0";
   const amtNum = Number(amount);
   // "1,25" or "-1" is refused out loud, never quietly turned into 125 or 1
   const amountProblem = amountTextError(amount, 18);
@@ -128,7 +154,7 @@ export function SendView() {
   const validPreview = !validate() && isAddress(to) && amtNum > 0;
 
   const connectedOk = isConnected && onProduct;
-  const busy = isPending || confirming;
+  const busy = isPending || confirming || estimatingMax;
 
   // Tempo has no native coin to send (its nodes report a placeholder balance),
   // so money there is stablecoins, which move privately from Move.
@@ -172,14 +198,13 @@ export function SendView() {
               </label>
               <button
                 type="button"
-                disabled={!isConnected || !onProduct}
-                onClick={() =>
-                  setAmount(maxEth === "<0.0001" ? "0" : maxEth.replace(/,/g, ""))
-                }
+                disabled={!isConnected || !onProduct || !bal || estimatingMax || busy}
+                onClick={() => void fillMax()}
+                title="Max leaves an estimated network-fee reserve."
                 className="tnum -my-2 inline-flex min-h-10 items-center gap-1.5 text-mute transition-colors hover:text-foreground disabled:opacity-45"
               >
-                Balance {isConnected && onProduct ? maxEth : "0"} ETH
-                <span className="font-medium text-foreground">Max</span>
+                Balance {isConnected && onProduct ? balanceText : "0"} ETH
+                <span className="font-medium text-foreground">{estimatingMax ? "Estimating…" : "Max"}</span>
               </button>
             </div>
             <div className="mt-2 flex items-center gap-3">
@@ -189,7 +214,7 @@ export function SendView() {
                 autoComplete="off"
                 placeholder="0"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => { ++maxVersion.current; setAmount(e.target.value); }}
                 className="tnum min-w-0 flex-1 bg-transparent text-[40px] font-light leading-[1.15] tracking-[-0.02em] text-foreground outline-none! placeholder:text-faint sm:text-[46px]"
                 aria-label="Amount to send"
               />
