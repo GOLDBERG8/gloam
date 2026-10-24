@@ -234,6 +234,7 @@ COMMON ISSUES (from the app)
 - "Unlock your private balance with your passkey first.": the passkey lock is on; tap Unlock.
 - "That passkey doesn't open this vault": a different passkey was used than the one that locked it.
 - "No private balances to export." or "Enter the passphrase for this locked backup.": a backup export with nothing in it, or a locked backup that needs its phrase to restore.
+- Restoring a backup only adds what that browser doesn't have; a balance already there keeps its own state. "One balance in this backup was spent after the backup was made": that note moved after the backup, so it is kept as history, not balance. A claimed payment secured after the backup lives in the note it was secured into: it is in the browser where it was secured and in any backup made after that, so restore a newer backup or open Gloam there.
 - Payroll: "That is a public wallet, paying it would show the amount" means a CSV row has a 0x address (use a Gloam address or leave it blank for a claim link); "Up to 200 people per run" means split the CSV; "Finish the run first" means a Payroll total can only be proven once every payment in the run is settled.
 - Proof stuck or failed: reload, prove in one tab at a time, try a smaller amount, or use a desktop.
 - Root or tree mismatch: someone else just used the vault. Wait a few seconds, refresh and try again.
