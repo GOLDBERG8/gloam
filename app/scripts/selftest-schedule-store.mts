@@ -1,6 +1,7 @@
 /** Run from app/: ../mcp/node_modules/.bin/tsx scripts/selftest-schedule-store.mts */
 import assert from "node:assert/strict";
 import { localStorage } from "./browser-shim.mjs";
+import { sealJson } from "../src/lib/noteVault";
 import * as first from "../src/lib/payrollSchedule";
 
 const key = "gloam.payroll.schedules.v1";
@@ -39,12 +40,43 @@ try {
       assert.equal(notifications, 7, "listeners removed");
       console.log(`ok: concurrent save/delete/payment updates and notifications, locks=${useLocks}`);
     } finally { stop(); }
+
+    const existing = Array.from({ length: first.MAX_PAYROLL_SCHEDULES - 1 }, (_, i) => ({ ...base, id: `existing-${i}` }));
+    localStorage.setItem(key, await sealJson(existing));
+    const additions = await Promise.allSettled([
+      first.saveSchedule({ ...base, id: "last-slot-a" }),
+      second.saveSchedule({ ...base, id: "last-slot-b" }),
+    ]);
+    assert.equal(additions.filter(result => result.status === "fulfilled").length, 1);
+    const refused = additions.find(result => result.status === "rejected");
+    assert.equal(refused?.status, "rejected");
+    if (refused?.status === "rejected") assert.match(String(refused.reason), /save up to 50 schedules/);
+    let saved = await first.loadSchedules(4663, pool);
+    assert.equal(saved.length, first.MAX_PAYROLL_SCHEDULES);
+    assert.ok(existing.every(schedule => saved.some(item => item.id === schedule.id)), "neither tab may evict an existing schedule");
+    await first.saveSchedule({ ...existing[0], name: "Updated at capacity" });
+    saved = await first.loadSchedules(4663, pool);
+    assert.equal(saved.length, first.MAX_PAYROLL_SCHEDULES);
+    assert.equal(saved.find(schedule => schedule.id === existing[0].id)?.name, "Updated at capacity");
+    await second.deleteSchedule(existing[1].id);
+    await first.saveSchedule({ ...base, id: "freed-slot" });
+    assert.equal((await first.loadSchedules(4663, pool)).length, first.MAX_PAYROLL_SCHEDULES);
+
+    // Updating a store already above the limit must not silently truncate it.
+    const oversized = Array.from({ length: first.MAX_PAYROLL_SCHEDULES + 1 }, (_, i) => ({ ...base, id: `legacy-${i}` }));
+    localStorage.setItem(key, await sealJson(oversized));
+    await first.saveSchedule({ ...oversized[0], name: "Preserved" });
+    assert.equal((await first.loadSchedules(4663, pool)).length, oversized.length);
+    await assert.rejects(second.saveSchedule({ ...base, id: "over-capacity" }), /save up to 50 schedules/);
+    console.log(`ok: concurrent capacity limit, updates, freed slots and no truncation, locks=${useLocks}`);
+    localStorage.setItem(key, await sealJson([base]));
   }
   const before = localStorage.getItem(key);
   const set = localStorage.setItem.bind(localStorage);
   try {
     localStorage.setItem = (k, v) => { if (k === key) throw new Error("Storage full"); set(k, v); };
     await assert.rejects(first.saveSchedule({ ...base, id: "refused" }), /Storage full/);
+    await assert.rejects(first.deleteSchedule(base.id), /Storage full/);
     assert.equal(localStorage.getItem(key), before);
   } finally { localStorage.setItem = set; }
   await first.saveSchedule({ ...base, id: "after-failure" });

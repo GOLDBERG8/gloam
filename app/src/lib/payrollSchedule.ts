@@ -373,6 +373,7 @@ export function runTitle(s: PayrollSchedule, payday: string, today: string = iso
 // ------------------------------------------------------------------ storage
 
 const STORE_KEY = "gloam.payroll.schedules.v1";
+export const MAX_PAYROLL_SCHEDULES = 50;
 const STORE_LOCK = "gloam-payroll-schedules";
 export const SCHEDULES_CHANGED_EVENT = "gloam:schedules-changed";
 const WRITE_CONFLICT = new Error("Schedules changed in another tab. Please try again.");
@@ -408,7 +409,7 @@ async function readAll(forWrite = false): Promise<PayrollSchedule[]> {
 
 async function writeAll(list: PayrollSchedule[]): Promise<void> {
   // Names and Gloam addresses: sealed under the same device key as notes and runs.
-  const sealed = await sealJson(list.slice(0, 50));
+  const sealed = await sealJson(list);
   // Where Web Locks are unavailable, retry if another tab wrote during encryption.
   if (window.localStorage.getItem(STORE_KEY) !== writeSnapshot) throw WRITE_CONFLICT;
   window.localStorage.setItem(STORE_KEY, sealed);
@@ -442,6 +443,9 @@ function queue(task: () => Promise<void>): Promise<void> {
 export function saveSchedule(s: PayrollSchedule): Promise<void> {
   return queue(async () => {
     const all = await readAll(true);
+    if (!all.some((x) => x.id === s.id) && all.length >= MAX_PAYROLL_SCHEDULES) {
+      throw new Error(`You can save up to ${MAX_PAYROLL_SCHEDULES} schedules across all networks. Delete one before adding another.`);
+    }
     await writeAll([s, ...all.filter((x) => x.id !== s.id)]);
   });
 }
