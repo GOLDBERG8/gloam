@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Mark } from "@/components/Logo";
 import { shortAddress } from "@/lib/chain";
 import { assetDecimals } from "@/lib/shield";
+import { formatExactAmount } from "@/lib/amount";
 import type { PayrollBatch } from "@/lib/payroll";
 
 /**
@@ -40,7 +41,7 @@ export function PayrollInvoice({
     day: "numeric",
     year: "numeric",
   });
-  const money = (raw: bigint | string) => `${formatMoney(BigInt(raw), decimals)} ${symbol}`;
+  const money = (raw: bigint | string) => `${formatExactAmount(BigInt(raw), decimals, 2)} ${symbol}`;
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -267,10 +268,4 @@ function invoiceNumber(b: PayrollBatch) {
 
 function shortTag(tag: string) {
   return tag.length > 24 ? `${tag.slice(0, 13)}…${tag.slice(-5)}` : tag;
-}
-
-/** Fixed two decimals, the way an invoice reads. */
-function formatMoney(raw: bigint, decimals: number) {
-  const value = Number(raw) / 10 ** decimals;
-  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

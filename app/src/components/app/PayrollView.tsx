@@ -15,6 +15,7 @@ import { ScheduleEditor } from "./payroll/ScheduleEditor";
 import { ScheduleList } from "./payroll/ScheduleList";
 import { ScheduleIcon } from "./payroll/scheduleUi";
 import { useSchedules } from "./payroll/useSchedules";
+import { formatExactAmount } from "@/lib/amount";
 import { RelayToggle } from "./RelayToggle";
 import { TokenLogo } from "./TokenLogo";
 import { SealDots } from "@/components/ui/SealDots";
@@ -470,6 +471,7 @@ export function PayrollView() {
   const [active, setActive] = useState<PayrollBatch | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   /** The finished run whose total is being proven (the Prove the total dialog). */
@@ -1415,7 +1417,7 @@ export function PayrollView() {
                   total === 0n ? "text-faint" : ""
                 }`}
               >
-                {formatAssetAmount(total, asset, 2)}
+                {formatExactAmount(total, assetDecimals(asset))}
               </span>
               <TokenLogo id={token.logoId} symbol={token.symbol} size={24} />
             </p>
@@ -1477,7 +1479,7 @@ export function PayrollView() {
                   ? "Payments come out of your private balance."
                   : plan.shortfall === 0n
                     ? "Covers this run."
-                    : `${formatAssetAmount(plan.shortfall, asset, 2)} ${token.symbol} short. Add it as one deposit.`}
+                    : `Add ${formatExactAmount(plan.shortfall, assetDecimals(asset))} ${token.symbol} as one deposit to cover this run.`}
               </p>
             </div>
 
@@ -1503,7 +1505,7 @@ export function PayrollView() {
             <div className="mt-5">
               {validRows.length > 0 && plan.shortfall > 0n && isConnected ? (
                 <Link href="/app/vault?tab=shield" className="btn btn-ink btn-lg btn-block">
-                  Add {formatAssetAmount(plan.shortfall, asset, 2)} {token.symbol} privately
+                  Add {formatExactAmount(plan.shortfall, assetDecimals(asset))} {token.symbol} privately
                 </Link>
               ) : (
                 <button type="button" disabled={!canRun} onClick={() => void startRun()} className="btn btn-ink btn-lg btn-block">
@@ -1529,6 +1531,7 @@ export function PayrollView() {
             </div>
           </section>
 
+          {scheduleError && <p role="alert" className="text-[13px] text-danger">{scheduleError}</p>}
           {pool && (
             <ScheduleList
               schedules={sched.schedules}
@@ -1539,8 +1542,12 @@ export function PayrollView() {
               onTogglePause={(s) => void sched.togglePause(s)}
               onEdit={(s) => setEditor({ base: s, isNew: false })}
               onDelete={(s) => {
-                if (fromSchedule?.id === s.id) setFromSchedule(null);
-                void sched.remove(s.id);
+                setScheduleError(null);
+                void sched.remove(s.id).then(() => {
+                  setFromSchedule((current) => current?.id === s.id ? null : current);
+                }).catch((error: unknown) => {
+                  setScheduleError(error instanceof Error ? error.message : "Could not delete this schedule. Try again.");
+                });
               }}
               onNew={newScheduleFromDraft}
             />

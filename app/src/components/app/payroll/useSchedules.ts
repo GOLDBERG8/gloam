@@ -62,7 +62,7 @@ export function useSchedules({
 
   const remove = useCallback(
     async (id: string) => {
-      if (!demo) await deleteSchedule(id).catch(() => undefined);
+      if (!demo) await deleteSchedule(id);
       setSchedules((prev) => prev.filter((x) => x.id !== id));
     },
     [demo]

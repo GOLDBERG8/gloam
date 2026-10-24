@@ -148,10 +148,11 @@ export const PAYROLL_TEMPLATE = [
   "Tunde Bello,,980,Invoice 7",
 ].join("\n");
 
-function splitCsvLine(line: string): string[] {
+function splitCsvLine(line: string, delimiter: string): string[] | null {
   const out: string[] = [];
   let cur = "";
   let quoted = false;
+  let closed = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (quoted) {
@@ -160,18 +161,23 @@ function splitCsvLine(line: string): string[] {
         i++;
       } else if (ch === '"') {
         quoted = false;
+        closed = true;
       } else {
         cur += ch;
       }
     } else if (ch === '"') {
+      if (cur.trim() || closed) return null;
       quoted = true;
-    } else if (ch === "," || ch === "\t" || ch === ";") {
+    } else if (ch === delimiter) {
       out.push(cur.trim());
       cur = "";
+      closed = false;
     } else {
+      if (closed && ch.trim()) return null;
       cur += ch;
     }
   }
+  if (quoted) return null;
   out.push(cur.trim());
   return out;
 }
@@ -190,14 +196,20 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
   const lines = text
     .replace(/\r\n?/g, "\n")
     .split("\n")
-    .map((l, i) => ({ l: l.trim(), i: i + 1 }))
-    .filter((x) => x.l.length > 0);
+    .map((l, i) => ({ l, i: i + 1 }))
+    .filter((x) => x.l.trim().length > 0);
   if (!lines.length) return { rows: [], error: null };
 
   // Without a header: name, address, amount, then an optional note.
   let cols = { name: 0, recipient: 1, amount: 2, note: 3 };
   let start = 0;
-  const first = splitCsvLine(lines[0].l);
+  // Pick one delimiter for the entire file. A comma inside a semicolon or
+  // tab-separated amount remains part of that amount and must be validated.
+  const delimiter = ["\t", ";", ","].sort((a, b) =>
+    (splitCsvLine(lines[0].l, b)?.length ?? 0) - (splitCsvLine(lines[0].l, a)?.length ?? 0),
+  )[0];
+  const first = splitCsvLine(lines[0].l, delimiter);
+  if (!first) return { rows: [], error: "Check the CSV quotes. Use one line per person." };
   const looksLikeHeader = first.some((c) =>
     [...NAME_KEYS, ...RECIPIENT_KEYS, ...AMOUNT_KEYS].includes(c.toLowerCase().trim())
   );
@@ -218,12 +230,16 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
   }
 
   const rows = body.map(({ l, i }, idx): DraftRow => {
-    const c = splitCsvLine(l);
+    const fields = splitCsvLine(l, delimiter);
+    const c = fields ?? [];
     const name = (cols.name >= 0 ? c[cols.name] : "")?.slice(0, 60) || `Person ${idx + 1}`;
     const recipient = (cols.recipient >= 0 ? c[cols.recipient] : "")?.trim() ?? "";
     const amountInput = (c[cols.amount] ?? "").replace(/[$\s]/g, "");
     const note = cols.note >= 0 ? cleanPaymentNote(c[cols.note]) : "";
-    let error: string | null = null;
+    const minColumns = Math.max(cols.name, cols.recipient, cols.amount) + 1;
+    const maxColumns = looksLikeHeader ? first.length : first.length === 2 ? 2 : 4;
+    let error: string | null = !fields ? "Check the CSV quotes. Use one line per person."
+      : c.length < minColumns || c.length > maxColumns ? "Column count does not match the CSV. Check delimiters and quote amounts containing commas." : null;
     let kind: PayeeKind = "link";
     if (recipient) {
       if (isValidReceiveTag(recipient)) {
@@ -272,7 +288,7 @@ export function fundingNotes(address: string, asset: Address, tree: SyncedTree |
  * one note (with its change reused)? Returns how much more to add, as a single
  * deposit, to cover the rows that do not fit.
  */
-export function fundingPlan(amounts: bigint[], notes: bigint[]): { covered: number; shortfall: bigint } {
+function simulateFunding(amounts: bigint[], notes: bigint[]): { covered: number; shortfall: bigint } {
   const pool = notes.filter((n) => n > 0n).sort((a, b) => (a < b ? -1 : 1));
   let covered = 0;
   let shortfall = 0n;
@@ -291,6 +307,25 @@ export function fundingPlan(amounts: bigint[], notes: bigint[]): { covered: numb
     }
   }
   return { covered, shortfall };
+}
+
+/** A sufficient single deposit, verified with the same smallest-note-first order as execution. */
+export function fundingPlan(amounts: bigint[], notes: bigint[]): { covered: number; shortfall: bigint } {
+  const current = simulateFunding(amounts, notes);
+  if (current.shortfall === 0n) return current;
+  const total = amounts.reduce((sum, amount) => sum + amount, 0n);
+  let deposit = current.shortfall;
+  // A new note can change which existing notes get spent. Recheck the whole
+  // run, not just the originally uncovered rows. This is conservative, not a
+  // claim to find the smallest possible deposit.
+  for (let attempt = 0; attempt < amounts.length && deposit < total; attempt++) {
+    const next = simulateFunding(amounts, [...notes, deposit]);
+    if (next.shortfall === 0n) return { covered: current.covered, shortfall: deposit };
+    deposit += next.shortfall;
+  }
+  // A note holding the total always covers every remaining payment. Bound
+  // planning work even with highly fragmented balances.
+  return { covered: current.covered, shortfall: total };
 }
 
 // ------------------------------------------------------------------ storage

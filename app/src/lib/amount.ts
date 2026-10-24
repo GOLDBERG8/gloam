@@ -1,5 +1,13 @@
-import { parseEther, parseUnits } from "viem";
+import { formatUnits, parseEther, parseUnits } from "viem";
 import { readAmountText } from "./amountText";
+
+/** Exact, grouped token amount for funding instructions and financial records. */
+export function formatExactAmount(raw: bigint, decimals: number, minimumFractionDigits = 0): string {
+  const [whole, fraction = ""] = formatUnits(raw, decimals).split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const digits = fraction.padEnd(Math.min(minimumFractionDigits, decimals), "0");
+  return digits ? `${grouped}.${digits}` : grouped;
+}
 
 /** Safe decimal → wei; refuses anything lib/amountText refuses (sci notation, "1,25", "-1"). */
 export function safeParseEther(raw: string): bigint | null {
