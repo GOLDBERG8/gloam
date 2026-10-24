@@ -15,10 +15,13 @@ import {
 } from "@/lib/mainnet";
 import { AppLink } from "@/components/AppLink";
 
-/** The time left to mainnet, ticking once a second. Null until mounted, so the server and the first render agree. */
+/** Configured mainnets have launched; render that state on the server too. */
 export function useMainnetRemaining(): Remaining | null {
-  const [r, setR] = useState<Remaining | null>(null);
+  const [r, setR] = useState<Remaining | null>(
+    MAINNET_CONFIGURED ? remainingUntil(MAINNET_LAUNCH_MS) : null,
+  );
   useEffect(() => {
+    if (MAINNET_CONFIGURED) return;
     let id = 0;
     const tick = () => {
       const next = remainingUntil(Date.now());
@@ -33,19 +36,16 @@ export function useMainnetRemaining(): Remaining | null {
 }
 
 /**
- * Whether mainnet is live: the launch time has passed and a mainnet pool is
- * filled in (lib/mainnet.ts). False until mounted, and false after the launch
- * time for as long as no pool is in, so the countdown copy stays as it was.
+ * The October launch is complete. Deployment configuration is shared by the
+ * server and client, so live copy no longer depends on mounting or a local clock.
  */
 export function useMainnetLive(): boolean {
-  const r = useMainnetRemaining();
-  return Boolean(r?.done) && MAINNET_CONFIGURED;
+  return MAINNET_CONFIGURED;
 }
 
 /**
  * Copy that depends on whether mainnet is live, for server pages: `before`
- * until mainnet is live (and on the server, so the first render matches),
- * `live` from then on. Before a mainnet pool is filled in it is always `before`.
+ * until a mainnet pool is configured, `live` thereafter, including server HTML.
  */
 export function MainnetCopy({ live, before }: { live: React.ReactNode; before: React.ReactNode }) {
   return <>{useMainnetLive() ? live : before}</>;

@@ -122,13 +122,14 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
       <p className="mt-3 max-w-[64ch] text-[13px] leading-relaxed text-mute">
         {paymentsOnly ? (
           <>
-            Money stays private while it stays in the vault. Adding to it and
-            sending from it keep amounts hidden. Cashing out shows the amount.
+            Vault balances and private payment amounts stay hidden. Adding money
+            shows your wallet and amount publicly. Cashing out shows the amount.
           </>
         ) : (
           <>
-            Money stays private while it stays in the vault. Adding, sending and
-            trading from it keep amounts hidden. Cashing out shows the amount.
+            Vault balances and private payment amounts stay hidden. Adding money
+            shows your wallet and amount publicly. Trades expose the pair and
+            amounts; cashing out shows the amount.
           </>
         )}
       </p>

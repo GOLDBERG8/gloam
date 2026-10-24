@@ -191,9 +191,14 @@ const DEV_LINKS = [
 
 const SNIPPET = `import { buildGloamPayment, relayIntent } from "@gloamtrade/sdk";
 
-const payment = await buildGloamPayment({ to, amount, asset });
+// Use the merchant's requirements and a funded note's proof inputs.
+const payment = await buildGloamPayment({
+  requirements, senderSecretHex, senderNoteAmountWei, path, prove,
+});
+// Persist change securely before submitting; it holds your remaining balance.
+await saveChangeNote(payment.changeNote);
 const hash = await relayIntent(payment.intent);
-// settled privately, your wallet never shows up`;
+// Wait for confirmation, then send the payment header to the merchant.`;
 
 export function Landing() {
   return (
