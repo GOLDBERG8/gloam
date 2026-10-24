@@ -211,3 +211,45 @@ export type PrivateBridgeQuote = {
 export type BridgeStage = "waiting" | "moving" | "done" | "failed" | "refunded";
 
 export type BridgeStatus = { stage: BridgeStage; outTx: string | null };
+
+/**
+ * A route worth a second look before sending: it costs more than 3% of what
+ * you pay and at least $1, so a few cents on a small test stays quiet.
+ */
+export const EXPENSIVE_ROUTE_SHARE = 0.03;
+export const EXPENSIVE_ROUTE_MIN_USD = 1;
+
+/** The parts of a quote that say what it costs (BridgeQuote and PrivateBridgeQuote both fit). */
+export type CostedQuote = {
+  send: { usd: number | null };
+  receive: { amount: string };
+  feeUsd: number;
+  extra?: string | null;
+  gasUsd?: number | null;
+};
+
+/**
+ * What a route costs in dollars: what you pay less the stablecoin that comes
+ * out (the price buffer sent back to the wallet counts as coming out), and
+ * never less than Relay's own fee, plus the paying chain's network fee when
+ * Relay prices it. `share` is that cost over what you pay, or null when Relay
+ * doesn't price what you pay; then the cost is Relay's fee alone.
+ */
+export function routeCost(q: CostedQuote): { usd: number; share: number | null } | null {
+  const gas = q.gasUsd ?? 0;
+  const paid = q.send.usd;
+  const out = Number(q.receive.amount) + (q.extra ? Number(q.extra) : 0);
+  if (paid !== null && paid > 0 && Number.isFinite(out)) {
+    const usd = Math.max(paid - out, q.feeUsd, 0) + gas;
+    return { usd, share: usd / paid };
+  }
+  const usd = q.feeUsd + gas;
+  return Number.isFinite(usd) ? { usd, share: null } : null;
+}
+
+/** The cost to warn about before anything is sent, or null when the route is priced fine (or can't be told). */
+export function expensiveRoute(q: CostedQuote): { usd: number; share: number } | null {
+  const c = routeCost(q);
+  if (!c || c.share === null) return null;
+  return c.share > EXPENSIVE_ROUTE_SHARE && c.usd >= EXPENSIVE_ROUTE_MIN_USD ? { usd: c.usd, share: c.share } : null;
+}

@@ -13,11 +13,13 @@ import {
   BRIDGE_MIN_USD,
   SWAP_GAS_RESERVE_WEI,
   chainLogo,
+  expensiveRoute,
   privateBridgeable,
   swapSource,
   type BridgeChain,
   type BridgeQuote,
   type BridgeStatus,
+  type CostedQuote,
   type PrivateBridgeQuote,
 } from "@/lib/bridge";
 import { prepareBridgeNote, settleBridgeNote } from "@/lib/bridgePrivate";
@@ -1215,6 +1217,8 @@ function BridgeSheet({
               </div>
             </dl>
 
+            <CostWarning quote={stage.quote} />
+
             <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
               Send only {stage.quote.send.symbol} on {stage.quote.send.chain}, and use this address for this transfer
               only. Sending from an exchange works too.
@@ -1369,6 +1373,8 @@ function PrivateReview({
           </div>
         ))}
       </dl>
+
+      <CostWarning quote={q} />
 
       {review.signing && review.progress && (
         <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] text-foreground">
@@ -1562,6 +1568,8 @@ function SwapReview({
         </div>
       </dl>
 
+      <CostWarning quote={quote} />
+
       {line && (
         <p
           className={`mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] ${
@@ -1645,13 +1653,33 @@ function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: strin
     ["Network fee", `A few cents of ${from}`],
   ];
   return (
-    <dl className="divide-y divide-line rounded-2xl bg-surface px-4 text-[13.5px]" aria-live="polite" aria-busy={!quote}>
-      {rows.map(([k, v]) => (
-        <div key={k} className="flex min-h-10 items-center justify-between gap-3">
-          <dt className="text-mute">{k}</dt>
-          <dd className="tnum text-right text-foreground">{v}</dd>
-        </div>
-      ))}
-    </dl>
+    <>
+      <dl className="divide-y divide-line rounded-2xl bg-surface px-4 text-[13.5px]" aria-live="polite" aria-busy={!quote}>
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex min-h-10 items-center justify-between gap-3">
+            <dt className="text-mute">{k}</dt>
+            <dd className="tnum text-right text-foreground">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {quote && <CostWarning quote={quote} />}
+    </>
+  );
+}
+
+/**
+ * Said before anything is sent when a route costs over 3% of what you pay
+ * (lib/bridge expensiveRoute). The fees are already in the rows above; this
+ * puts the total in plain words and says what tends to cost less.
+ */
+function CostWarning({ quote }: { quote: CostedQuote & { receive: { symbol: string } } }) {
+  const cost = expensiveRoute(quote);
+  if (!cost) return null;
+  const pct = cost.share >= 0.1 ? Math.round(cost.share * 100) : Math.round(cost.share * 1000) / 10;
+  return (
+    <p role="status" className="mt-4 rounded-xl bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+      This route costs about {pct}% of what you pay (${fmtMoney(cost.usd)}). A larger amount spreads the fixed fees,
+      and another chain or token, or {quote.receive.symbol} sent straight to your wallet, may cost less.
+    </p>
   );
 }
