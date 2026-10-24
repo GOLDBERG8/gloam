@@ -594,43 +594,63 @@ export function exportNotesBackup(address?: string | null): NotesBackup {
   };
 }
 
-/** Merge a backup into local storage. Returns how many notes were added/updated. */
+/**
+ * Merge a backup into this browser. A backup only adds what this browser
+ * doesn't have. A note it already holds (same id, or the same commitment)
+ * keeps its own state, which is never older than the backup's copy: spent,
+ * secured, landed, a cash out on its way. Only the wallet it shows under
+ * becomes the one restoring it. Writing the backup's copy over it put a claim
+ * the sweep had spent back in the balance until the next sync retired it,
+ * counted next to the note it was secured into, and wiped its secured mark.
+ * Returns how many notes were added (`count`) and how many were already here.
+ */
 export function importNotesBackup(
   raw: string,
   address?: string | null
-): { ok: true; count: number } | { ok: false; error: string } {
+): { ok: true; count: number; kept: number } | { ok: false; error: string } {
+  let data: NotesBackup;
   try {
-    const data = JSON.parse(raw) as NotesBackup;
-    if (data?.type !== "gloam-notes-backup" || data.v !== 1) {
-      return { ok: false, error: "Not a Gloam notes backup." };
-    }
-    const scope = activeScope();
-    if (data.chainId !== scope.chainId) {
-      return { ok: false, error: "Backup is for a different network. Switch networks and try again." };
-    }
-    if (!Array.isArray(data.notes)) {
-      return { ok: false, error: "Backup has no notes." };
-    }
-    let count = 0;
-    for (const n of data.notes) {
-      if (!n?.secret || !n?.commitment || !n?.amountWei) continue;
-      if (n.chainId !== scope.chainId) continue;
-      if (n.id?.startsWith("pay-")) continue;
-      const note: LocalNote = {
-        ...n,
-        from: (address as Address | undefined) ?? n.from,
-        status: n.status === "recovered" ? "recovered" : "open",
-        source: "local",
-        bound: n.bound ?? true,
-      };
-      if (note.status === "recovered") continue;
-      saveLocalNote(note);
-      count++;
-    }
-    return { ok: true, count };
+    data = JSON.parse(raw) as NotesBackup;
   } catch {
     return { ok: false, error: "Could not parse backup JSON." };
   }
+  if (data?.type !== "gloam-notes-backup" || data.v !== 1) {
+    return { ok: false, error: "Not a Gloam notes backup." };
+  }
+  const scope = activeScope();
+  if (data.chainId !== scope.chainId) {
+    return { ok: false, error: "Backup is for a different network. Switch networks and try again." };
+  }
+  if (!Array.isArray(data.notes)) {
+    return { ok: false, error: "Backup has no notes." };
+  }
+  const owner = (address as Address | undefined) ?? undefined;
+  const here = new Set<string>();
+  let count = 0;
+  for (const n of data.notes) {
+    if (!n?.secret || !n?.commitment || !n?.amountWei) continue;
+    if (n.chainId !== scope.chainId) continue;
+    if (n.id?.startsWith("pay-") || n.status === "recovered") continue;
+    const local = getAllNotes().find(
+      (m) =>
+        m.chainId === n.chainId &&
+        (m.id === n.id || m.commitment.toLowerCase() === n.commitment.toLowerCase()) &&
+        Boolean(m.secret) &&
+        m.secret !== "0x"
+    );
+    if (local) {
+      here.add(local.id);
+      continue;
+    }
+    saveLocalNote({ ...n, from: owner ?? n.from, status: "open", source: "local", bound: n.bound ?? true });
+    count++;
+  }
+  // a restore adds what it holds to the wallet restoring it, notes already here too
+  const lower = owner?.toLowerCase();
+  if (lower && getAllNotes().some((m) => here.has(m.id) && m.from && m.from.toLowerCase() !== lower)) {
+    setAllNotes(getAllNotes().map((m) => (here.has(m.id) && m.from && m.from.toLowerCase() !== lower ? { ...m, from: owner } : m)));
+  }
+  return { ok: true, count, kept: here.size };
 }
 
 /** ETH only (native asset), spendable notes only */

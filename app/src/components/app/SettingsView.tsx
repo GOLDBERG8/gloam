@@ -724,7 +724,9 @@ export function SettingsView() {
                   const res = importNotesBackup(raw, address);
                   if (res.ok) {
                     setBackupMsg(
-                      `Restored ${res.count} balance(s). Open Portfolio or Vault to see them.`
+                      res.count || !res.kept
+                        ? `Restored ${res.count} balance(s). Open Portfolio or Vault to see them.`
+                        : "Everything in this backup is already in this browser, so nothing changed."
                     );
                     setBackupImport("");
                   } else {
