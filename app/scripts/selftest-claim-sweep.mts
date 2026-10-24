@@ -453,6 +453,24 @@ await test("a backup made while the move was on its way, restored where it lande
   assert.equal(byId(claim.id).secured, true);
 });
 
+await test("a claim an older restore wrote over is secured again on the next sync, and counted once", async () => {
+  const pool = mockPool();
+  const env = pool.env();
+  const claim = await claimed(pool, 10_000_000n);
+  const stale = { ...claim }; // the backup's copy, from before securing
+  assert.equal((await secureClaim({ note: claim, relay: true, sendWithWallet: noWallet }, env)).status, "swept");
+  const [fresh] = freshOf(claim);
+  // what restoring did before it merged: the backup's copy written over this browser's
+  await saveLocalNote(stale);
+  assert.equal(byId(claim.id).secured, undefined);
+
+  await syncAsTheAppDoes(pool, env);
+  assert.equal(byId(claim.id).secured, true, "Prove shows it secured again");
+  assert.equal(byId(claim.id).status, "recovered");
+  assert.deepEqual(counted(claim).map((n) => n.id), [fresh!.id]);
+  assert.equal(await reconcileClaims(env), false, "nothing left to mark");
+});
+
 /** This browser without these notes: a new device, or one whose storage was cleared. */
 const forget = (claim: LocalNote) => setAllNotes(getAllNotes().filter((n) => n.id !== claim.id && n.sweptFrom?.id !== claim.id));
 

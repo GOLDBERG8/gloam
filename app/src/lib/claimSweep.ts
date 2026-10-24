@@ -420,18 +420,38 @@ export async function reconcileUnfunded(env?: ClaimEnv): Promise<boolean> {
 }
 
 /**
+ * A note moved out of a claim that landed here means the claim was secured.
+ * Before restores merged, a backup's copy of the claim was written over this
+ * browser's: reopened (counted next to the note it was secured into), then
+ * retired by the next sync without its secured mark. Marks such claims again,
+ * from this browser's own notes. Returns true when one changed.
+ */
+function remarkSecured(): boolean {
+  const landed = new Set(
+    getAllNotes()
+      .filter((n) => isSecuredClaim(n) && !n.sweepPending && n.status !== "recovered")
+      .map((n) => n.sweptFrom!.id)
+  );
+  const stale = getAllNotes().filter((n) => landed.has(n.id) && (n.status !== "recovered" || !n.secured));
+  for (const n of stale) updateLocalNote(n.id, { status: "recovered", secured: true });
+  return stale.length > 0;
+}
+
+/**
  * Settle secured claims whose move was sent but not confirmed here (a closed
- * tab, a lost reply, another device's backup). Returns true when something
+ * tab, a lost reply, another device's backup), and mark claims secured again
+ * where a restore unmarked them (remarkSecured). Returns true when something
  * changed.
  */
 export async function reconcileClaims(env?: ClaimEnv): Promise<boolean> {
   if (typeof window === "undefined") return false;
+  const remarked = remarkSecured();
   const pending = getAllNotes().filter((n) => n.sweepPending && n.status !== "recovered");
-  if (!pending.length) return false;
+  if (!pending.length) return remarked;
   const e = env ?? appClaimEnv();
   const pool = e.pool;
-  if (!pool) return false;
-  let changed = false;
+  if (!pool) return remarked;
+  let changed = remarked;
   for (const fresh of pending) {
     if (fresh.chainId !== e.chainId || fresh.pool.toLowerCase() !== pool.toLowerCase()) continue;
     const state = await settlePending(e, fresh);
