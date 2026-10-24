@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { useTradingSettings } from "@/hooks/useTradingSettings";
+import { usePreferredChoice } from "@/hooks/usePreferredChoice";
 import { formatMark, formatUsd } from "@/lib/markets";
 import { useNetwork } from "./NetworkProvider";
 import { Sparkline } from "./Sparkline";
@@ -53,7 +54,7 @@ export function MarketsView() {
 
   const { settings } = useTradingSettings();
   const [q, setQ] = useState("");
-  const [kind, setKind] = useState<Filter>("stocks");
+  const [kind, setKind] = usePreferredChoice<Filter>(settings.marketFilter);
   const [menuOpen, setMenuOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);

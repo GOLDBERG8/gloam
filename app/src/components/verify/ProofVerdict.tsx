@@ -37,9 +37,9 @@ export function amountOf(raw: string, asset: string): string {
   } catch {
     return raw;
   }
-  const n = Number(formatUnits(v, assetDecimals(asset)));
-  if (!Number.isFinite(n)) return formatUnits(v, assetDecimals(asset));
-  return n.toLocaleString("en-US", { maximumFractionDigits: 6 });
+  const [whole, fraction] = formatUnits(v, assetDecimals(asset)).split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return fraction ? `${grouped}.${fraction}` : grouped;
 }
 
 function day(unix: number): string {
@@ -115,6 +115,7 @@ function verdictOf(r: VerifyResult): Verdict {
   if (r.ok) return "verified";
   const fails = r.checks.filter((c) => c.state === "fail" && !(r.expired && c.label === "Expired"));
   if (fails.length > 0) return "failed";
+  if (r.checks.some((c) => c.state === "unknown")) return "incomplete";
   if (r.expired) return "expired";
   return "incomplete";
 }

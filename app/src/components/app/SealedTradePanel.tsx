@@ -20,6 +20,7 @@ import { useNetwork } from "./NetworkProvider";
 import { safeParseEther } from "@/lib/amount";
 import { AmountProblem } from "./AmountProblem";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
+import { usePreferredChoice } from "@/hooks/usePreferredChoice";
 import { useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
@@ -57,12 +58,14 @@ export function SealedTradePanel({
   marketSymbol,
   tokenAddress,
   initialDir = "buy",
+  sideKey = "",
 }: {
   marketId?: string;
   marketSymbol: string;
   tokenAddress?: Address;
   /** buy = ETH→stock · sell = stock→ETH */
   initialDir?: TradeDir;
+  sideKey?: string;
   /** kept for TradeView API compat; unused */
   onUseAdapter?: () => void;
 }) {
@@ -85,11 +88,7 @@ export function SealedTradePanel({
   const { data: marketsData } = useLiveMarkets();
 
   const [support, setSupport] = useState<Support>("checking");
-  const [dir, setDir] = useState<TradeDir>(initialDir);
-
-  useEffect(() => {
-    setDir(initialDir);
-  }, [initialDir]);
+  const [dir, setDir] = usePreferredChoice<TradeDir>(initialDir, sideKey);
   const [noteId, setNoteId] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [status, setStatus] = useState<string | null>(null);

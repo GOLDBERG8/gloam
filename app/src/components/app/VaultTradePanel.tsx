@@ -28,6 +28,7 @@ import {
   routerAbi,
 } from "@/lib/dex";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
+import { usePreferredChoice } from "@/hooks/usePreferredChoice";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import {
   APPROVE_GAS_LIMIT,
@@ -79,12 +80,16 @@ export function VaultTradePanel({
   marketSymbol,
   tokenAddress,
   hasPool,
+  initialSide = "buy",
+  sideKey = "",
   onUsePrivate,
 }: {
   marketId?: string;
   marketSymbol: string;
   tokenAddress?: Address;
   hasPool: boolean;
+  initialSide?: Side;
+  sideKey?: string;
   onUsePrivate?: () => void;
 }) {
   const shieldLive = isShieldDeployed();
@@ -101,7 +106,7 @@ export function VaultTradePanel({
     refresh: refreshTree,
   } = useShieldTree();
 
-  const [side, setSide] = useState<Side>("buy");
+  const [side, setSide] = usePreferredChoice<Side>(initialSide, sideKey);
   const [noteId, setNoteId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

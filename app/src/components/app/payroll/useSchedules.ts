@@ -1,15 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocalDay } from "@/hooks/useLocalDay";
 import type { Address } from "viem";
 import { assetDecimals } from "@/lib/shield";
 import {
   deleteSchedule,
   demoSchedule,
-  isoDay,
   loadSchedules,
   markSchedulePaid,
   saveSchedule,
+  subscribeSchedules,
   withPaid,
   type PayrollSchedule,
 } from "@/lib/payrollSchedule";
@@ -31,23 +32,30 @@ export function useSchedules({
   demoAsset: Address | undefined;
 }) {
   const [schedules, setSchedules] = useState<PayrollSchedule[]>([]);
-  // One calendar day per visit is enough for paydays.
-  const [today] = useState(() => isoDay());
+  const today = useLocalDay();
+  // The example is seeded once per mount; a day change must not reset demo edits.
+  const demoStart = useRef(today);
 
   useEffect(() => {
     if (!pool) return;
     let live = true;
-    const load =
-      demo && demoAsset
-        ? Promise.resolve([demoSchedule({ chainId, pool, asset: demoAsset, decimals: assetDecimals(demoAsset), today })])
+    let version = 0;
+    const refresh = () => {
+      const current = ++version;
+      const load = demo && demoAsset
+        ? Promise.resolve([demoSchedule({ chainId, pool, asset: demoAsset, decimals: assetDecimals(demoAsset), today: demoStart.current })])
         : loadSchedules(chainId, pool);
-    void load.then((list) => {
-      if (live) setSchedules(list);
-    });
+      void load.then((list) => {
+        if (live && current === version) setSchedules(list);
+      });
+    };
+    const unsubscribe = demo ? () => {} : subscribeSchedules(refresh);
+    refresh();
     return () => {
       live = false;
+      unsubscribe();
     };
-  }, [chainId, pool, demo, demoAsset, today]);
+  }, [chainId, pool, demo, demoAsset]);
 
   // Saved first, shown after: a write refused because the stored schedules
   // cannot be opened must not look like it worked.

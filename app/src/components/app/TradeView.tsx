@@ -28,6 +28,7 @@ import {
 } from "@/lib/dex";
 import { useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { useTradingSettings } from "@/hooks/useTradingSettings";
+import { usePreferredChoice } from "@/hooks/usePreferredChoice";
 import { formatMark, formatUsd } from "@/lib/markets";
 import { isShieldDeployed } from "@/lib/shield";
 import { WalletMenu } from "./WalletMenu";
@@ -82,7 +83,8 @@ export function TradeView() {
   const searchMarket = search.get("market");
   const pathParam = search.get("path");
   const sideParam = search.get("side"); // sealed trade: buy | sell
-  const [side, setSide] = useState<Side>(settings.defaultSide);
+  const preferredSide = sideParam === "buy" || sideParam === "sell" ? sideParam : settings.defaultSide;
+  const [side, setSide] = usePreferredChoice<Side>(preferredSide, sideParam ?? "");
   const [marketId, setMarketId] = useState(searchMarket ?? "tsla");
   const [amount, setAmount] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("token");
@@ -809,6 +811,8 @@ export function TradeView() {
               marketSymbol={market.symbol}
               tokenAddress={token}
               hasPool={hasPool}
+              initialSide={preferredSide}
+              sideKey={sideParam ?? ""}
               onUsePrivate={() => setPathMode("sealed")}
             />
           ) : pathMode === "sealed" ? (
@@ -816,7 +820,8 @@ export function TradeView() {
               marketId={resolvedId}
               marketSymbol={market.symbol}
               tokenAddress={token}
-              initialDir={sideParam === "sell" ? "sell" : "buy"}
+              initialDir={preferredSide}
+              sideKey={sideParam ?? ""}
             />
           ) : (
             <div className="gl-card overflow-hidden">
