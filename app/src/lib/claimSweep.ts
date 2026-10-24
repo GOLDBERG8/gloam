@@ -38,7 +38,7 @@ import { proveTransferInBrowser } from "./proveClient";
 import { relayTransfer, waitForTx } from "./relay/client";
 import { getRhPublicClient } from "./rhClient";
 import { getAllNotes } from "./noteVault";
-import { saveLocalNote, shieldPoolAbi, updateLocalNote, type LocalNote } from "./shield";
+import { saveLocalNote, shieldPoolAbi, updateLocalNote, type BackupSpentCheck, type LocalNote } from "./shield";
 import { syncShieldTree } from "./treeSync";
 import { escrowHolds } from "./vaultSwap";
 
@@ -373,6 +373,22 @@ export async function secureClaim(
  */
 export async function claimFunded(commitment: Hex, env: ClaimEnv = appClaimEnv()): Promise<boolean> {
   return (await env.chain.isCommitmentSeen(commitment).catch(() => false)) === true;
+}
+
+/**
+ * For a backup restore (shield importNotesBackup): is this note spent in the
+ * vault? Null when it can't tell: another network or vault, a legacy note
+ * without its nullifier, or a read that fails.
+ */
+export function backupSpentCheck(env: ClaimEnv = appClaimEnv()): BackupSpentCheck {
+  return async (n) => {
+    const pool = env.pool;
+    if (!pool || n.chainId !== env.chainId || n.pool.toLowerCase() !== pool.toLowerCase()) return null;
+    if (n.scheme === "keccak" && (!n.nullifier || n.nullifier === "0x")) return null;
+    const nullifier = await nullifierOf(n).catch(() => null);
+    if (!nullifier) return null;
+    return env.chain.isSpent(nullifier).catch(() => null);
+  };
 }
 
 /**

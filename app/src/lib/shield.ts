@@ -595,6 +595,26 @@ export function exportNotesBackup(address?: string | null): NotesBackup {
 }
 
 /**
+ * What the vault says about a backup's note: true when it is spent, false when
+ * not, null when it can't tell (lib/claimSweep backupSpentCheck).
+ */
+export type BackupSpentCheck = (n: LocalNote) => Promise<boolean | null>;
+
+export type BackupImport =
+  | {
+      ok: true;
+      /** Balances added. */
+      count: number;
+      /** Notes this browser already had, kept as they are here. */
+      kept: number;
+      /** Notes new here that the vault shows spent since the backup: kept as history, never counted. */
+      moved: number;
+      /** Of those, claimed payments: secured (or taken back) after the backup was made. */
+      movedClaims: number;
+    }
+  | { ok: false; error: string };
+
+/**
  * Merge a backup into this browser. A backup only adds what this browser
  * doesn't have. A note it already holds (same id, or the same commitment)
  * keeps its own state, which is never older than the backup's copy: spent,
@@ -602,12 +622,18 @@ export function exportNotesBackup(address?: string | null): NotesBackup {
  * becomes the one restoring it. Writing the backup's copy over it put a claim
  * the sweep had spent back in the balance until the next sync retired it,
  * counted next to the note it was secured into, and wiped its secured mark.
- * Returns how many notes were added (`count`) and how many were already here.
+ *
+ * A note new here is asked about first (`isSpent`, all at once): one the vault
+ * shows spent goes in as history, so a backup made before a claim was secured
+ * never shows that claim as money, not even for the few seconds before a sync.
+ * One it can't read goes in as before, for the sync to settle. Settles once
+ * the notes are on disk (rejects with NoteSaveError when the browser refuses).
  */
-export function importNotesBackup(
+export async function importNotesBackup(
   raw: string,
-  address?: string | null
-): { ok: true; count: number; kept: number } | { ok: false; error: string } {
+  address?: string | null,
+  isSpent?: BackupSpentCheck
+): Promise<BackupImport> {
   let data: NotesBackup;
   try {
     data = JSON.parse(raw) as NotesBackup;
@@ -626,7 +652,7 @@ export function importNotesBackup(
   }
   const owner = (address as Address | undefined) ?? undefined;
   const here = new Set<string>();
-  let count = 0;
+  const added: LocalNote[] = [];
   for (const n of data.notes) {
     if (!n?.secret || !n?.commitment || !n?.amountWei) continue;
     if (n.chainId !== scope.chainId) continue;
@@ -638,19 +664,40 @@ export function importNotesBackup(
         Boolean(m.secret) &&
         m.secret !== "0x"
     );
-    if (local) {
-      here.add(local.id);
-      continue;
-    }
-    saveLocalNote({ ...n, from: owner ?? n.from, status: "open", source: "local", bound: n.bound ?? true });
-    count++;
+    if (local) here.add(local.id);
+    else if (!added.some((a) => a.id === n.id)) added.push(n);
   }
+  const spent = await Promise.all(added.map((n) => (isSpent ? isSpent(n).catch(() => null) : null)));
+
+  const writes: Promise<void>[] = [];
+  let moved = 0;
+  let movedClaims = 0;
+  added.forEach((n, i) => {
+    const gone = spent[i] === true;
+    if (gone) {
+      moved++;
+      if (n.id.startsWith("imp-")) movedClaims++;
+    }
+    writes.push(
+      saveLocalNote({
+        ...n,
+        from: owner ?? n.from,
+        // spent since the backup: history (a received payment can still be proved), not balance
+        status: gone ? "recovered" : "open",
+        source: "local",
+        bound: n.bound ?? true,
+      })
+    );
+  });
   // a restore adds what it holds to the wallet restoring it, notes already here too
   const lower = owner?.toLowerCase();
   if (lower && getAllNotes().some((m) => here.has(m.id) && m.from && m.from.toLowerCase() !== lower)) {
-    setAllNotes(getAllNotes().map((m) => (here.has(m.id) && m.from && m.from.toLowerCase() !== lower ? { ...m, from: owner } : m)));
+    writes.push(
+      setAllNotes(getAllNotes().map((m) => (here.has(m.id) && m.from && m.from.toLowerCase() !== lower ? { ...m, from: owner } : m)))
+    );
   }
-  return { ok: true, count, kept: here.size };
+  await Promise.all(writes);
+  return { ok: true, count: added.length - moved, kept: here.size, moved, movedClaims };
 }
 
 /** ETH only (native asset), spendable notes only */

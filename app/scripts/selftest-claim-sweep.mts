@@ -8,8 +8,9 @@
  * spending it back first, a closed wallet prompt and a retry, a relay that
  * sent the move but lost its reply, a receipt that timed out, a payment not in
  * the vault yet (kept, listed apart, never counted until it lands: review
- * finding 6, 23 Oct 2026), and the wrong network. Throughout, the balance must never
- * count the money twice or lose it.
+ * finding 6, 23 Oct 2026), the wrong network, and a backup restored before or
+ * after securing, here or in a browser without those notes (user report, 24 Oct
+ * 2026). Throughout, the balance must never count the money twice or lose it.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-claim-sweep.mts
  */
@@ -27,7 +28,7 @@ import {
 } from "@gloamtrade/sdk";
 
 const { getActiveNetwork } = await import("../src/lib/networks");
-const { getAllNotes } = await import("../src/lib/noteVault");
+const { getAllNotes, setAllNotes } = await import("../src/lib/noteVault");
 const {
   activeSpendableNotes,
   exportNotesBackup,
@@ -38,9 +39,8 @@ const {
   sumByAsset,
   unfundedClaims,
 } = await import("../src/lib/shield");
-const { claimFunded, claimNoteId, isUnsecuredClaim, reconcileClaims, reconcileUnfunded, secureClaim } = await import(
-  "../src/lib/claimSweep"
-);
+const { backupSpentCheck, claimFunded, claimNoteId, isUnsecuredClaim, reconcileClaims, reconcileUnfunded, secureClaim } =
+  await import("../src/lib/claimSweep");
 type LocalNote = import("../src/lib/shield").LocalNote;
 type ClaimEnv = import("../src/lib/claimSweep").ClaimEnv;
 
@@ -414,7 +414,7 @@ await test("a backup from before securing, restored where it was secured: the mo
   assert.equal((await secureClaim({ note: claim, relay: true, sendWithWallet: noWallet }, env)).status, "swept");
   const [fresh] = freshOf(claim);
 
-  const res = importNotesBackup(backup, ME);
+  const res = await importNotesBackup(backup, ME, backupSpentCheck(env));
   assert.equal(res.ok, true);
   assert.deepEqual(counted(claim).map((n) => n.id), [fresh!.id], "only the swept note counts, never the spent claim next to it");
   assert.equal(total(counted(claim)), 10_000_000n);
@@ -445,12 +445,67 @@ await test("a backup made while the move was on its way, restored where it lande
   const [fresh] = freshOf(claim);
   assert.ok(JSON.parse(backup).notes.some((n: LocalNote) => n.id === fresh!.id && n.sweepPending), "the backup holds it pending");
 
-  importNotesBackup(backup, ME);
+  await importNotesBackup(backup, ME, backupSpentCheck(env));
   assert.equal(byId(fresh!.id).sweepPending, false, "the landed note stays landed");
   assert.deepEqual(counted(claim).map((n) => n.id), [fresh!.id]);
   await syncAsTheAppDoes(pool, env);
   assert.equal(total(counted(claim)), 10_000_000n);
   assert.equal(byId(claim.id).secured, true);
+});
+
+/** This browser without these notes: a new device, or one whose storage was cleared. */
+const forget = (claim: LocalNote) => setAllNotes(getAllNotes().filter((n) => n.id !== claim.id && n.sweptFrom?.id !== claim.id));
+
+await test("the same backup where those notes aren't: the spent claim never counts, not even before a sync, and the restore says so", async () => {
+  const pool = mockPool();
+  const env = pool.env();
+  const claim = await claimed(pool, 10_000_000n);
+  const backup = JSON.stringify(exportNotesBackup(ME));
+  assert.equal((await secureClaim({ note: claim, relay: true, sendWithWallet: noWallet }, env)).status, "swept");
+  await forget(claim);
+
+  const res = await importNotesBackup(backup, ME, backupSpentCheck(env));
+  assert.ok(res.ok);
+  if (!res.ok) return;
+  assert.equal(res.moved, 1, "the claim is reported as spent since the backup");
+  assert.equal(res.movedClaims, 1);
+  assert.equal(byId(claim.id).status, "recovered", "kept as history: the payment can still be proved");
+  assert.equal(total(counted(claim)), 0n, "never shown as money");
+  await syncAsTheAppDoes(pool, env);
+  assert.equal(total(counted(claim)), 0n);
+});
+
+await test("a backup holding the swept note restores it, counted straight away and after the sync", async () => {
+  const pool = mockPool();
+  const env = pool.env();
+  const claim = await claimed(pool, 10_000_000n);
+  assert.equal((await secureClaim({ note: claim, relay: true, sendWithWallet: noWallet }, env)).status, "swept");
+  const backup = JSON.stringify(exportNotesBackup(ME));
+  const [fresh] = freshOf(claim);
+  await forget(claim);
+  assert.equal(total(counted(claim)), 0n);
+
+  const res = await importNotesBackup(backup, ME, backupSpentCheck(env));
+  assert.ok(res.ok && res.count >= 1 && res.moved === 0);
+  assert.deepEqual(counted(claim).map((n) => n.id), [fresh!.id]);
+  await syncAsTheAppDoes(pool, env);
+  assert.deepEqual(counted(claim).map((n) => n.id), [fresh!.id]);
+  assert.equal(total(counted(claim)), 10_000_000n);
+});
+
+await test("a restore that can't read the vault still adds the note, for the sync to settle", async () => {
+  const pool = mockPool();
+  const env = pool.env();
+  const claim = await claimed(pool, 10_000_000n);
+  const backup = JSON.stringify(exportNotesBackup(ME));
+  assert.equal((await secureClaim({ note: claim, relay: true, sendWithWallet: noWallet }, env)).status, "swept");
+  await forget(claim);
+  const down = pool.env({ chain: { ...env.chain, isSpent: async () => { throw new Error("rpc down"); } } });
+  const res = await importNotesBackup(backup, ME, backupSpentCheck(down));
+  assert.ok(res.ok && res.moved === 0);
+  assert.equal(byId(claim.id).status, "open", "never dropped: a secret is only ever added");
+  await syncAsTheAppDoes(pool, env);
+  assert.equal(byId(claim.id).status, "recovered", "the sync retires it once the vault answers");
 });
 
 await test("a claim on another network is refused before anything runs", async () => {

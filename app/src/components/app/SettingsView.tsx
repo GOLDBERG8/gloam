@@ -183,6 +183,29 @@ function Status({ children }: { children: ReactNode }) {
   );
 }
 
+/** What a restore did, in plain words. */
+function restoreMessage(r: { count: number; kept: number; moved: number; movedClaims: number }): string {
+  const parts: string[] = [];
+  if (r.count || (!r.kept && !r.moved)) {
+    parts.push(`Restored ${r.count} balance(s). Open Portfolio or Vault to see them.`);
+  } else if (!r.moved) {
+    parts.push("Everything in this backup is already in this browser, so nothing changed.");
+  }
+  if (r.moved) {
+    parts.push(
+      r.moved === 1
+        ? "One balance in this backup was spent after the backup was made, so it stays out of your balance."
+        : `${r.moved} balances in this backup were spent after the backup was made, so they stay out of your balance.`
+    );
+  }
+  if (r.movedClaims) {
+    parts.push(
+      "A claimed payment you secured since then is in the browser where you secured it, and in any backup made after that."
+    );
+  }
+  return parts.join(" ");
+}
+
 /* ------------------------------------------------------------ passkey */
 
 function passkeyMessage(e: unknown, fallback: string): string {
@@ -721,13 +744,12 @@ export function SettingsView() {
                     }
                     raw = await openWithPassphrase(raw, backupPass);
                   }
-                  const res = importNotesBackup(raw, address);
+                  // the vault is asked about each note new here, so one spent since the backup never shows as money
+                  setBackupMsg("Checking this backup against the vault…");
+                  const { backupSpentCheck } = await import("@/lib/claimSweep");
+                  const res = await importNotesBackup(raw, address, backupSpentCheck());
                   if (res.ok) {
-                    setBackupMsg(
-                      res.count || !res.kept
-                        ? `Restored ${res.count} balance(s). Open Portfolio or Vault to see them.`
-                        : "Everything in this backup is already in this browser, so nothing changed."
-                    );
+                    setBackupMsg(restoreMessage(res));
                     setBackupImport("");
                   } else {
                     setBackupMsg(res.error);
