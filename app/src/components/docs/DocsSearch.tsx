@@ -207,6 +207,11 @@ const PAGE_META: Record<string, PageMeta> = {
       "Try it",
     ],
   },
+  "/docs/bridge": {
+    description: "Pay into Gloam from Bitcoin, Solana, Tron or 22 EVM chains through Relay, straight into the private balance from a Solana or EVM wallet.",
+    keywords: ["bridge", "deposit", "relay", "bitcoin", "btc", "solana", "tron", "base", "ethereum", "exchange", "deposit address", "refund", "fee", "cross-chain"],
+    headings: ["Straight into your private balance", "Bitcoin, Tron and exchanges", "What it costs", "What is public", "Try it"],
+  },
   "/docs/encryption": {
     description: "Add money, hold it privately, cash out: the whole loop in plain words.",
     keywords: ["shield", "deposit", "withdraw", "cash out", "private balance", "vault", "how it works"],
